@@ -42,7 +42,9 @@ impl Default for General {
         Self {
             theme: "dark".into(),
             language: "en-US".into(),
-            close_action: "MinimizeToTray".into(),
+            // snake_case literal per PRD § 8.5 General -> close_action.
+            // Two valid values: "minimize_to_tray" (default) or "quit".
+            close_action: "minimize_to_tray".into(),
         }
     }
 }
@@ -127,7 +129,7 @@ mod tests {
         let cfg = Config::default();
         assert!(!cfg.telemetry.enabled, "FR-110: telemetry off by default");
         assert_eq!(cfg.general.theme, "dark");
-        assert_eq!(cfg.general.close_action, "MinimizeToTray");
+        assert_eq!(cfg.general.close_action, "minimize_to_tray");
         assert!(cfg.realtime.shields_enabled, "shields default ON");
     }
 
@@ -160,6 +162,6 @@ mod tests {
         assert_eq!(cfg.general.theme, "light");
         // Untouched sections still use defaults.
         assert!(!cfg.telemetry.enabled);
-        assert_eq!(cfg.general.close_action, "MinimizeToTray");
+        assert_eq!(cfg.general.close_action, "minimize_to_tray");
     }
 }

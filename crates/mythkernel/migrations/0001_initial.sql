@@ -6,10 +6,10 @@
 -- scans, findings, quarantine, exclusions. Detector-specific tables
 -- (file_baseline, persistence_entries, quarantine_batches, etc.) get their
 -- own migrations in the phases that introduce them.
-
-PRAGMA foreign_keys = ON;
-PRAGMA journal_mode = WAL;
-PRAGMA synchronous = NORMAL;
+--
+-- Connection-level PRAGMAs (foreign_keys, journal_mode, synchronous) are set
+-- by the engine in `db::configure_connection` BEFORE this migration runs,
+-- because PRAGMA journal_mode cannot execute inside a transaction.
 
 CREATE TABLE IF NOT EXISTS scans (
   id              INTEGER PRIMARY KEY,
@@ -76,9 +76,7 @@ CREATE TABLE IF NOT EXISTS exclusions (
 
 CREATE INDEX IF NOT EXISTS idx_exclusions_kind ON exclusions (kind);
 
-CREATE TABLE IF NOT EXISTS schema_migrations (
-  version  INTEGER PRIMARY KEY,
-  applied_at_utc INTEGER NOT NULL
-);
-
-INSERT OR IGNORE INTO schema_migrations (version, applied_at_utc) VALUES (1, strftime('%s', 'now'));
+-- The `schema_migrations` row for this migration is inserted by the engine
+-- (`crates/mythkernel/src/db.rs::apply_migrations`) inside the same
+-- transaction as the DDL above, so a partially-applied migration leaves no
+-- marker.

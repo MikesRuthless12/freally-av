@@ -7,6 +7,7 @@
 //! [`crate::scan::ScanProgress`] events.
 
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 use rusqlite::Connection;
 use tokio::sync::broadcast;
@@ -43,12 +44,16 @@ impl ScanEngine {
     /// finalizes.
     pub fn scan(&self, target: ScanTarget, opts: ScanOptions) -> Result<ScanHandle, EngineError> {
         let started_at_utc = now_utc();
+        let started_at_instant = Instant::now();
         let target_paths_json = target.to_paths_json();
         let target_kind = target.kind();
         let trigger = opts.trigger;
 
         let scan_id = {
-            let conn = self.db.lock().expect("scan db poisoned");
+            let conn = self
+                .db
+                .lock()
+                .map_err(|_| EngineError::Db(crate::db::DbError::Poisoned.to_string()))?;
             history::create_scan(
                 &conn,
                 started_at_utc,
@@ -120,8 +125,7 @@ impl ScanEngine {
             }
 
             let ended_at_utc = now_utc();
-            let duration_ms =
-                ((ended_at_utc.saturating_sub(started_at_utc)) as u64).saturating_mul(1000);
+            let duration_ms = started_at_instant.elapsed().as_millis() as u64;
 
             let finalize_status = match db.lock() {
                 Ok(conn) => history::finalize_scan(
@@ -136,9 +140,7 @@ impl ScanEngine {
                     bytes_visited,
                     0,
                 ),
-                Err(_) => Err(crate::db::DbError::Sqlite(
-                    rusqlite::Error::ExecuteReturnedResults,
-                )),
+                Err(_) => Err(crate::db::DbError::Poisoned),
             };
 
             match finalize_status {

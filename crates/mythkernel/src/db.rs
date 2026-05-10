@@ -6,6 +6,7 @@
 //! `schema_migrations`.
 
 use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use rusqlite::Connection;
 
@@ -19,17 +20,27 @@ pub enum DbError {
     Io(#[from] std::io::Error),
     #[error("could not resolve a per-user data directory")]
     NoDataDir,
+    #[error("database lock poisoned (holder thread panicked)")]
+    Poisoned,
 }
 
-/// Resolve the canonical engine data directory, creating it if missing.
+/// Resolve the canonical engine data directory, creating it if missing. Per
+/// `docs/prd.md` § 3 (line 256-258) — uses platform-native local-data paths,
+/// **not** the synthetic bundle-id paths `directories::ProjectDirs` would
+/// produce.
 ///
 /// - Windows: `%LOCALAPPDATA%\Mythodikal\`
-/// - macOS:   `~/Library/Application Support/com.mythodikal.av/`
+/// - macOS:   `~/Library/Application Support/Mythodikal/`
 /// - Linux:   `$XDG_DATA_HOME/mythodikal/` or `~/.local/share/mythodikal/`
 pub fn default_data_dir() -> Result<PathBuf, DbError> {
-    let dirs = directories::ProjectDirs::from("com", "Mythodikal", "Mythodikal")
-        .ok_or(DbError::NoDataDir)?;
-    let dir = dirs.data_dir().to_path_buf();
+    let base = directories::BaseDirs::new().ok_or(DbError::NoDataDir)?;
+    let dir = if cfg!(target_os = "windows") {
+        base.data_local_dir().join("Mythodikal")
+    } else if cfg!(target_os = "macos") {
+        base.data_dir().join("Mythodikal")
+    } else {
+        base.data_dir().join("mythodikal")
+    };
     std::fs::create_dir_all(&dir)?;
     Ok(dir)
 }
@@ -45,20 +56,35 @@ pub fn open(path: &Path) -> Result<Connection, DbError> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let conn = Connection::open(path)?;
-    apply_migrations(&conn)?;
+    let mut conn = Connection::open(path)?;
+    configure_connection(&conn)?;
+    apply_migrations(&mut conn)?;
     Ok(conn)
 }
 
 /// Open an in-memory database (used by tests and the engine when running
 /// `--ephemeral`).
 pub fn open_in_memory() -> Result<Connection, DbError> {
-    let conn = Connection::open_in_memory()?;
-    apply_migrations(&conn)?;
+    let mut conn = Connection::open_in_memory()?;
+    configure_connection(&conn)?;
+    apply_migrations(&mut conn)?;
     Ok(conn)
 }
 
-fn apply_migrations(conn: &Connection) -> Result<(), DbError> {
+/// Apply per-connection PRAGMAs that **must** run outside any transaction
+/// (notably `journal_mode = WAL`, which fails with "Safety level may not be
+/// changed inside a transaction" otherwise). For in-memory DBs the journal
+/// pragma is a no-op; we still set `foreign_keys = ON` everywhere.
+fn configure_connection(conn: &Connection) -> Result<(), DbError> {
+    conn.pragma_update(None, "foreign_keys", "ON")?;
+    // WAL is only meaningful on file-backed databases; SQLite returns "memory"
+    // for in-memory DBs and silently ignores the change request.
+    let _: String = conn.query_row("PRAGMA journal_mode = WAL", [], |row| row.get(0))?;
+    conn.pragma_update(None, "synchronous", "NORMAL")?;
+    Ok(())
+}
+
+fn apply_migrations(conn: &mut Connection) -> Result<(), DbError> {
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS schema_migrations (
             version INTEGER PRIMARY KEY,
@@ -67,17 +93,35 @@ fn apply_migrations(conn: &Connection) -> Result<(), DbError> {
     )?;
 
     for (version, sql) in MIGRATIONS {
-        let already_applied: bool = conn
-            .query_row(
-                "SELECT 1 FROM schema_migrations WHERE version = ?1",
-                [version],
-                |_| Ok(true),
-            )
-            .unwrap_or(false);
+        let already_applied: bool = match conn.query_row(
+            "SELECT 1 FROM schema_migrations WHERE version = ?1",
+            [version],
+            |_| Ok(true),
+        ) {
+            Ok(_) => true,
+            Err(rusqlite::Error::QueryReturnedNoRows) => false,
+            Err(e) => return Err(e.into()),
+        };
         if already_applied {
             continue;
         }
-        conn.execute_batch(sql)?;
+
+        // Run the migration body and the version-recording row in one
+        // transaction so a partially-applied migration leaves no marker —
+        // the next startup will retry it cleanly.
+        let tx = conn.transaction()?;
+        tx.execute_batch(sql)?;
+        tx.execute(
+            "INSERT INTO schema_migrations (version, applied_at_utc) VALUES (?1, ?2)",
+            [
+                *version,
+                SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .map(|d| d.as_secs() as i64)
+                    .unwrap_or(0),
+            ],
+        )?;
+        tx.commit()?;
     }
     Ok(())
 }
@@ -112,9 +156,9 @@ mod tests {
 
     #[test]
     fn idempotent_migrations() {
-        let conn = open_in_memory().unwrap();
-        apply_migrations(&conn).unwrap();
-        apply_migrations(&conn).unwrap();
+        let mut conn = open_in_memory().unwrap();
+        apply_migrations(&mut conn).unwrap();
+        apply_migrations(&mut conn).unwrap();
         let count: i64 = conn
             .query_row("SELECT COUNT(*) FROM schema_migrations", [], |row| {
                 row.get(0)

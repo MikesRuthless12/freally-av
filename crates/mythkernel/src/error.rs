@@ -1,5 +1,3 @@
-//! Engine error types. Filled in by TASK-015.
-
 //! Engine error type.
 //!
 //! TASK-015 (Phase 1) — single `EngineError` enum used by every public

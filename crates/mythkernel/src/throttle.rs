@@ -4,6 +4,11 @@
 //! adaptive CPU/IO throttle that watches system load and lowers worker count
 //! when the user is interactive lands in TASK-039 (Phase 4); this struct is
 //! the minimum surface every backend can rely on until then.
+//!
+//! **Known limitation (Phase 1):** [`Throttle::max_workers`] is *defined*
+//! but the [`crate::engine::ScanEngine`] worker still drives `walkdir` and
+//! BLAKE3 sequentially through the rayon global pool. Wiring `max_workers`
+//! into a custom rayon pool is part of TASK-039.
 
 use serde::{Deserialize, Serialize};
 

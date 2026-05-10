@@ -4,8 +4,8 @@
 //! in-memory SQLite for now; the persistent DB lands when `mythctl history`
 //! arrives in Phase 2.
 
-use std::io::{self, Write};
-use std::path::{Path, PathBuf};
+use std::io::Write;
+use std::path::PathBuf;
 
 use anyhow::{Context, anyhow};
 use mythkernel::{
@@ -42,9 +42,9 @@ pub async fn run(
     let mut rx = handle.progress;
     let worker = handle.worker;
 
-    let stderr = io::stderr();
+    let stderr = std::io::stderr();
     let mut stderr = stderr.lock();
-    let stdout = io::stdout();
+    let stdout = std::io::stdout();
     let mut stdout = stdout.lock();
 
     let mut files = 0u64;
@@ -56,7 +56,18 @@ pub async fn run(
         match rx.recv().await {
             Ok(event) => match &event {
                 ScanProgress::Started { .. } => {
-                    write_started(&mut stderr, format, &event, &path)?;
+                    // In Text mode the start banner is informational and goes
+                    // to stderr; in JSON mode every event including Started
+                    // belongs on stdout so the full stream is one valid NDJSON
+                    // document.
+                    match format {
+                        Format::Text => {
+                            writeln!(stderr, "scanning {}", path.display())?;
+                        }
+                        Format::Json => {
+                            writeln!(stdout, "{}", serde_json::to_string(&event)?)?;
+                        }
+                    }
                 }
                 ScanProgress::File { size, .. } => {
                     files += 1;
@@ -89,11 +100,23 @@ pub async fn run(
     let _ = worker.await;
 
     match (format, last_completed) {
-        (Format::Text, Some(ScanProgress::Completed { duration_ms, .. })) => {
+        (
+            Format::Text,
+            Some(ScanProgress::Completed {
+                files_visited,
+                files_hashed,
+                bytes_visited,
+                duration_ms,
+                ..
+            }),
+        ) => {
+            // Prefer the engine's authoritative counters from the Completed
+            // payload over our local accumulators (which only count files the
+            // hasher succeeded on, missing the WalkEvent::Error contributors).
             writeln!(
                 stdout,
-                "scan {scan_id}: {files} files, {bytes} bytes, {errors} errors, {} ms",
-                duration_ms
+                "scan {scan_id}: {files_visited} files visited, {files_hashed} hashed, \
+                 {bytes_visited} bytes, {errors} errors, {duration_ms} ms"
             )?;
         }
         (Format::Text, Some(ScanProgress::Failed { message, .. })) => {
@@ -103,25 +126,14 @@ pub async fn run(
             writeln!(stdout, "{}", serde_json::to_string(&ev)?)?;
         }
         _ => {
-            writeln!(stderr, "scan {scan_id}: ended without completion event")?;
+            // Walked-no-completion fallback: report what we observed locally.
+            writeln!(
+                stderr,
+                "scan {scan_id}: ended without completion event \
+                 ({files} files, {bytes} bytes, {errors} errors)"
+            )?;
         }
     }
 
     Ok(())
-}
-
-fn write_started<W: Write>(
-    w: &mut W,
-    format: Format,
-    event: &ScanProgress,
-    path: &Path,
-) -> io::Result<()> {
-    match format {
-        Format::Text => writeln!(w, "scanning {}", path.display()),
-        Format::Json => writeln!(
-            w,
-            "{}",
-            serde_json::to_string(event).unwrap_or_else(|e| format!("{{\"error\":\"{e}\"}}"))
-        ),
-    }
 }

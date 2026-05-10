@@ -3,15 +3,14 @@ import type { Config } from "tailwindcss";
 const config: Config = {
   content: ["./index.html", "./src/**/*.{ts,tsx}"],
   darkMode: ["selector", '[data-theme="dark"]'],
-  corePlugins: {
-    // Restrict the spacing scale per PRD § 9 — no values between the listed steps.
-    // Tailwind's default spacing utilities are replaced (not extended) below.
-  },
   theme: {
+    // Restrict the spacing scale per PRD § 9. By replacing `theme.spacing`
+    // (instead of extending it) we drop Tailwind's default 0.5/1.5/2.5/...
+    // half-steps and the 7/9/11/13/... odd values entirely. The only
+    // permitted scale is the one below.
     spacing: {
       0: "0",
       px: "1px",
-      "0.5": "2px",
       1: "4px",
       2: "8px",
       3: "12px",
