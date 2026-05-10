@@ -1,1 +1,3 @@
-//! `mythctl` subcommand modules. Filled in by TASK-017 onward.
+//! `mythctl` subcommand implementations.
+
+pub mod scan;

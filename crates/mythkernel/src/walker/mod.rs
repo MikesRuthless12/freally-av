@@ -18,7 +18,7 @@ pub mod posix;
 pub use posix::PosixWalker;
 
 /// Options that govern a single walk.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct WalkOpts {
     /// Follow symbolic links during traversal. Default `false` per FR-007.
     pub follow_symlinks: bool,
@@ -26,16 +26,6 @@ pub struct WalkOpts {
     pub skip_hidden: bool,
     /// Cap traversal depth (root = 0). `None` = unlimited.
     pub max_depth: Option<usize>,
-}
-
-impl Default for WalkOpts {
-    fn default() -> Self {
-        Self {
-            follow_symlinks: false,
-            skip_hidden: false,
-            max_depth: None,
-        }
-    }
 }
 
 /// One observation from the walker.

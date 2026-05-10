@@ -11,10 +11,33 @@ Each release section lists which `TASK-NNN` items from `docs/product-roadmap.md`
 ## [Unreleased]
 
 ### Added
-- _(populated by Phase Closeout as work lands; entries appear here keyed to TASK-NNN)_
+- **Phase 0 — Foundation & Setup (v0.0.x)**
+  - TASK-001: Cargo workspace + Tauri v2 shell with single-instance plugin
+  - TASK-002: Solid + TypeScript + Vite + Tailwind v3 frontend on port 1420
+  - TASK-003: Design tokens (CSS variables + Tailwind extension) per PRD § 9, with restricted spacing scale (`4 / 8 / 12 / 16 / 20 / 24 / 32 / 40 / 56 / 80`)
+  - TASK-004: `mythkernel`, `ui-bridge`, `mythctl` crate skeletons matching PRD § 2.3 module layout
+  - TASK-005: GitHub Actions CI matrix (Windows, macOS arm64+x86_64, Linux x86_64+arm64) running fmt + clippy + test + pnpm typecheck/build
+  - TASK-006: `cargo-deny` config (license allow-list, advisory check, source registry pinning)
+  - TASK-007: `SECURITY.md` (90-day coordinated disclosure inbox `mythodikalone@gmail.com`) and `THIRD-PARTY-DATA.md` (abuse.ch, NSRL, YARA-Forge, loldrivers, LOLBAS, OSV.dev license posture)
+  - TASK-008: Baby-blue 3D `M` glyph + wordmark, cross-platform app icon set (PNG ladder, `.ico`, `.icns`), and 16 tray icon variants per FR-162 (`tray-{idle,scanning,shields_off,update_available}-{16,22,32}.png` + 4 macOS template variants)
+- **Phase 1 — Engine Core (v0.1.0..v0.1.5)**
+  - TASK-009: `FileWalker` trait + `PosixWalker` (`walkdir` + `rayon` `par_bridge`, channel-based event stream)
+  - TASK-010: BLAKE3 always / SHA-256 lazy streaming hasher (1 MiB chunks, mid-flight `partial()` snapshot for FR-136, in-memory skip-if-unchanged cache)
+  - TASK-011: SQLite migration runner + initial schema (`scans`, `findings`, `quarantine`, `exclusions`, `schema_migrations`) + typed CRUD on scans/findings
+  - TASK-012: `ScanEngine` top-level with `tokio::broadcast` progress events and DB writeback
+  - TASK-013: Static throttle baseline (`available_parallelism / 2`)
+  - TASK-014: `tracing` + JSON daily-rolling logs at `<data_dir>/logs/`, level via `MYTH_LOG`
+  - TASK-015: `EngineError` enum (serializable for IPC) with `From<io::Error>` and `From<DbError>`
+  - TASK-016: TOML config loader (`<config_dir>/config.toml`) with FR-110 (telemetry off) and shields-default-on
+  - TASK-017: `mythctl scan <path> [--format text|json] [--sha256] [--follow-symlinks]`
+  - TASK-018: criterion benches for walker + hasher; `scripts/bench-1m-files.sh` end-to-end harness asserting NFR-001 budget
+- **Spec changes that landed alongside the build**
+  - PRD: FR-033 promoted to P0; **FR-160** (Shields kill-switch), **FR-161** (Start-with-OS auto-launch), **FR-162** (System tray + menu) added
+  - Roadmap: TASK-156, TASK-157, TASK-158 inserted into Phase 4; shields-respect contract appended to TASK-073/074/075/076/080/081/082/092/097/102; TASK-008 expanded for tray variants
+  - Build-Prompts Guide: full `BEGIN PROMPT … END PROMPT` blocks for TASK-156/157/158; phase smoke tests extended
 
 ### Changed
--
+- License/attribution scrub across project docs to canonical `Mike Weaver <mythodikalone@gmail.com>` and GitHub URLs to `MikesRuthless12/mythodikal-av`.
 
 ### Fixed
 -
@@ -23,7 +46,7 @@ Each release section lists which `TASK-NNN` items from `docs/product-roadmap.md`
 -
 
 ### Security
--
+- Telemetry off by default per FR-110.
 
 ---
 

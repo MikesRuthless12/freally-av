@@ -241,10 +241,7 @@ mod tests {
         };
         cache.insert(key.clone(), r.clone());
         assert_eq!(cache.get(&key).unwrap().blake3, "deadbeef");
-        let stale = CacheKey {
-            mtime: 9999,
-            ..key
-        };
+        let stale = CacheKey { mtime: 9999, ..key };
         assert!(cache.get(&stale).is_none());
     }
 
@@ -252,7 +249,9 @@ mod tests {
     fn chunked_reads_match_single_read() {
         let dir = tempdir().unwrap();
         let p = dir.path().join("big.bin");
-        let payload: Vec<u8> = (0..(3 * DEFAULT_CHUNK_SIZE)).map(|i| (i % 251) as u8).collect();
+        let payload: Vec<u8> = (0..(3 * DEFAULT_CHUNK_SIZE))
+            .map(|i| (i % 251) as u8)
+            .collect();
         fs::write(&p, &payload).unwrap();
 
         let big = Hasher::new().hash_file(&p).unwrap();

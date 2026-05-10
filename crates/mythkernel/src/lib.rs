@@ -11,6 +11,7 @@ pub mod engine;
 pub mod error;
 pub mod hasher;
 pub mod history;
+pub mod logging;
 pub mod quarantine;
 pub mod scan;
 pub mod scheduler;

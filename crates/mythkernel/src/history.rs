@@ -4,7 +4,7 @@
 //! (TASK-012): start a scan, end a scan, record a finding. The Tauri-facing
 //! history queries (`history_list`, `history_detail`) land in TASK-028 (Phase 3).
 
-use rusqlite::{params, Connection};
+use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
 
 use crate::db::DbError;
@@ -54,6 +54,7 @@ impl ScanStatus {
 }
 
 /// Insert a new `scans` row with status = `running`. Returns the row id.
+#[allow(clippy::too_many_arguments)]
 pub fn create_scan(
     conn: &Connection,
     started_at_utc: i64,
@@ -83,6 +84,7 @@ pub fn create_scan(
 }
 
 /// Mark a scan as finished, capture final counters.
+#[allow(clippy::too_many_arguments)]
 pub fn finalize_scan(
     conn: &Connection,
     scan_id: i64,
