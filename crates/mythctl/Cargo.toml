@@ -1,0 +1,20 @@
+[package]
+name = "mythctl"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license-file.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Mythodikal Anti-Virus command-line interface"
+publish = false
+
+[[bin]]
+name = "mythctl"
+path = "src/main.rs"
+
+[dependencies]
+clap = { workspace = true }
+anyhow = { workspace = true }
+mythkernel = { path = "../mythkernel" }

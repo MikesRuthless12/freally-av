@@ -1,0 +1,55 @@
+# Rust
+/target/
+**/target/
+Cargo.lock.bak
+*.pdb
+
+# Node / pnpm / Vite
+node_modules/
+**/node_modules/
+dist/
+**/dist/
+.pnpm-store/
+
+# Tauri
+**/src-tauri/target/
+**/src-tauri/gen/
+**/src-tauri/WixTools/
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json.example
+.idea/
+*.swp
+
+# Logs / data
+logs/
+*.log
+*.tmp
+
+# Mythodikal-specific: license files must not be committed
+*.lic
+
+# Local config overrides
+.env
+.env.local
+config.local.toml
+
+# Internal planning / strategy docs — kept out of the public repo
+# (the source-visible posture is for engine code; product strategy stays private)
+docs/product-roadmap.md
+docs/gtm.md
+docs/launch-checklists/
+Mythodikal-Build-Prompts-Guide.md
+RESEARCH-DOSSIER.md
+vision.json
+
+# Temp scratch
+.tmp-*.ps1
+.tmp-*.sh
+
+# Session-local Claude Code state (do not commit)
+.claude/

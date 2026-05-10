@@ -1,0 +1,11 @@
+<svg viewBox="0 0 720 144" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Mythodikal Anti-Virus">
+  <g fill="#7C5CFF">
+    <polygon points="24,24 60,24 100,114 140,24 176,24 176,120 140,120 140,72 116,116 84,116 60,72 60,120 24,120" />
+  </g>
+  <text x="208" y="93"
+        font-family="'Inter Display', Inter, system-ui, sans-serif"
+        font-weight="600"
+        font-size="56"
+        fill="#E6E9F2"
+        letter-spacing="-0.5">Mythodikal Anti-Virus</text>
+</svg>

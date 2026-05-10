@@ -1,0 +1,37 @@
+[package]
+name = "mythkernel"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license-file.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Mythodikal Anti-Virus engine core"
+publish = false
+
+[lib]
+name = "mythkernel"
+path = "src/lib.rs"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+tracing-appender = { workspace = true }
+directories = "5"
+chrono = { version = "0.4", features = ["serde"] }
+walkdir = { workspace = true }
+rayon = { workspace = true }
+crossbeam-channel = { workspace = true }
+blake3 = { workspace = true }
+sha2 = { workspace = true }
+hex = { workspace = true }
+rusqlite = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"
