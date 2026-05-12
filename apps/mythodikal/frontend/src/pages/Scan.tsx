@@ -6,11 +6,10 @@
 // completion the user can start a new scan.
 
 import type { Component } from "solid-js";
-import { Show, createSignal, onMount } from "solid-js";
+import { Show, createSignal } from "solid-js";
 import type { FindingAction, FindingView } from "@/ipc/types";
 import { findingAction } from "@/ipc/invoke";
 import {
-  attachScanEvents,
   scanCounters,
   scanFindings,
   scanState,
@@ -28,9 +27,10 @@ const Scan: Component = () => {
   const [error, setError] = createSignal<string | null>(null);
   const [busyAction, setBusyAction] = createSignal<number | null>(null);
 
-  onMount(() => {
-    attachScanEvents();
-  });
+  // Event subscriptions live in App.tsx so they survive route changes
+  // (PRD § review fix: a scan kicked off here keeps emitting events even
+  // after the user navigates to History — the singleton store must
+  // catch them).
 
   const onStart = async () => {
     setError(null);

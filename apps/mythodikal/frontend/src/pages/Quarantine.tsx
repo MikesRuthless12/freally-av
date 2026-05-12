@@ -18,7 +18,6 @@ import type { BatchOpReport, QuarantineId, QuarantineItem } from "@/ipc/types";
 import { PathDisplay } from "@/components/PathDisplay";
 import { ProgressBar } from "@/components/ProgressBar";
 import {
-  attachQuarantineEvents,
   clearSelection,
   currentBatchProgress,
   quarantineListResource,
@@ -34,7 +33,6 @@ const Quarantine: Component = () => {
   const [lastReport, setLastReport] = createSignal<BatchOpReport | null>(null);
 
   onMount(() => {
-    attachQuarantineEvents();
     refreshQuarantine();
   });
 

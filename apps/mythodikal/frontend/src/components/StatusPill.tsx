@@ -39,11 +39,11 @@ function inferVariant(s: string): Props["variant"] {
   switch (s) {
     case "completed":
     case "restored":
-    case "low":
     case "info":
       return "ok";
     case "running":
     case "paused":
+    case "low":
     case "medium":
       return "warn";
     case "failed":
@@ -53,6 +53,12 @@ function inferVariant(s: string): Props["variant"] {
     case "quarantined":
     case "detected":
       return "bad";
+    case "none":
+    case "idle":
+      // findings.action_taken = 'none' (Detected) — render as warn so
+      // a never-actioned finding doesn't look harmless next to the
+      // critical-severity pill on the same row.
+      return "warn";
     default:
       return "neutral";
   }

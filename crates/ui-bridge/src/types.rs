@@ -98,12 +98,31 @@ pub struct BatchItemErr {
     pub error: String,
 }
 
+/// Discriminator for which kind of batch op was run. Serialized as
+/// lowercase `"restore"` / `"delete"` to match the TS narrow union
+/// in `apps/mythodikal/frontend/src/ipc/types.ts`.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum BatchKindWire {
+    Restore,
+    Delete,
+}
+
+impl From<mythkernel::quarantine::BatchKind> for BatchKindWire {
+    fn from(k: mythkernel::quarantine::BatchKind) -> Self {
+        match k {
+            mythkernel::quarantine::BatchKind::Restore => BatchKindWire::Restore,
+            mythkernel::quarantine::BatchKind::Delete => BatchKindWire::Delete,
+        }
+    }
+}
+
 /// Final report of a bulk op. Mirrors
 /// [`mythkernel::quarantine::BatchReport`] for IPC.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BatchOpReport {
     pub batch_id: BatchOpId,
-    pub kind: String,
+    pub kind: BatchKindWire,
     pub items_total: u64,
     pub items_done: u64,
     pub bytes_total: u64,
@@ -116,7 +135,7 @@ pub struct BatchOpReport {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BatchProgressEvent {
     pub batch_id: BatchOpId,
-    pub kind: String,
+    pub kind: BatchKindWire,
     pub items_done: u64,
     pub items_total: u64,
     pub bytes_done: u64,

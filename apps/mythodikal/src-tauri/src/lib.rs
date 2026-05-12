@@ -52,8 +52,13 @@ fn init_state() -> Result<AppState, Box<dyn std::error::Error>> {
     let pipeline = build_pipeline_from_feeds(&data_dir);
     let pipeline_count = pipeline.len();
 
-    // Engine shares the same Connection via the Mutex so commands can
-    // read scan/findings rows the engine just wrote without a race.
+    // The engine writes via its own SQLite Connection so its scan
+    // worker doesn't contend with command-side reads on the
+    // Arc<Mutex<Connection>>. Both handles open the same DB file in
+    // WAL mode (configured in db::configure_connection) so engine
+    // writes are visible to command reads after the engine's tx
+    // commits. The Tauri commands read via `state.db`; the engine
+    // writes via its own internal handle.
     let engine_conn = db::open(&db_path)?;
     let engine = Arc::new(ScanEngine::new(engine_conn).with_detection_pipeline(pipeline));
 

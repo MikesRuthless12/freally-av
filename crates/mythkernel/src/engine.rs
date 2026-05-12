@@ -375,6 +375,97 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn pipeline_emits_finding_and_records_row_when_detector_matches() {
+        // Build a feed containing the SHA-256 of a known payload, attach
+        // a blacklist detector to the engine, scan the dir, and assert
+        // that ScanProgress::Finding fires AND a findings row landed.
+        // This is the gap both reviewers flagged: previously the e2e test
+        // bypassed ScanEngine::scan entirely.
+        use crate::detect::{
+            DetectionPipeline, HashKind, hash_blacklist::HashBlacklistDetector,
+            hash_set_file::write_sorted,
+        };
+
+        let dir = tempdir().unwrap();
+        let target = dir.path().join("sample.bin");
+        let payload: Vec<u8> = (0..256u32).map(|i| (i & 0xff) as u8).collect();
+        fs::write(&target, &payload).unwrap();
+
+        // Compute SHA-256 of the payload so we can build a 1-entry feed.
+        use sha2::Digest;
+        let mut hasher = sha2::Sha256::new();
+        hasher.update(&payload);
+        let sha256: [u8; 32] = hasher.finalize().into();
+
+        let feed_path = dir.path().join("feed.bin");
+        write_sorted(&feed_path, [sha256]).unwrap();
+        let detector = HashBlacklistDetector::open(&feed_path)
+            .unwrap()
+            .with_hash_kind(HashKind::Sha256);
+        let pipeline = DetectionPipeline::new(vec![Box::new(detector)]);
+
+        let conn = db::open_in_memory().unwrap();
+        let engine = ScanEngine::new(conn).with_detection_pipeline(pipeline);
+
+        let handle = engine
+            .scan(
+                ScanTarget::Path(dir.path().to_path_buf()),
+                ScanOptions {
+                    compute_sha256: true,
+                    ..ScanOptions::default()
+                },
+            )
+            .unwrap();
+        let scan_id = handle.scan_id;
+        let mut rx = handle.progress;
+        let worker = handle.worker;
+        worker.await.unwrap();
+
+        let mut got_finding = false;
+        let mut completed_findings_count: i64 = -1;
+        while let Ok(event) = rx.try_recv() {
+            match event {
+                ScanProgress::Finding {
+                    rule_source,
+                    severity,
+                    ..
+                } => {
+                    got_finding = true;
+                    assert_eq!(rule_source, "abusech");
+                    assert_eq!(severity, "high");
+                }
+                ScanProgress::Completed { findings_count, .. } => {
+                    completed_findings_count = findings_count;
+                }
+                _ => {}
+            }
+        }
+        assert!(got_finding, "expected ScanProgress::Finding for known-bad");
+        assert_eq!(completed_findings_count, 1);
+
+        // The findings row must have landed on disk.
+        let db = engine.db.lock().unwrap();
+        let count: i64 = db
+            .query_row(
+                "SELECT COUNT(*) FROM findings WHERE scan_id = ?1",
+                [scan_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 1);
+
+        // And the scans row's findings_count is updated.
+        let scan_findings_count: i64 = db
+            .query_row(
+                "SELECT findings_count FROM scans WHERE id = ?1",
+                [scan_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(scan_findings_count, 1);
+    }
+
+    #[tokio::test]
     async fn empty_directory_completes_with_zero_files() {
         let conn = db::open_in_memory().unwrap();
         let engine = ScanEngine::new(conn);

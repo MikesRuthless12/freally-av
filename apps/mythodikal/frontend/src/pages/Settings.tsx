@@ -6,7 +6,7 @@
 // in TASK-041 (Phase 4).
 
 import type { Component } from "solid-js";
-import { Show, createResource, createSignal, onMount } from "solid-js";
+import { Show, createResource, createSignal } from "solid-js";
 import { feedUpdateNow, settingsGet } from "@/ipc/invoke";
 import type { FeedUpdateResult, SettingsSnapshot } from "@/ipc/types";
 
@@ -20,10 +20,6 @@ const Settings: Component = () => {
   const [feedReports, setFeedReports] = createSignal<FeedUpdateResult[]>([]);
   const [feedBusy, setFeedBusy] = createSignal(false);
   const [feedError, setFeedError] = createSignal<string | null>(null);
-
-  onMount(() => {
-    // settingsGet already kicks off via createResource.
-  });
 
   const onUpdateFeeds = async () => {
     setFeedBusy(true);

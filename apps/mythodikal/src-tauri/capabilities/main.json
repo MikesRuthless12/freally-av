@@ -1,0 +1,15 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "mythodikal-main",
+  "description": "Capabilities granted to the main window — explicit allowlist of every Phase-3 Tauri command (TASK-028). New commands MUST be added here to be invokable from the renderer; Tauri 2 fails closed.",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    {
+      "identifier": "core:webview:allow-internal-toggle-devtools",
+      "allow": []
+    }
+  ]
+}
