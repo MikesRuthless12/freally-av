@@ -31,7 +31,7 @@ The full strategic foundation is in [`docs/product-vision.md`](docs/product-visi
 - **Honest progress.** Time-remaining estimates are calibrated and monotone-non-increasing after the first 3% of work — no "stuck at 99%."
 - **Cross-platform parity.** Same feature set on Windows, macOS, and Linux unless platform constraints forbid.
 - **Source-visible.** Every line of the engine, the UI, and the build pipeline is here on GitHub. License forbids redistribution; reading and learning is welcome.
-- **Real-time on-access protection.** Windows minifilter (`mythflt.sys`), macOS Endpoint Security, Linux fanotify.
+- **Real-time on-access protection.** **All user-mode, zero kernel drivers, zero paid signing** (see [`docs/prd.md`](docs/prd.md) § 1.5.4). Windows: ETW Threat Intelligence + AMSI + WDAC + Microsoft Defender bridge. macOS: ESF NOTIFY-only + XProtect-Remediator-style launchd cleanup. Linux: `fanotify` daemon.
 - **Layered detection.** abuse.ch hash blacklist (commercial-clean per [their FAQ](https://bazaar.abuse.ch/faq/)), NIST NSRL goodware allowlist, YARA-Forge `core` permissively-licensed rule pack, original behavioral heuristics.
 - **User-loadable YARA.** First-class rule manager. Add your own rules. Validate, license-scrub, run.
 - **Quarantine with restore + per-finding explanation.** When a file is flagged, you see the exact rule, the exact bytes (for YARA), the source feed, and the action options.
@@ -81,9 +81,9 @@ The roadmap targets stable **v0.19.84**, sequenced across 16 phases. Current pha
 | 8 | Linux Real-time | v0.8.x |
 | 9 | macOS Real-time (NOTIFY) | v0.9.x |
 | 10 | Polish & Public Launch | v0.10.x |
-| 11 | macOS ESF AUTH | v0.11.x – v0.12.x |
-| 12 | Windows Minifilter Driver | v0.13.x – v0.15.x |
-| 13 | Pro Tier | v0.16.x – v0.17.x |
+| 11 | macOS Real-time Enhancement (NOTIFY + XProtect-Style Cleanup) | v0.11.x – v0.12.x |
+| 12 | Windows Real-time Enforcement Stack (ETW + AMSI + WDAC) | v0.13.x – v0.15.x |
+| 13 | Donor / Pro Tier (optional, deferred) | v0.16.x – v0.17.x |
 | 14 | Hardening | v0.18.x |
 | 15 | Stable Run-up | v0.19.x |
 | 16 | **Stable Release** | **v0.19.84** |

@@ -132,10 +132,10 @@ The following entries are placeholders aligned with the Version → Phase Map in
 ### [0.6.x] — Phase 6 — macOS Port _(scheduled)_
 
 - macOS universal binary (lipo arm64 + x86_64) (TASK-059).
-- Apple Developer ID signing + notarization in CI (TASK-060).
-- macOS .dmg with hardened runtime (TASK-061).
+- macOS unsigned bundle + first-run UX documentation per `docs/prd.md` § 1.5.3 (TASK-060). **No Apple Developer Program, no notarization.**
+- macOS .dmg (unsigned, runtime restrictions where free) (TASK-061).
 - macOS UI parity polish (sheets, native chrome) (TASK-062).
-- Apple ESF entitlement application playbook (TASK-063).
+- ~~Apple ESF entitlement application playbook~~ — REMOVED per § 1.5.4 (macOS real-time is NOTIFY-only permanently).
 - v0.6.0 release: Win + Mac + Linux (TASK-064).
 
 ### [0.7.x] — Phase 7 — YARA & Rule Manager _(scheduled)_
@@ -174,36 +174,38 @@ The following entries are placeholders aligned with the Version → Phase Map in
 - Auto-scan on USB / removable mount (Linux + Windows) (TASK-087).
 - Diagnostic bundle export (path-redacted) (TASK-088).
 - Localization scaffolding (Fluent format) (TASK-089).
-- Marketing site at `mythodikal.com` (Astro on Cloudflare Pages) (TASK-090).
+- Marketing / docs site (Astro on **GitHub Pages**) per `docs/prd.md` § 1.5.2 (TASK-090).
 - v0.10.0 public launch — Show HN, Reddit, dev-Twitter, reviewer outreach (TASK-091).
 
-### [0.11.x – 0.12.x] — Phase 11 — macOS ESF AUTH _(scheduled)_
+### [0.11.x – 0.12.x] — Phase 11 — macOS Real-time Enhancement (NOTIFY + XProtect-Style Cleanup) _(scheduled)_
 
-- ESF subscription switched to AUTH events (after entitlement granted) (TASK-092).
+- Enriched ESF NOTIFY subscription + event-stream forensic depth (TASK-092).
 - Verdict cache LRU keyed on (path, mtime, size) (TASK-093).
-- Stress + crash-recovery on macOS AUTH path (fail-open semantics) (TASK-094).
-- v0.12.0 release: macOS real-time AUTH live (TASK-095).
+- XProtect-Remediator-style launchd cleanup task `com.mythodikal.cleanup` (TASK-094).
+- v0.12.0 release: macOS real-time NOTIFY + post-hoc cleanup live (TASK-095).
 
-### [0.13.x – 0.15.x] — Phase 12 — Windows Minifilter Driver _(scheduled)_
+### [0.13.x – 0.15.x] — Phase 12 — Windows Real-time Enforcement Stack (ETW + AMSI + WDAC + Defender bridge) _(scheduled)_
 
-- C/C++ minifilter driver project skeleton (mythflt) (TASK-096).
-- User-mode service ↔ driver IPC over Filter Communication Port (TASK-097).
-- Driver test-signing in CI (TASK-098).
-- Microsoft Hardware Dev Center attestation submission (TASK-099).
-- Windows EV cert procurement (TASK-100).
-- Driver in product installer + uninstaller (TASK-101).
-- Real-time UI: Windows parity with driver telemetry (TASK-102).
+- User-mode real-time service skeleton `mythd-windows` (TASK-096). **No kernel driver.**
+- Engine ↔ mythd-windows IPC over authenticated named pipe (TASK-097).
+- ETW Threat Intelligence subscriber (TASK-098).
+- AMSI provider registration `MythodikalAmsiProvider` (TASK-099).
+- WDAC policy generator + apply (TASK-100).
+- Service in product installer + uninstaller (Windows MSI, no driver) (TASK-101).
+- Real-time UI: Windows parity (no driver telemetry fields) (TASK-102).
 - Windows real-time stress + recovery tests (fail-open) (TASK-103).
-- v0.15.0 release: Windows real-time live (TASK-104).
+- v0.15.0 release: Windows real-time live (user-mode stack) (TASK-104).
+- Microsoft Defender bridge (Set-MpPreference + quarantine push) (TASK-159).
+- Optional Sysmon ingest (bundled, signed-by-Microsoft) (TASK-160).
 
-### [0.16.x – 0.17.x] — Phase 13 — Pro Tier _(scheduled)_
+### [0.16.x – 0.17.x] — Phase 13 — Donor / Pro Tier (optional, deferred) _(scheduled)_
 
-- License-key engine (offline ed25519 verification) (TASK-105).
-- Lemon Squeezy integration for Pro purchase flow (TASK-106).
+- License-key engine (offline ed25519 verification) (TASK-105). **No P0/P1/P2 feature gated by it.**
+- Payment-provider integration (Gumroad-leading; founder admin) (TASK-106). Lemon Squeezy removed per `docs/prd.md` § 1.5.5.
 - Settings > Activation page (TASK-107).
-- Pro: signed scan reports (PDF + JSON) with verifier CLI (TASK-108).
-- Pro: end-to-end-encrypted multi-device policy sync (opt-in) (TASK-109).
-- Donate flow for free users (TASK-110).
+- Donor extra: signed scan reports (PDF + JSON) with verifier CLI (TASK-108).
+- Donor extra: multi-device policy sync via private GitHub Gist (opt-in) (TASK-109). **No `sync.mythodikal.com` endpoint.**
+- Donate flow for free users (GitHub Sponsors / Gumroad link) (TASK-110).
 
 ### [0.18.x] — Phase 14 — Hardening _(scheduled)_
 
