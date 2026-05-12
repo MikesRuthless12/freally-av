@@ -37,6 +37,7 @@ memmap2 = { workspace = true }
 reqwest = { workspace = true }
 keyring = { workspace = true }
 rand = { workspace = true }
+sysinfo = { workspace = true }
 
 [features]
 default = []

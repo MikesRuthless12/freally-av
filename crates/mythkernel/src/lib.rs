@@ -9,6 +9,7 @@ pub mod config;
 pub mod db;
 pub mod engine;
 pub mod error;
+pub mod eta;
 pub mod findings;
 pub mod hasher;
 pub mod history;
@@ -16,6 +17,7 @@ pub mod logging;
 pub mod quarantine;
 pub mod scan;
 pub mod scheduler;
+pub mod sysload;
 pub mod telemetry;
 pub mod throttle;
 
