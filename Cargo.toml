@@ -48,6 +48,10 @@ toml = "0.8"
 
 memmap2 = "0.9"
 
+# HTTPS client for feed updaters (TASK-022 / TASK-023). Per docs/prd.md § 1.5
+# we use rustls-only — no openssl / native-tls dep tree.
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "gzip", "deflate", "json"] }
+
 [profile.release]
 opt-level = 3
 lto = "thin"
