@@ -23,10 +23,25 @@ import { ProgressBar } from "@/components/ProgressBar";
 import { StatusPill } from "@/components/StatusPill";
 import { ThroughputChart } from "@/components/ThroughputChart";
 
+const PARTIAL_HASH_STORAGE_KEY = "mythodikal.scan.operatorMode";
+
 const Scan: Component = () => {
   const [target, setTarget] = createSignal("");
   const [computeSha, setComputeSha] = createSignal(true);
   const [followSymlinks, setFollowSymlinks] = createSignal(false);
+  // TASK-134 — operator-mode toggle. Persists in localStorage so the
+  // setting survives page reloads.
+  const [operatorMode, setOperatorMode] = createSignal(
+    typeof window !== "undefined"
+      ? window.localStorage.getItem(PARTIAL_HASH_STORAGE_KEY) === "1"
+      : false,
+  );
+  const setOperatorModePersistent = (v: boolean) => {
+    setOperatorMode(v);
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(PARTIAL_HASH_STORAGE_KEY, v ? "1" : "0");
+    }
+  };
   const [error, setError] = createSignal<string | null>(null);
   const [busyAction, setBusyAction] = createSignal<number | null>(null);
 
@@ -42,6 +57,7 @@ const Scan: Component = () => {
         target_path: target(),
         compute_sha256: computeSha(),
         follow_symlinks: followSymlinks(),
+        emit_partial_hash: operatorMode(),
       });
     } catch (err) {
       setError(String(err));
@@ -122,7 +138,7 @@ const Scan: Component = () => {
           onInput={(e) => setTarget(e.currentTarget.value)}
         />
 
-        <div class="mt-3 flex gap-6 text-sm text-myth-text-md">
+        <div class="mt-3 flex flex-wrap gap-6 text-sm text-myth-text-md">
           <label class="flex items-center gap-2">
             <input
               type="checkbox"
@@ -138,6 +154,19 @@ const Scan: Component = () => {
               onChange={(e) => setFollowSymlinks(e.currentTarget.checked)}
             />
             <span>Follow symlinks</span>
+          </label>
+          <label
+            class="flex items-center gap-2"
+            title="FR-136 / TASK-134 — live mid-flight BLAKE3 prefix at ≤ 10 Hz. Off by default; slight CPU cost during scan."
+          >
+            <input
+              type="checkbox"
+              checked={operatorMode()}
+              onChange={(e) =>
+                setOperatorModePersistent(e.currentTarget.checked)
+              }
+            />
+            <span>Operator mode (live hash preview)</span>
           </label>
         </div>
 
@@ -205,6 +234,20 @@ const Scan: Component = () => {
               <PathDisplay path={scanCounters().currentPath!} />
             </Show>
           </div>
+          <Show when={operatorMode() && scanCounters().partialHash}>
+            <div class="mt-3">
+              <div class="text-xs uppercase tracking-wide text-myth-text-lo">
+                Live BLAKE3 (operator mode)
+              </div>
+              <div class="break-all font-mono text-xs text-myth-text-hi">
+                {scanCounters().partialHash}
+              </div>
+              <div class="mt-0.5 font-mono text-xs tabular-nums text-myth-text-lo">
+                {scanCounters().partialBytesDone.toLocaleString("en-US")} bytes
+                hashed
+              </div>
+            </div>
+          </Show>
           <Show when={scanState().kind === "completed"}>
             <div class="mt-3 font-mono text-xs text-myth-text-md tabular-nums">
               completed in{" "}

@@ -68,7 +68,7 @@ This license posture is unusual for an AV product. The reasoning is in [`docs/pr
 
 The roadmap targets stable **v0.19.84**, sequenced across 16 phases. Current phase status is tracked live in [`docs/product-roadmap.md`](docs/product-roadmap.md).
 
-**Current state:** Phases 0, 1, 2, 3 are shipped. Phase 4 wave 1 (ETA + adaptive throttle + Shields kill-switch + Exclusions CRUD + Throughput chart + First-run flow) is committed; remaining Phase 4 tasks (real-time Linux fanotify daemon + auto-update + UN-removed roadmap items) land in subsequent waves before v0.4.0 promotes from `[Unreleased]`.
+**Current state:** Phases 0, 1, 2, 3 are shipped. Phase 4 waves 1, 2, 3, 4, 5 are committed pre-tag — ETA, adaptive throttle, pause/resume, Shields kill-switch, Exclusions CRUD (incl. publisher kind), throughput chart, first-run flow, feed auto-updater, release pipeline + GH-Releases-signed Tauri Updater, dual-channel (engine vs database) update architecture, About page per-source definition counts, Settings → Updates dual pane, operator-mode live BLAKE3 partial-hash display, per-exclusion 24-hour quick-action, cross-platform publisher whitelist (Authenticode / codesign / GPG), and Tauri-plugin-autostart wiring all in the tree. Final wave 6 (system tray icon + menu — TASK-158) plus the v0.4.0 launch checklist (TASK-049 sign-off, screenshots, benchmark rerun) gate the promotion from `[Unreleased]` to `v0.4.0`.
 
 | Phase | Goal | Version | Status |
 |---|---|---|---|

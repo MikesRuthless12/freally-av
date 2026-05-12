@@ -367,6 +367,12 @@ impl DatabaseChannel {
         self.kick.clone()
     }
 
+    /// Iterate over the stable feed IDs registered in this channel.
+    /// Surfaces order-of-registration to log lines + the UI.
+    pub fn iter_feed_ids(&self) -> impl Iterator<Item = &str> {
+        self.runners.iter().map(|r| r.feed_id())
+    }
+
     /// Read persisted state. Missing file → defaults.
     pub fn load_state(&self) -> DatabaseChannelState {
         let path = self.state_dir.join(ChannelKind::Database.state_file());

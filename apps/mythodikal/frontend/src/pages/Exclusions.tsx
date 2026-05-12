@@ -1,17 +1,32 @@
-// Exclusions page (TASK-042).
+// Exclusions page (TASK-042 + TASK-135 + TASK-136 polish).
 //
 // Settings → Exclusions sub-tab. Lists active and expired rules; add
-// new path / glob / hash exclusions with optional expiry. Per FR-060
-// kinds: path, glob, hash_blake3, hash_sha256. Per FR-134 scope:
-// scan_only | realtime_only | both, plus expiry.
+// new path / glob / hash / publisher exclusions with optional expiry.
+// Per FR-060 kinds: path, glob, hash_blake3, hash_sha256, publisher.
+// Per FR-134 scope: scan_only | realtime_only | both, plus expiry.
+//
+// TASK-135 adds the "Exclude for 24h" quick-action button next to the
+// expiry field so users can fast-path the most common temporary-allow
+// use case without typing "24" by hand.
+//
+// TASK-136 adds the "publisher" kind plus an "Identify signer of a
+// file..." helper that pre-fills the value field with the canonical
+// signer identity (Authenticode subject, codesign team-id, GPG fpr,
+// dpkg maintainer, ...).
 
 import type { Component } from "solid-js";
 import { For, Show, createResource, createSignal } from "solid-js";
-import { exclusionAdd, exclusionList, exclusionRemove } from "@/ipc/invoke";
+import {
+  exclusionAdd,
+  exclusionList,
+  exclusionRemove,
+  publisherSignerForPath,
+} from "@/ipc/invoke";
 import type {
   ExclusionKind,
   ExclusionScope,
   ExclusionView,
+  PublisherView,
 } from "@/ipc/types";
 import { StatusPill } from "@/components/StatusPill";
 
@@ -25,6 +40,11 @@ const Exclusions: Component = () => {
   const [expireHours, setExpireHours] = createSignal<number | null>(null);
   const [busy, setBusy] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);
+  // TASK-136 — pick-a-signed-file helper state.
+  const [signerProbe, setSignerProbe] = createSignal<PublisherView | null>(
+    null,
+  );
+  const [signerProbePath, setSignerProbePath] = createSignal("");
 
   const onAdd = async () => {
     if (value().trim().length === 0) {
@@ -48,6 +68,8 @@ const Exclusions: Component = () => {
       setValue("");
       setReason("");
       setExpireHours(null);
+      setSignerProbe(null);
+      setSignerProbePath("");
       void refetch();
     } catch (err) {
       setError(String(err));
@@ -66,6 +88,47 @@ const Exclusions: Component = () => {
       setError(String(err));
     } finally {
       setBusy(false);
+    }
+  };
+
+  const onProbeSigner = async () => {
+    const p = signerProbePath().trim();
+    if (p.length === 0) {
+      setError("Enter a path to a signed file");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const view = await publisherSignerForPath(p);
+      setSignerProbe(view);
+      if (view.identity.length > 0) {
+        setKind("publisher");
+        setValue(view.identity);
+        setReason(
+          `Identified from ${p} (kind=${view.kind})`,
+        );
+      } else {
+        setError("File is not signed (kind=unsigned).");
+      }
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const placeholderForKind = (k: ExclusionKind): string => {
+    switch (k) {
+      case "path":
+        return "/home/me/safe";
+      case "glob":
+        return "**/node_modules/**";
+      case "hash_blake3":
+      case "hash_sha256":
+        return "64-char hex digest";
+      case "publisher":
+        return "authenticode:THUMB:CN=Microsoft Corporation, ...";
     }
   };
 
@@ -105,6 +168,7 @@ const Exclusions: Component = () => {
               <option value="glob">glob</option>
               <option value="hash_blake3">hash_blake3</option>
               <option value="hash_sha256">hash_sha256</option>
+              <option value="publisher">publisher (TASK-136)</option>
             </select>
           </label>
           <label class="text-sm text-myth-text-md">
@@ -126,18 +190,16 @@ const Exclusions: Component = () => {
           <label class="col-span-2 text-sm text-myth-text-md">
             <div class="text-xs uppercase tracking-wide text-myth-text-lo">
               Value{" "}
-              {kind().startsWith("hash") ? "(64-char hex)" : "(path or glob)"}
+              {kind().startsWith("hash")
+                ? "(64-char hex)"
+                : kind() === "publisher"
+                  ? "(signer identity — use the helper below)"
+                  : "(path or glob)"}
             </div>
             <input
               type="text"
               class="mt-1 w-full rounded-sm border border-myth-line bg-myth-bg-0 px-2 py-1 font-mono text-sm text-myth-text-hi focus:border-myth-accent focus:outline-none"
-              placeholder={
-                kind() === "path"
-                  ? "/home/me/safe"
-                  : kind() === "glob"
-                  ? "*node_modules*"
-                  : "64-char hex"
-              }
+              placeholder={placeholderForKind(kind())}
               value={value()}
               onInput={(e) => setValue(e.currentTarget.value)}
             />
@@ -158,19 +220,75 @@ const Exclusions: Component = () => {
             <div class="text-xs uppercase tracking-wide text-myth-text-lo">
               Expires in hours (FR-134, blank = permanent)
             </div>
-            <input
-              type="number"
-              min="0"
-              class="mt-1 w-full rounded-sm border border-myth-line bg-myth-bg-0 px-2 py-1 font-mono text-sm text-myth-text-hi focus:border-myth-accent focus:outline-none"
-              placeholder="(permanent)"
-              value={expireHours() ?? ""}
-              onInput={(e) => {
-                const v = e.currentTarget.valueAsNumber;
-                setExpireHours(Number.isFinite(v) && v > 0 ? v : null);
-              }}
-            />
+            <div class="mt-1 flex gap-2">
+              <input
+                type="number"
+                min="0"
+                class="flex-1 rounded-sm border border-myth-line bg-myth-bg-0 px-2 py-1 font-mono text-sm text-myth-text-hi focus:border-myth-accent focus:outline-none"
+                placeholder="(permanent)"
+                value={expireHours() ?? ""}
+                onInput={(e) => {
+                  const v = e.currentTarget.valueAsNumber;
+                  setExpireHours(Number.isFinite(v) && v > 0 ? v : null);
+                }}
+              />
+              <button
+                type="button"
+                class="rounded-sm border border-myth-line bg-myth-bg-0 px-3 font-mono text-xs uppercase tracking-wide text-myth-text-md hover:border-myth-accent hover:text-myth-text-hi"
+                title="TASK-135 — Exclude for 24h quick action"
+                onClick={() => setExpireHours(24)}
+              >
+                24 h
+              </button>
+            </div>
           </label>
         </div>
+
+        <Show when={kind() === "publisher"}>
+          <section class="mt-3 space-y-2 rounded border border-myth-line/60 bg-myth-bg-0 p-3">
+            <div class="text-xs uppercase tracking-wide text-myth-text-lo">
+              TASK-136 — Identify signer from a file
+            </div>
+            <div class="flex gap-2">
+              <input
+                type="text"
+                class="flex-1 rounded-sm border border-myth-line bg-myth-bg-1 px-2 py-1 font-mono text-xs text-myth-text-hi focus:border-myth-accent focus:outline-none"
+                placeholder="/usr/bin/firefox  or  C:\\Program Files\\Foo\\Foo.exe"
+                value={signerProbePath()}
+                onInput={(e) => setSignerProbePath(e.currentTarget.value)}
+              />
+              <button
+                type="button"
+                class="rounded-sm border border-myth-accent bg-myth-accent px-3 py-1 font-mono text-xs uppercase text-white hover:bg-myth-accent/90 disabled:cursor-not-allowed disabled:opacity-50"
+                disabled={busy()}
+                onClick={onProbeSigner}
+              >
+                Probe
+              </button>
+            </div>
+            <Show when={signerProbe()}>
+              <div class="font-mono text-xs text-myth-text-md">
+                <div>
+                  <span class="text-myth-text-lo">kind:</span>{" "}
+                  {signerProbe()!.kind}
+                </div>
+                <div class="break-all">
+                  <span class="text-myth-text-lo">identity:</span>{" "}
+                  {signerProbe()!.identity || "(unsigned)"}
+                </div>
+              </div>
+            </Show>
+            <p class="text-xs text-myth-text-lo">
+              Probing shells out to the platform's signer tool
+              (PowerShell <code>Get-AuthenticodeSignature</code> on Windows,{" "}
+              <code>codesign -dv</code> on macOS,{" "}
+              <code>dpkg-query / rpm / gpg</code> on Linux).
+              First probe of a given file is slow (~100 ms);
+              subsequent probes hit the cache.
+            </p>
+          </section>
+        </Show>
+
         <Show when={error()}>
           <div class="mt-2 font-mono text-xs text-myth-bad">{error()}</div>
         </Show>

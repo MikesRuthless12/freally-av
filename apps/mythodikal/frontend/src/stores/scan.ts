@@ -11,12 +11,14 @@ import {
   onScanError,
   onScanFailed,
   onScanFinding,
+  onScanPartialHash,
   onScanPaused,
   onScanProgress,
   onScanStarted,
   scanStart,
   scanResume as ipcScanResume,
 } from "@/ipc/invoke";
+import { setTrayScanning } from "@/stores/tray";
 import type { FindingView, ScanId, ScanRequest } from "@/ipc/types";
 
 export type ScanState =
@@ -38,6 +40,11 @@ interface ScanCounters {
   /** Local timestamp (ms) when the most recent ETA was received — used
    *  by the UI to count down between engine events. */
   etaReceivedAt: number | null;
+  /** TASK-134 / FR-136 — live mid-flight BLAKE3 hex from the engine.
+   *  null when the operator-mode toggle is off, or while between
+   *  files. */
+  partialHash: string | null;
+  partialBytesDone: number;
 }
 
 /** One throughput sample = files-per-second over the prior ~1 s window
@@ -64,6 +71,8 @@ const initialCounters: ScanCounters = {
   lastError: null,
   etaSecs: null,
   etaReceivedAt: null,
+  partialHash: null,
+  partialBytesDone: 0,
 };
 
 const [state, setState] = createSignal<ScanState>({ kind: "idle" });
@@ -132,6 +141,8 @@ export function attachScanEvents(): void {
     onScanStarted(() => {
       setCounters(initialCounters);
       setFindings([]);
+      // TASK-158 — drive the tray icon while a scan is running.
+      void setTrayScanning(true);
     }),
   );
 
@@ -145,6 +156,23 @@ export function attachScanEvents(): void {
         currentPath: payload.path,
         etaSecs: payload.eta_secs,
         etaReceivedAt: payload.eta_secs !== null ? Date.now() : c.etaReceivedAt,
+        // A `file` event always means a file just finalized — the
+        // partial-hash field belongs to the *next* file. Clear it.
+        partialHash: null,
+        partialBytesDone: 0,
+      }));
+    }),
+  );
+
+  handles.push(
+    onScanPartialHash((payload) => {
+      // TASK-134 — events are throttled to ≤ 10 Hz on the engine side,
+      // so we don't add a frontend rate-limiter here.
+      setCounters((c) => ({
+        ...c,
+        currentPath: payload.path,
+        partialHash: payload.blake3_partial,
+        partialBytesDone: payload.bytes_done,
       }));
     }),
   );
@@ -192,6 +220,7 @@ export function attachScanEvents(): void {
         findingsCount: payload.findings_count,
         currentPath: null,
       }));
+      void setTrayScanning(false);
     }),
   );
 
@@ -202,6 +231,7 @@ export function attachScanEvents(): void {
         scanId: payload.scan_id,
         message: payload.message,
       });
+      void setTrayScanning(false);
     }),
   );
 
@@ -218,6 +248,7 @@ export function attachScanEvents(): void {
         etaSecs: null,
         etaReceivedAt: null,
       }));
+      void setTrayScanning(false);
     }),
   );
 

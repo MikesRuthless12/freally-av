@@ -9,13 +9,21 @@ use mythkernel::{
     realtime::shields::ShieldsBroker,
     updater::{
         abusech::AbuseChUpdater,
+        database::{AbuseChFeedRunner, DatabaseChannel, NsrlFeedRunner},
+        engine::EngineChannel,
+        nsrl::{NsrlSource, NsrlUpdater},
         scheduler::{self, AbuseChScheduledFeed, ScheduledFeed, SchedulerHandle},
     },
 };
-use tauri::Manager;
-use tauri_plugin_autostart::MacosLauncher;
+use serde::Serialize;
+use tauri::{AppHandle, Emitter, Manager, State};
+use tauri_plugin_autostart::{MacosLauncher, ManagerExt};
+use tauri_plugin_updater::UpdaterExt;
 use ui_bridge::commands::{AppState, build_pipeline_from_feeds};
 use ui_bridge::invoke_handler;
+
+pub mod tray;
+use tray::{TrayIconState, TrayManager};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -73,9 +81,41 @@ pub fn run() {
         // a clean app exit + restart-after-update flow.
         .plugin(tauri_plugin_process::init())
         .setup(move |app| {
+            // TASK-158 — build the system tray icon + menu. Errors are
+            // logged but non-fatal: an app without a tray icon is
+            // strictly less polished but still functional.
+            if let Err(err) = tray::build_tray(app.handle()) {
+                tracing::warn!(error = %err, "tray init failed; running without system tray");
+            }
+            // TASK-158 — share the TrayManager state with frontend
+            // commands.
+            app.manage(TrayManager::new());
+
             if !start_minimized && let Some(win) = app.get_webview_window("main") {
                 let _ = win.show();
                 let _ = win.set_focus();
+            }
+            // TASK-158 — close-to-tray: when the user clicks the X on
+            // the main window, hide instead of quitting (matching the
+            // default config.general.close_action = "minimize_to_tray").
+            if let Some(win) = app.get_webview_window("main") {
+                let app_for_close = app.handle().clone();
+                win.on_window_event(move |evt| {
+                    if let tauri::WindowEvent::CloseRequested { api, .. } = evt {
+                        let close_action = app_for_close
+                            .try_state::<ui_bridge::commands::AppState>()
+                            .and_then(|s| {
+                                s.config.lock().ok().map(|c| c.general.close_action.clone())
+                            })
+                            .unwrap_or_else(|| "minimize_to_tray".to_string());
+                        if close_action == "minimize_to_tray" {
+                            if let Some(w) = app_for_close.get_webview_window("main") {
+                                let _ = w.hide();
+                            }
+                            api.prevent_close();
+                        }
+                    }
+                });
             }
             Ok(())
         });
@@ -86,9 +126,265 @@ pub fn run() {
         builder = builder.manage(SchedulerSlot(std::sync::Mutex::new(Some(h))));
     }
     builder
+        .invoke_handler(tauri::generate_handler![
+            engine_install_update,
+            autostart_get,
+            autostart_set,
+            tray_get_state,
+            tray_set_scanning,
+            tray_set_update_available,
+            window_show_main,
+            window_hide_main,
+            app_quit,
+        ])
         .invoke_handler(invoke_handler!())
         .run(tauri::generate_context!())
         .expect("error while running Mythodikal Anti-Virus");
+}
+
+// ============================================================================
+// Tray + window commands (TASK-158)
+// ============================================================================
+
+#[derive(Debug, Clone, Serialize)]
+struct TrayStateView {
+    icon: String,
+    tooltip: String,
+}
+
+/// Read the current resolved tray-icon state (TASK-158). Frontend uses
+/// this to render the matching badge in the header.
+#[tauri::command]
+fn tray_get_state(manager: State<'_, TrayManager>) -> TrayStateView {
+    let (icon, tooltip) = manager.snapshot();
+    TrayStateView {
+        icon: icon.as_str().to_string(),
+        tooltip,
+    }
+}
+
+/// Push a "scanning" state into the tray. Called by the frontend scan
+/// store at `scan:started` and cleared at terminal events.
+#[tauri::command]
+fn tray_set_scanning(
+    app: AppHandle,
+    manager: State<'_, TrayManager>,
+    scanning: bool,
+) -> TrayStateView {
+    let resolved = manager.set_scanning(scanning);
+    tray::apply_state(&app, resolved);
+    TrayStateView {
+        icon: resolved.as_str().to_string(),
+        tooltip: tray_tooltip_for(resolved),
+    }
+}
+
+/// Push an "update available" state into the tray. Called when the
+/// engine channel's `check_for_updates` returns `Some(_)`.
+#[tauri::command]
+fn tray_set_update_available(
+    app: AppHandle,
+    manager: State<'_, TrayManager>,
+    available: bool,
+) -> TrayStateView {
+    let resolved = manager.set_update_available(available);
+    tray::apply_state(&app, resolved);
+    TrayStateView {
+        icon: resolved.as_str().to_string(),
+        tooltip: tray_tooltip_for(resolved),
+    }
+}
+
+fn tray_tooltip_for(state: TrayIconState) -> String {
+    match state {
+        TrayIconState::Idle => "Mythodikal Anti-Virus — idle".to_string(),
+        TrayIconState::Scanning => "Mythodikal Anti-Virus — scanning".to_string(),
+        TrayIconState::ShieldsOff => "Mythodikal Anti-Virus — Shields OFF".to_string(),
+        TrayIconState::UpdateAvailable => "Mythodikal Anti-Virus — update available".to_string(),
+    }
+}
+
+#[tauri::command]
+fn window_show_main(app: AppHandle) {
+    if let Some(win) = app.get_webview_window("main") {
+        let _ = win.show();
+        let _ = win.set_focus();
+    }
+}
+
+#[tauri::command]
+fn window_hide_main(app: AppHandle) {
+    if let Some(win) = app.get_webview_window("main") {
+        let _ = win.hide();
+    }
+}
+
+#[tauri::command]
+fn app_quit(app: AppHandle) {
+    app.exit(0);
+}
+
+// ============================================================================
+// Shell-level Tauri commands that need the AppHandle / plugin extensions
+// (cannot live in ui-bridge because they reach into tauri-plugin-* APIs).
+// ============================================================================
+
+/// Engine self-update install (TASK-130). Drives the Tauri Updater plugin's
+/// `check` + `download_and_install` flow and emits `engine_update:progress`
+/// events at ≤ 10 Hz with phases `download | verify | install | restart_pending`
+/// so the Settings → Updates → Engine pane can render per-phase bars.
+///
+/// Returns the new engine version on success. The plugin verifies the
+/// ed25519 signature internally against the public key compiled into the
+/// app (tauri.conf.json :: plugins.updater.pubkey).
+#[tauri::command]
+async fn engine_install_update(app: AppHandle) -> Result<String, String> {
+    let updater = app.updater().map_err(|e| e.to_string())?;
+    let app_for_dl = app.clone();
+    let maybe_update = updater.check().await.map_err(|e| e.to_string())?;
+    let update = match maybe_update {
+        Some(u) => u,
+        None => return Err("no update available (run engine_check_for_updates first)".into()),
+    };
+    let version = update.version.clone();
+
+    // Phase events. The Tauri Updater plugin doesn't expose phase
+    // transitions natively; we emit them from this side at the points
+    // where the user-visible state changes (download start → bytes
+    // streaming → verify+install → restart-pending).
+    let _ = app.emit(
+        "engine_update:progress",
+        &EngineUpdateProgressEvent {
+            phase: "download".to_string(),
+            bytes_done: 0,
+            // Tauri Updater's `Update` doesn't expose total content
+            // length up-front for every endpoint shape; the closure
+            // below receives the per-chunk total when the server sent
+            // `Content-Length`. UI falls back to indeterminate progress
+            // when `bytes_total == 0`.
+            bytes_total: 0,
+            message: format!("Downloading v{version}"),
+        },
+    );
+
+    let mut bytes_done = 0u64;
+    let mut bytes_total_observed = 0u64;
+    let app_progress = app.clone();
+    update
+        .download_and_install(
+            move |chunk, maybe_total| {
+                bytes_done = bytes_done.saturating_add(chunk as u64);
+                if let Some(t) = maybe_total
+                    && t > bytes_total_observed
+                {
+                    bytes_total_observed = t;
+                }
+                let _ = app_progress.emit(
+                    "engine_update:progress",
+                    &EngineUpdateProgressEvent {
+                        phase: "download".to_string(),
+                        bytes_done,
+                        bytes_total: bytes_total_observed,
+                        message: String::new(),
+                    },
+                );
+            },
+            move || {
+                let _ = app_for_dl.emit(
+                    "engine_update:progress",
+                    &EngineUpdateProgressEvent {
+                        phase: "verify".to_string(),
+                        bytes_done: 0,
+                        bytes_total: 0,
+                        message: "Verifying ed25519 signature".to_string(),
+                    },
+                );
+            },
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let _ = app.emit(
+        "engine_update:progress",
+        &EngineUpdateProgressEvent {
+            phase: "install".to_string(),
+            bytes_done: 0,
+            bytes_total: 0,
+            message: "Installing".to_string(),
+        },
+    );
+    let _ = app.emit(
+        "engine_update:progress",
+        &EngineUpdateProgressEvent {
+            phase: "restart_pending".to_string(),
+            bytes_done: 0,
+            bytes_total: 0,
+            message: format!("v{version} installed; restart to apply"),
+        },
+    );
+
+    Ok(version)
+}
+
+/// TS-side mirror of `mythkernel::updater::engine::EngineUpdateProgress`.
+/// Re-declared here to avoid pulling the kernel type through the Tauri
+/// event serializer (which has its own derive constraints).
+#[derive(Debug, Clone, Serialize)]
+struct EngineUpdateProgressEvent {
+    phase: String,
+    bytes_done: u64,
+    bytes_total: u64,
+    message: String,
+}
+
+/// Read the OS autostart state (FR-161 / TASK-157). Mirrors the Tauri
+/// Autostart plugin so the UI's "Start with operating system" toggle
+/// reflects the OS truth on every render.
+#[tauri::command]
+async fn autostart_get(app: AppHandle) -> Result<AutostartView, String> {
+    let manager = app.autolaunch();
+    let enabled = manager.is_enabled().map_err(|e| e.to_string())?;
+    Ok(AutostartView {
+        enabled,
+        mechanism: autostart_mechanism().to_string(),
+    })
+}
+
+/// Flip the OS autostart state. Idempotent.
+#[tauri::command]
+async fn autostart_set(app: AppHandle, enabled: bool) -> Result<AutostartView, String> {
+    let manager = app.autolaunch();
+    if enabled {
+        manager.enable().map_err(|e| e.to_string())?;
+    } else {
+        manager.disable().map_err(|e| e.to_string())?;
+    }
+    autostart_get(app).await
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct AutostartView {
+    enabled: bool,
+    mechanism: String,
+}
+
+fn autostart_mechanism() -> &'static str {
+    #[cfg(target_os = "linux")]
+    {
+        "~/.config/autostart/mythodikal.desktop"
+    }
+    #[cfg(target_os = "macos")]
+    {
+        "SMAppService LoginItem"
+    }
+    #[cfg(target_os = "windows")]
+    {
+        "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run"
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+    {
+        "unknown"
+    }
 }
 
 /// Wrapper around the scheduler handle so we can `App::manage()` it
@@ -181,6 +477,9 @@ fn init_state() -> Result<AppState, Box<dyn std::error::Error>> {
         "engine initialized"
     );
 
+    let updater_engine = Arc::new(EngineChannel::new(&data_dir, env!("CARGO_PKG_VERSION")));
+    let updater_db = Arc::new(build_database_channel(&data_dir));
+
     Ok(AppState {
         engine,
         db,
@@ -191,5 +490,36 @@ fn init_state() -> Result<AppState, Box<dyn std::error::Error>> {
         active_pause_flags: Arc::new(Mutex::new(std::collections::HashMap::new())),
         data_dir,
         engine_version: env!("CARGO_PKG_VERSION").to_string(),
+        updater_engine,
+        updater_db,
     })
+}
+
+/// Build the database update channel with the currently-supported feed
+/// runners (TASK-131). The channel itself is configured once at startup;
+/// per-cycle execution happens in response to user-clicked "Check now"
+/// or the auto-update timer.
+fn build_database_channel(data_dir: &std::path::Path) -> DatabaseChannel {
+    let feeds_dir = ui_bridge::commands::feeds_dir(data_dir);
+    let mut channel = DatabaseChannel::new(data_dir);
+    // Always register feeds at startup so manual "Check now" works
+    // without the user having configured an auth-key first; the
+    // adapter itself fails fast when the key is empty.
+    let abusech_auth_key = std::env::var("MYTHODIKAL_ABUSECH_AUTH_KEY").unwrap_or_default();
+    if !abusech_auth_key.is_empty() {
+        let updater = AbuseChUpdater::new(abusech_auth_key, &feeds_dir);
+        channel = channel.register(AbuseChFeedRunner::new(updater));
+    }
+    let nsrl_local = std::env::var("MYTHODIKAL_NSRL_LOCAL").unwrap_or_default();
+    if !nsrl_local.is_empty() {
+        let updater = NsrlUpdater::new(NsrlSource::Local(nsrl_local.into()), &feeds_dir);
+        channel = channel.register(NsrlFeedRunner::new(updater));
+    }
+    let registered: Vec<&str> = channel.iter_feed_ids().collect();
+    tracing::info!(
+        feeds = ?registered,
+        "database channel built ({} feeds registered)",
+        registered.len()
+    );
+    channel
 }

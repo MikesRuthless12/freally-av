@@ -14,10 +14,11 @@ use std::time::Instant;
 use rusqlite::Connection;
 use tokio::sync::broadcast;
 
+use crate::detect::publisher;
 use crate::detect::{DetectionPipeline, FileCtx, PipelineOutcome, blake3_hex_to_bytes};
 use crate::error::EngineError;
 use crate::eta::{EtaEstimator, Progress as EtaSample};
-use crate::exclusions::{self, MatchCtx, MatchScope};
+use crate::exclusions::{self, ExclusionKind, MatchCtx, MatchScope};
 use crate::hasher::{HashResult, Hasher, StreamingHasher};
 use crate::history::{self, ScanStatus};
 use crate::scan::{
@@ -192,6 +193,21 @@ impl ScanEngine {
         let target_paths_for_token: Vec<std::path::PathBuf> =
             target_for_worker.paths().cloned().collect();
         let target_kind_for_token = target_kind.to_string();
+        // TASK-136 — short-circuit publisher extraction when the user has
+        // no active publisher exclusions. Per-file shell-out is expensive
+        // (~100 ms cold, sub-ms cached); skipping the extraction entirely
+        // when no rule could ever fire is the standard "pay for what you
+        // use" approach. The check happens once per scan, not per-file.
+        let has_publisher_excl = match db.lock() {
+            Ok(conn) => exclusions::list_active(&conn, now_utc())
+                .map(|rules| {
+                    rules
+                        .iter()
+                        .any(|r| matches!(r.kind, ExclusionKind::Publisher))
+                })
+                .unwrap_or(false),
+            Err(_) => false,
+        };
         let worker = tokio::task::spawn_blocking(move || {
             let walker = PosixWalker::new();
             // TASK-040 — resume context. When `resume_carry` is Some,
@@ -256,16 +272,26 @@ impl ScanEngine {
                 files_visited += 1;
                 bytes_visited += size as i64;
 
-                // Path/glob exclusion check first — if hit, skip this file
-                // entirely (don't hash, don't detect).
+                // Path/glob/publisher exclusion check first — if hit,
+                // skip this file entirely (don't hash, don't detect).
                 //
-                // TODO(TASK-136-wire-engine): the `MatchCtx.publisher`
-                // field stays `None` here in Phase 4 wave 3 — the engine
-                // doesn't yet extract the signer per file before the
-                // matcher runs. The publisher whitelist Settings UI +
-                // engine wiring lands together in a follow-up wave. For
-                // now publisher-kind exclusion rules persist but never
-                // match, by design.
+                // TASK-136: when at least one publisher-kind exclusion
+                // exists, extract the signer identity via the
+                // `publisher` module (cache-backed; shells out only on
+                // first encounter per (path, mtime, size)). The signer
+                // identity feeds `MatchCtx.publisher`; case-insensitive
+                // match against the configured rule values.
+                let signer_identity: Option<String> = if has_publisher_excl {
+                    match db.lock() {
+                        Ok(conn) => publisher::signer_for(&conn, &path)
+                            .ok()
+                            .filter(|s| s.is_signed())
+                            .map(|s| s.identity),
+                        Err(_) => None,
+                    }
+                } else {
+                    None
+                };
                 let path_excluded = match db.lock() {
                     Ok(conn) => exclusions::matches(
                         &conn,
@@ -273,7 +299,7 @@ impl ScanEngine {
                             path: path_str_owned.as_str(),
                             blake3_hex: None,
                             sha256_hex: None,
-                            publisher: None,
+                            publisher: signer_identity.as_deref(),
                             scope: MatchScope::Scan,
                         },
                     )

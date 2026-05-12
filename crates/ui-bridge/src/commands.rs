@@ -26,7 +26,7 @@ use std::sync::{Arc, Mutex};
 use mythkernel::{
     detect::{
         DetectionPipeline, HashKind, goodware_allowlist::GoodwareAllowlistDetector,
-        hash_blacklist::HashBlacklistDetector,
+        hash_blacklist::HashBlacklistDetector, publisher,
     },
     engine::ScanEngine,
     exclusions::{self, ExclusionKind, ExclusionScope},
@@ -34,7 +34,14 @@ use mythkernel::{
     quarantine::{BatchProgress, ProgressCallback, QuarantineVault},
     realtime::shields::{ShieldsActor, ShieldsBroker, ShieldsState},
     scan::{ScanOptions, ScanProgress, ScanTarget},
-    updater::{abusech::AbuseChUpdater, nsrl::NsrlSource, nsrl::NsrlUpdater},
+    updater::{
+        abusech::AbuseChUpdater,
+        channels::ChannelState,
+        database::{DatabaseChannel, DatabaseUpdateProgress, DbProgressCallback},
+        engine::{EngineChannel, EngineUpdateAvailable},
+        nsrl::NsrlSource,
+        nsrl::NsrlUpdater,
+    },
 };
 use rusqlite::Connection;
 use tauri::{AppHandle, Emitter, State};
@@ -222,6 +229,13 @@ pub struct AppState {
     pub active_pause_flags: Arc<Mutex<HashMap<i64, Arc<AtomicBool>>>>,
     pub data_dir: PathBuf,
     pub engine_version: String,
+    /// Engine self-update channel (TASK-130). Owns the persisted state
+    /// for the `Settings → Updates → Engine` pane.
+    pub updater_engine: Arc<EngineChannel>,
+    /// Database / signature-feed update channel (TASK-131). The shared
+    /// arc lets `updater_db_state` and `updater_db_check_now` both
+    /// reach the same registry without re-registering feeds.
+    pub updater_db: Arc<DatabaseChannel>,
 }
 
 /// Resolve the canonical feeds directory under `<data_dir>/feeds/`.
@@ -1158,6 +1172,209 @@ fn to_exclusion_view(e: exclusions::Exclusion) -> ExclusionView {
 }
 
 // ============================================================================
+// Updater channels (TASK-129/130/131/132/133)
+// ============================================================================
+
+/// Read the engine channel's persisted state (last check, last install,
+/// auto-update toggle, channel name).
+#[tauri::command]
+pub async fn updater_engine_state(
+    state: State<'_, AppState>,
+) -> Result<UpdateChannelStateView, String> {
+    let s = state.updater_engine.load_state();
+    Ok(channel_state_to_view(&s, "engine"))
+}
+
+/// Trigger an HTTPS probe of the engine `latest.json` (TASK-130).
+/// Returns `Some(...)` when a newer version is published, `None` when
+/// up-to-date. Updates the persisted last-check timestamp.
+#[tauri::command]
+pub async fn updater_engine_check_now(
+    state: State<'_, AppState>,
+) -> Result<Option<EngineUpdateAvailableView>, String> {
+    let channel = state.updater_engine.clone();
+    let result = channel.check_for_updates().await;
+    let mut current = channel.load_state();
+    match &result {
+        Ok(Some(_)) => current.record_check(
+            mythkernel::updater::channels::LastCheckOutcome::UpdateAvailable,
+            None,
+        ),
+        Ok(None) => current.record_check(
+            mythkernel::updater::channels::LastCheckOutcome::UpToDate,
+            None,
+        ),
+        Err(err) => current.record_check(
+            mythkernel::updater::channels::LastCheckOutcome::Failed,
+            Some(&err.to_string()),
+        ),
+    };
+    if let Err(err) = channel.save_state(&current) {
+        tracing::warn!(error = %err, "updater_engine_check_now: state persist failed");
+    }
+    result
+        .map(|opt| opt.map(engine_update_to_view))
+        .map_err(stringify)
+}
+
+/// Toggle the engine channel's auto-update flag. Persisted to disk.
+#[tauri::command]
+pub async fn updater_engine_set_auto(
+    state: State<'_, AppState>,
+    enabled: bool,
+) -> Result<(), String> {
+    let channel = state.updater_engine.clone();
+    let mut current = channel.load_state();
+    current.auto_update_enabled = enabled;
+    channel.save_state(&current).map_err(stringify)?;
+    Ok(())
+}
+
+/// Read the database channel's persisted state including the per-feed
+/// metadata map (TASK-131 / TASK-132).
+#[tauri::command]
+pub async fn updater_db_state(
+    state: State<'_, AppState>,
+) -> Result<DatabaseChannelStateView, String> {
+    let s = state.updater_db.load_state();
+    let mut feeds: Vec<FeedMetaView> = s
+        .feeds
+        .iter()
+        .map(|(id, meta)| FeedMetaView {
+            feed_id: id.clone(),
+            last_check_at_utc: meta.last_check_at_utc,
+            last_install_at_utc: meta.last_install_at_utc,
+            entry_count: meta.entry_count,
+            last_outcome: meta.last_outcome.clone(),
+            last_error: meta.last_error.clone(),
+        })
+        .collect();
+    feeds.sort_by(|a, b| a.feed_id.cmp(&b.feed_id));
+    Ok(DatabaseChannelStateView {
+        state: channel_state_to_view(&s.common, "database"),
+        feeds,
+    })
+}
+
+/// Run one cycle of the database channel. Emits
+/// `db_update:progress` events along the way. Returns once every
+/// registered feed has had a chance to run.
+///
+/// Per FR-156 there is no client-side rate limit — the user may invoke
+/// this as often as they like.
+#[tauri::command]
+pub async fn updater_db_check_now(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<DatabaseChannelStateView, String> {
+    let channel = state.updater_db.clone();
+    let app_for_cb = app.clone();
+    let progress: DbProgressCallback = Arc::new(move |p: DatabaseUpdateProgress| {
+        let payload = DatabaseUpdateProgressEvent {
+            feed_id: p.feed_id,
+            phase: p.phase.as_str().to_string(),
+            bytes_done: p.bytes_done,
+            bytes_total: p.bytes_total,
+            message: p.message,
+        };
+        if let Err(err) = app_for_cb.emit("db_update:progress", &payload) {
+            tracing::warn!(error = %err, "tauri emit (db_update:progress) failed");
+        }
+    });
+    let _all_ok = channel.run_once(progress).await;
+    updater_db_state(state).await
+}
+
+/// Toggle the database channel's auto-update flag. Persisted.
+#[tauri::command]
+pub async fn updater_db_set_auto(state: State<'_, AppState>, enabled: bool) -> Result<(), String> {
+    let channel = state.updater_db.clone();
+    let mut current = channel.load_state();
+    current.common.auto_update_enabled = enabled;
+    channel.save_state(&current).map_err(stringify)?;
+    Ok(())
+}
+
+fn channel_state_to_view(s: &ChannelState, kind: &str) -> UpdateChannelStateView {
+    UpdateChannelStateView {
+        kind: kind.to_string(),
+        auto_update_enabled: s.auto_update_enabled,
+        channel: s.channel.clone(),
+        interval_hours: s.interval_hours,
+        last_check_at_utc: s.last_check_at_utc,
+        last_install_at_utc: s.last_install_at_utc,
+        last_outcome: outcome_to_wire(s.last_outcome),
+        last_error: s.last_error.clone(),
+    }
+}
+
+fn outcome_to_wire(o: mythkernel::updater::channels::LastCheckOutcome) -> String {
+    use mythkernel::updater::channels::LastCheckOutcome::*;
+    match o {
+        Never => "never",
+        UpToDate => "up_to_date",
+        UpdateAvailable => "update_available",
+        Installed => "installed",
+        Failed => "failed",
+    }
+    .to_string()
+}
+
+fn engine_update_to_view(u: EngineUpdateAvailable) -> EngineUpdateAvailableView {
+    EngineUpdateAvailableView {
+        current_version: u.current_version,
+        latest_version: u.latest_version,
+        release_url: u.release_url,
+        release_notes: u.release_notes,
+        published_at_utc: u.published_at_utc,
+    }
+}
+
+// ============================================================================
+// Publisher whitelist (FR-146 / TASK-136)
+// ============================================================================
+
+/// Extract the signer identity for a single file path. Used by the
+/// Exclusions UI's "Add publisher exclusion from signed file" workflow.
+/// The path is canonicalized + system-path-policy-checked before the
+/// signer extractor shells out, matching `scan_start`'s gate.
+#[tauri::command]
+pub async fn publisher_signer_for_path(
+    state: State<'_, AppState>,
+    path: PathBuf,
+) -> Result<PublisherView, String> {
+    let canonical = validate_scan_target(&path).map_err(stringify)?;
+    let conn = state
+        .db
+        .lock()
+        .map_err(|_| "db lock poisoned".to_string())?;
+    let signer = publisher::signer_for(&conn, &canonical).map_err(stringify)?;
+    Ok(PublisherView {
+        path: canonical.to_string_lossy().to_string(),
+        identity: signer.identity,
+        kind: signer.kind.as_str().to_string(),
+    })
+}
+
+/// Manually trigger the publisher cache prune (TASK-136 / sec-review M5).
+/// Returns the number of rows removed. Defaults are documented on
+/// `publisher::DEFAULT_CACHE_PURGE_AGE_SECS` and
+/// `DEFAULT_CACHE_PURGE_MAX_ROWS`.
+#[tauri::command]
+pub async fn publisher_prune_cache(state: State<'_, AppState>) -> Result<u64, String> {
+    let conn = state
+        .db
+        .lock()
+        .map_err(|_| "db lock poisoned".to_string())?;
+    publisher::prune_cache(
+        &conn,
+        publisher::DEFAULT_CACHE_PURGE_AGE_SECS,
+        publisher::DEFAULT_CACHE_PURGE_MAX_ROWS,
+    )
+    .map_err(stringify)
+}
+
+// ============================================================================
 // Shields (FR-160 / TASK-156)
 // ============================================================================
 
@@ -1357,6 +1574,14 @@ macro_rules! invoke_handler {
             $crate::commands::exclusion_list,
             $crate::commands::exclusion_add,
             $crate::commands::exclusion_remove,
+            $crate::commands::updater_engine_state,
+            $crate::commands::updater_engine_check_now,
+            $crate::commands::updater_engine_set_auto,
+            $crate::commands::updater_db_state,
+            $crate::commands::updater_db_check_now,
+            $crate::commands::updater_db_set_auto,
+            $crate::commands::publisher_signer_for_path,
+            $crate::commands::publisher_prune_cache,
         ]
     };
 }
