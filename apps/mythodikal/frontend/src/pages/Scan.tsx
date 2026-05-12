@@ -8,17 +8,20 @@
 import type { Component } from "solid-js";
 import { Show, createSignal } from "solid-js";
 import type { FindingAction, FindingView } from "@/ipc/types";
-import { findingAction } from "@/ipc/invoke";
+import { findingAction, scanPause } from "@/ipc/invoke";
 import {
+  resumeScan,
   scanCounters,
   scanFindings,
   scanState,
   startScan,
 } from "@/stores/scan";
+import { EtaDisplay } from "@/components/EtaDisplay";
 import { FindingRow } from "@/components/FindingRow";
 import { PathDisplay } from "@/components/PathDisplay";
 import { ProgressBar } from "@/components/ProgressBar";
 import { StatusPill } from "@/components/StatusPill";
+import { ThroughputChart } from "@/components/ThroughputChart";
 
 const Scan: Component = () => {
   const [target, setTarget] = createSignal("");
@@ -64,6 +67,8 @@ const Scan: Component = () => {
         return "idle";
       case "running":
         return "running";
+      case "paused":
+        return "paused";
       case "completed":
         return "completed";
       case "failed":
@@ -73,6 +78,28 @@ const Scan: Component = () => {
 
   const startDisabled = () =>
     target().trim().length === 0 || scanState().kind === "running";
+
+  const onPause = async () => {
+    setError(null);
+    const s = scanState();
+    if (s.kind !== "running") return;
+    try {
+      await scanPause(s.scanId);
+    } catch (err) {
+      setError(String(err));
+    }
+  };
+
+  const onResume = async () => {
+    setError(null);
+    const s = scanState();
+    if (s.kind !== "paused") return;
+    try {
+      await resumeScan(s.scanId);
+    } catch (err) {
+      setError(String(err));
+    }
+  };
 
   return (
     <div class="flex h-full flex-col gap-4 p-6">
@@ -123,6 +150,24 @@ const Scan: Component = () => {
           >
             Start scan
           </button>
+          <Show when={scanState().kind === "running"}>
+            <button
+              type="button"
+              class="rounded-sm border border-myth-line bg-myth-bg-0 px-4 py-1.5 font-mono text-sm uppercase tracking-wide text-myth-text-hi hover:border-myth-accent"
+              onClick={onPause}
+            >
+              Pause
+            </button>
+          </Show>
+          <Show when={scanState().kind === "paused"}>
+            <button
+              type="button"
+              class="rounded-sm border border-myth-accent bg-myth-accent px-4 py-1.5 font-mono text-sm font-medium uppercase tracking-wide text-white hover:bg-myth-accent/90"
+              onClick={onResume}
+            >
+              Resume scan
+            </button>
+          </Show>
         </div>
       </section>
 
@@ -132,7 +177,7 @@ const Scan: Component = () => {
             Progress
           </h2>
           <ProgressBar done={scanCounters().filesVisited} total={null} />
-          <div class="mt-3 grid grid-cols-3 gap-4 text-sm text-myth-text-md">
+          <div class="mt-3 grid grid-cols-4 gap-4 text-sm text-myth-text-md">
             <Stat
               label="Files visited"
               value={scanCounters().filesVisited.toLocaleString("en-US")}
@@ -145,6 +190,7 @@ const Scan: Component = () => {
               label="Findings"
               value={scanCounters().findingsCount.toLocaleString("en-US")}
             />
+            <EtaDisplay />
           </div>
           <div class="mt-3">
             <div class="text-xs uppercase tracking-wide text-myth-text-lo">
@@ -174,6 +220,7 @@ const Scan: Component = () => {
             </div>
           </Show>
         </section>
+        <ThroughputChart />
       </Show>
 
       <Show when={error()}>

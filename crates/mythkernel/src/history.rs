@@ -123,6 +123,31 @@ pub fn finalize_scan(
     Ok(())
 }
 
+/// Persist a serialized resume token onto a scan row (TASK-040).
+/// The blob is opaque to the DB layer — the engine encodes
+/// `crate::scan::ResumeToken` as JSON. Callers should also set the
+/// status to `paused` via `finalize_scan` so the row signals to a
+/// subsequent process that it can be picked up.
+pub fn set_resume_token(conn: &Connection, scan_id: i64, token: &[u8]) -> Result<(), DbError> {
+    conn.execute(
+        "UPDATE scans SET resume_token = ?2 WHERE id = ?1",
+        params![scan_id, token],
+    )?;
+    Ok(())
+}
+
+/// Read the resume token blob (if any) for a scan row.
+pub fn read_resume_token(conn: &Connection, scan_id: i64) -> Result<Option<Vec<u8>>, DbError> {
+    let blob: Option<Vec<u8>> = conn
+        .query_row(
+            "SELECT resume_token FROM scans WHERE id = ?1",
+            [scan_id],
+            |row| row.get::<_, Option<Vec<u8>>>(0),
+        )
+        .map_err(DbError::from)?;
+    Ok(blob)
+}
+
 /// Append a `findings` row tied to a running scan.
 #[allow(clippy::too_many_arguments)]
 pub fn record_finding(

@@ -57,6 +57,13 @@ enum Commands {
         #[command(subcommand)]
         sub: commands::feed::FeedCmd,
     },
+
+    /// Toggle the real-time Shields master kill-switch (FR-160).
+    /// `mythctl shields {on,off,status,pause <minutes>}`.
+    Shields {
+        #[command(subcommand)]
+        sub: commands::shields::ShieldsCmd,
+    },
 }
 
 #[derive(ValueEnum, Clone, Copy, Debug)]
@@ -82,6 +89,7 @@ fn main() -> anyhow::Result<()> {
             } => commands::scan::run(path, format, sha256, follow_symlinks).await,
             Commands::Quarantine { sub } => commands::quarantine::run(sub, cli.db.clone()),
             Commands::Feed { sub } => commands::feed::run(sub).await,
+            Commands::Shields { sub } => commands::shields::run(sub, None),
         }
     })
 }

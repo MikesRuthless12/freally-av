@@ -250,6 +250,42 @@ pub struct EngineVersionInfo {
     pub version: String,
 }
 
+/// Most-recent feed updater run (TASK-043). Mirrors
+/// `mythkernel::updater::scheduler::LastRun` field-for-field; we re-
+/// declare here so the IPC boundary doesn't leak the internal type.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpdaterStatusView {
+    pub started_at_utc: i64,
+    pub finished_at_utc: i64,
+    pub outcome: String,
+    pub detail: String,
+    pub next_run_at_utc: i64,
+}
+
+// ---------------------------------------------------------------------------
+// Exclusions (TASK-042 / FR-060/061/062/134)
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExclusionView {
+    pub id: i64,
+    pub kind: String, // "path" | "glob" | "hash_blake3" | "hash_sha256"
+    pub value: String,
+    pub scope: String, // "scan_only" | "realtime_only" | "both"
+    pub expires_at_utc: Option<i64>,
+    pub created_at_utc: i64,
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExclusionRequest {
+    pub kind: String,
+    pub value: String,
+    pub scope: String,
+    pub expires_at_utc: Option<i64>,
+    pub reason: Option<String>,
+}
+
 /// Mapping helper — converts a kernel-level `FindingAction` from the IPC
 /// wire to the kernel enum.
 impl From<FindingAction> for mythkernel::findings::FindingAction {

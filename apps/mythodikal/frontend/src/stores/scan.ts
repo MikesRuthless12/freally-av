@@ -11,15 +11,18 @@ import {
   onScanError,
   onScanFailed,
   onScanFinding,
+  onScanPaused,
   onScanProgress,
   onScanStarted,
   scanStart,
+  scanResume as ipcScanResume,
 } from "@/ipc/invoke";
 import type { FindingView, ScanId, ScanRequest } from "@/ipc/types";
 
 export type ScanState =
   | { kind: "idle" }
   | { kind: "running"; scanId: ScanId; startedAt: number }
+  | { kind: "paused"; scanId: ScanId }
   | { kind: "completed"; scanId: ScanId; durationMs: number }
   | { kind: "failed"; scanId: ScanId; message: string };
 
@@ -30,7 +33,27 @@ interface ScanCounters {
   bytesVisited: number;
   currentPath: string | null;
   lastError: string | null;
+  /** Calibrated ETA seconds from the engine (null while warming up). */
+  etaSecs: number | null;
+  /** Local timestamp (ms) when the most recent ETA was received — used
+   *  by the UI to count down between engine events. */
+  etaReceivedAt: number | null;
 }
+
+/** One throughput sample = files-per-second over the prior ~1 s window
+ *  plus the local timestamp. Stored in a fixed-length ring so the chart
+ *  renders a sliding window without unbounded growth on a long scan
+ *  (TASK-045). */
+export interface ThroughputSample {
+  tMs: number;
+  filesPerSec: number;
+  bytesPerSec: number;
+}
+
+/** Sliding window length. 30 samples × 1 s ≈ a 30 s view, which matches
+ *  the operator-feedback target ("show me the last half-minute of
+ *  activity"). Larger windows blur the spike that signals an I/O stall. */
+const THROUGHPUT_WINDOW = 30;
 
 const initialCounters: ScanCounters = {
   filesVisited: 0,
@@ -39,21 +62,35 @@ const initialCounters: ScanCounters = {
   bytesVisited: 0,
   currentPath: null,
   lastError: null,
+  etaSecs: null,
+  etaReceivedAt: null,
 };
 
 const [state, setState] = createSignal<ScanState>({ kind: "idle" });
 const [counters, setCounters] = createSignal<ScanCounters>(initialCounters);
 const [findings, setFindings] = createSignal<FindingView[]>([]);
+const [throughput, setThroughput] = createSignal<ThroughputSample[]>([]);
 
 export const scanState = state;
 export const scanCounters = counters;
 export const scanFindings = findings;
+/** Rolling files/sec + bytes/sec window for the Scan throughput chart. */
+export const scanThroughput = throughput;
 
 export async function startScan(request: ScanRequest): Promise<ScanId> {
   setState({ kind: "idle" });
   setCounters(initialCounters);
   setFindings([]);
+  setThroughput([]);
   const id = await scanStart(request);
+  setState({ kind: "running", scanId: id, startedAt: Date.now() });
+  return id;
+}
+
+/** Resume a previously-paused scan. Re-uses the same scan_id; the
+ *  backend re-walks the target and skips already-completed paths. */
+export async function resumeScan(scanId: ScanId): Promise<ScanId> {
+  const id = await ipcScanResume(scanId);
   setState({ kind: "running", scanId: id, startedAt: Date.now() });
   return id;
 }
@@ -65,6 +102,31 @@ export async function startScan(request: ScanRequest): Promise<ScanId> {
  */
 export function attachScanEvents(): void {
   const handles: Promise<UnlistenFn>[] = [];
+  // Sample throughput once per second from the counter deltas. We do
+  // this client-side rather than over the wire because the engine
+  // already throttles File events to 10 Hz; computing a per-second
+  // figure here is cheap and avoids inflating IPC traffic.
+  let lastSampleAt = Date.now();
+  let lastFiles = 0;
+  let lastBytes = 0;
+  const samplerId = setInterval(() => {
+    if (state().kind !== "running") return;
+    const now = Date.now();
+    const c = counters();
+    const dtS = Math.max(0.001, (now - lastSampleAt) / 1000);
+    const filesPerSec = Math.max(0, (c.filesHashed - lastFiles) / dtS);
+    const bytesPerSec = Math.max(0, (c.bytesVisited - lastBytes) / dtS);
+    lastSampleAt = now;
+    lastFiles = c.filesHashed;
+    lastBytes = c.bytesVisited;
+    setThroughput((prev) => {
+      const next = prev.concat([{ tMs: now, filesPerSec, bytesPerSec }]);
+      return next.length > THROUGHPUT_WINDOW
+        ? next.slice(next.length - THROUGHPUT_WINDOW)
+        : next;
+    });
+  }, 1000);
+  onCleanup(() => clearInterval(samplerId));
 
   handles.push(
     onScanStarted(() => {
@@ -81,6 +143,8 @@ export function attachScanEvents(): void {
         filesHashed: c.filesHashed + 1,
         bytesVisited: c.bytesVisited + payload.size,
         currentPath: payload.path,
+        etaSecs: payload.eta_secs,
+        etaReceivedAt: payload.eta_secs !== null ? Date.now() : c.etaReceivedAt,
       }));
     }),
   );
@@ -138,6 +202,22 @@ export function attachScanEvents(): void {
         scanId: payload.scan_id,
         message: payload.message,
       });
+    }),
+  );
+
+  handles.push(
+    onScanPaused((payload) => {
+      setState({ kind: "paused", scanId: payload.scan_id });
+      setCounters((c) => ({
+        ...c,
+        filesVisited: payload.files_visited,
+        filesHashed: payload.files_hashed,
+        bytesVisited: payload.bytes_visited,
+        findingsCount: payload.findings_count,
+        currentPath: null,
+        etaSecs: null,
+        etaReceivedAt: null,
+      }));
     }),
   );
 

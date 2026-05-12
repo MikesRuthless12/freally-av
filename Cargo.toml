@@ -61,6 +61,11 @@ keyring = "3"
 # Per-install RNG for the quarantine XOR key (TASK-024).
 rand = "0.8"
 
+# System load polling for the adaptive throttle (TASK-039). MIT-licensed,
+# no default features so we get a minimal cross-platform CPU + memory
+# reader and skip Windows DiskInfo etc. that we don't need yet.
+sysinfo = { version = "0.32", default-features = false, features = ["system"] }
+
 [profile.release]
 opt-level = 3
 lto = "thin"

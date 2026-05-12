@@ -149,6 +149,36 @@ export interface EngineVersionInfo {
   version: string;
 }
 
+export interface UpdaterStatusView {
+  started_at_utc: number;
+  finished_at_utc: number;
+  outcome: string;
+  detail: string;
+  next_run_at_utc: number;
+}
+
+// Exclusions (TASK-042 / FR-060/061/062/134)
+export type ExclusionKind = "path" | "glob" | "hash_blake3" | "hash_sha256";
+export type ExclusionScope = "scan_only" | "realtime_only" | "both";
+
+export interface ExclusionView {
+  id: number;
+  kind: ExclusionKind | string;
+  value: string;
+  scope: ExclusionScope | string;
+  expires_at_utc: number | null;
+  created_at_utc: number;
+  reason: string | null;
+}
+
+export interface ExclusionRequest {
+  kind: ExclusionKind;
+  value: string;
+  scope: ExclusionScope;
+  expires_at_utc?: number | null;
+  reason?: string | null;
+}
+
 // ScanProgress mirrors the tagged enum from
 // mythkernel::scan::ScanProgress (also re-exported through
 // ui-bridge::types). The Tauri Emitter serializes the enum with the
@@ -156,7 +186,14 @@ export interface EngineVersionInfo {
 
 export type ScanProgress =
   | { kind: "started"; scan_id: ScanId; started_at_utc: number }
-  | { kind: "file"; path: string; blake3: string; size: number }
+  | {
+      kind: "file";
+      path: string;
+      blake3: string;
+      size: number;
+      /** ETA in seconds (post-3%-baseline clamp). null while warming up. */
+      eta_secs: number | null;
+    }
   | {
       kind: "finding";
       scan_id: ScanId;
@@ -176,7 +213,15 @@ export type ScanProgress =
       findings_count: number;
       duration_ms: number;
     }
-  | { kind: "failed"; scan_id: ScanId; message: string };
+  | { kind: "failed"; scan_id: ScanId; message: string }
+  | {
+      kind: "paused";
+      scan_id: ScanId;
+      files_visited: number;
+      files_hashed: number;
+      bytes_visited: number;
+      findings_count: number;
+    };
 
 // Severity ordering used by the UI for sort + color.
 export const SEVERITY_RANK: Record<string, number> = {

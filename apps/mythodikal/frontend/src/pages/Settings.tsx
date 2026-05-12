@@ -1,25 +1,57 @@
-// Settings page (TASK-035).
+// Settings page (TASK-041, Phase 4 wave 2).
 //
-// Skeleton — Phase 3 reads the current snapshot and renders read-only
-// fields with a "Phase 4 will make these editable" disclaimer. Real
-// persistence + OS-state mirrors (FR-161 autostart, FR-162 tray) land
-// in TASK-041 (Phase 4).
+// Read-and-write surface backed by the live engine config. Each sub-tab
+// renders its own section; mutations call `settings_update` with a
+// partial patch and re-fetch the snapshot to render the persisted
+// state. Toggling a field optimistically updates the UI; if the patch
+// fails we revert and surface the error.
+//
+// What is editable today (config-backed):
+//   * General → close_action (minimize_to_tray | quit)
+//   * Scanning → archives_enabled, follow_symlinks, skip_hidden
+//   * Privacy → telemetry_enabled (off by default per FR-110)
+//
+// What is read-only stub today:
+//   * General → start_with_os, show_tray_icon (OS-state owned by
+//     TASK-157 / TASK-158 — Tauri autostart + tray plugins)
+//
+// "Update feeds now" lives under the About tab as before.
 
 import type { Component } from "solid-js";
 import { Show, createResource, createSignal } from "solid-js";
-import { feedUpdateNow, settingsGet } from "@/ipc/invoke";
-import type { FeedUpdateResult, SettingsSnapshot } from "@/ipc/types";
+import { feedUpdateNow, settingsGet, settingsUpdate, updaterStatus } from "@/ipc/invoke";
+import type {
+  FeedUpdateResult,
+  SettingsPatch,
+  SettingsSnapshot,
+  UpdaterStatusView,
+} from "@/ipc/types";
 
 type Tab = "general" | "scanning" | "privacy" | "about";
 
 const Settings: Component = () => {
-  const [tab, setTab] = createSignal<Tab>("about");
-  const [snap] = createResource<SettingsSnapshot>(settingsGet);
+  const [tab, setTab] = createSignal<Tab>("general");
+  const [snap, { refetch }] = createResource<SettingsSnapshot>(settingsGet);
+  const [updater, { refetch: refetchUpdater }] =
+    createResource<UpdaterStatusView | null>(updaterStatus);
   const [authKey, setAuthKey] = createSignal("");
   const [nsrlPath, setNsrlPath] = createSignal("");
   const [feedReports, setFeedReports] = createSignal<FeedUpdateResult[]>([]);
   const [feedBusy, setFeedBusy] = createSignal(false);
   const [feedError, setFeedError] = createSignal<string | null>(null);
+  const [saveError, setSaveError] = createSignal<string | null>(null);
+
+  const apply = async (patch: SettingsPatch) => {
+    setSaveError(null);
+    try {
+      await settingsUpdate(patch);
+      await refetch();
+    } catch (err) {
+      setSaveError(String(err));
+      // Re-fetch anyway so the UI returns to truth-from-engine.
+      await refetch();
+    }
+  };
 
   const onUpdateFeeds = async () => {
     setFeedBusy(true);
@@ -30,11 +62,17 @@ const Settings: Component = () => {
         nsrl_local: nsrlPath().trim() || null,
       });
       setFeedReports(r);
+      await refetchUpdater();
     } catch (err) {
       setFeedError(String(err));
     } finally {
       setFeedBusy(false);
     }
+  };
+
+  const fmtUtc = (sec: number) => {
+    if (!sec) return "—";
+    return new Date(sec * 1000).toISOString().replace("T", " ").slice(0, 19) + " UTC";
   };
 
   return (
@@ -43,9 +81,11 @@ const Settings: Component = () => {
         <h1 class="font-display text-2xl font-semibold tracking-tight text-myth-text-hi">
           Settings
         </h1>
-        <span class="font-mono text-xs text-myth-text-lo">
-          Phase 3 read-only · full editing arrives in Phase 4 (TASK-041)
-        </span>
+        <Show when={saveError()}>
+          <span class="font-mono text-xs text-myth-bad">
+            save failed: {saveError()}
+          </span>
+        </Show>
       </header>
 
       <nav class="flex gap-1 border-b border-myth-line">
@@ -62,51 +102,75 @@ const Settings: Component = () => {
 
       <Show when={snap()}>
         <Show when={tab() === "general"}>
-          <section class="space-y-2 rounded-md border border-myth-line bg-myth-bg-1 p-4 text-sm text-myth-text-md">
-            <Row
-              label="Start with OS"
-              value={String(snap()!.general.start_with_os)}
+          <section class="space-y-3 rounded-md border border-myth-line bg-myth-bg-1 p-4 text-sm text-myth-text-md">
+            <Toggle
+              label="Start with operating system"
+              value={snap()!.general.start_with_os}
+              disabled
+              note="TASK-157 — Tauri autostart plugin wires this in a later wave."
+              onChange={() => {}}
             />
-            <Row
+            <Toggle
               label="Show tray icon"
-              value={String(snap()!.general.show_tray_icon)}
+              value={snap()!.general.show_tray_icon}
+              disabled
+              note="TASK-158 — Tray plugin wires this in a later wave."
+              onChange={() => {}}
             />
-            <Row
-              label="Close action"
+            <Radio
+              label="When I close the window"
               value={snap()!.general.close_action}
+              options={[
+                { value: "minimize_to_tray", label: "Minimize to tray" },
+                { value: "quit", label: "Quit Mythodikal" },
+              ]}
+              onChange={(v) =>
+                apply({ general: { close_action: v } })
+              }
             />
           </section>
         </Show>
 
         <Show when={tab() === "scanning"}>
-          <section class="space-y-2 rounded-md border border-myth-line bg-myth-bg-1 p-4 text-sm text-myth-text-md">
-            <Row
-              label="Scan archives"
-              value={String(snap()!.scanning.archives_enabled)}
+          <section class="space-y-3 rounded-md border border-myth-line bg-myth-bg-1 p-4 text-sm text-myth-text-md">
+            <Toggle
+              label="Scan archive files (.zip, .7z, .tar, …)"
+              value={snap()!.scanning.archives_enabled}
+              onChange={(v) =>
+                apply({ scanning: { archives_enabled: v } })
+              }
             />
-            <Row
-              label="Follow symlinks"
-              value={String(snap()!.scanning.follow_symlinks)}
+            <Toggle
+              label="Follow symbolic links"
+              value={snap()!.scanning.follow_symlinks}
+              note="Off by default. Enabling can cause walker loops."
+              onChange={(v) =>
+                apply({ scanning: { follow_symlinks: v } })
+              }
             />
-            <Row
-              label="Skip hidden files"
-              value={String(snap()!.scanning.skip_hidden)}
+            <Toggle
+              label="Skip hidden files and folders"
+              value={snap()!.scanning.skip_hidden}
+              note="Affects dotfiles on Linux/macOS and hidden-attribute files on Windows."
+              onChange={(v) => apply({ scanning: { skip_hidden: v } })}
             />
           </section>
         </Show>
 
         <Show when={tab() === "privacy"}>
-          <section class="space-y-2 rounded-md border border-myth-line bg-myth-bg-1 p-4 text-sm text-myth-text-md">
-            <Row
-              label="Telemetry"
-              value={
-                snap()!.privacy.telemetry_enabled ? "ENABLED" : "OFF (default)"
+          <section class="space-y-3 rounded-md border border-myth-line bg-myth-bg-1 p-4 text-sm text-myth-text-md">
+            <Toggle
+              label="Send anonymous telemetry"
+              value={snap()!.privacy.telemetry_enabled}
+              onChange={(v) =>
+                apply({ privacy: { telemetry_enabled: v } })
               }
             />
             <p class="text-xs text-myth-text-lo">
-              Per FR-110 telemetry is off by default. Mythodikal does not send
-              any data from this machine without explicit opt-in. The default
-              ships permanently disabled and there is no remote toggle.
+              Per FR-110, telemetry ships <strong>off by default</strong>. If
+              opted-in, the scope is anonymous version + scan-count counter
+              only — never paths, hashes, or IP addresses. The opt-in remains
+              local to this machine; there is no remote toggle.
             </p>
           </section>
         </Show>
@@ -144,6 +208,27 @@ const Settings: Component = () => {
                 </tbody>
               </table>
             </div>
+            <Show when={updater()}>
+              <section class="space-y-1 rounded border border-myth-line/60 bg-myth-bg-0 p-3">
+                <div class="text-xs uppercase tracking-wide text-myth-text-lo">
+                  Auto-updater status (TASK-043)
+                </div>
+                <Row
+                  label="Last run"
+                  value={fmtUtc(updater()!.finished_at_utc)}
+                />
+                <Row label="Outcome" value={updater()!.outcome} />
+                <Row
+                  label="Next run"
+                  value={fmtUtc(updater()!.next_run_at_utc)}
+                />
+                <Show when={updater()!.detail}>
+                  <pre class="whitespace-pre-wrap font-mono text-xs text-myth-text-md">
+                    {updater()!.detail}
+                  </pre>
+                </Show>
+              </section>
+            </Show>
             <section class="space-y-2 rounded border border-myth-line/60 bg-myth-bg-0 p-3">
               <div class="text-xs uppercase tracking-wide text-myth-text-lo">
                 Update feeds now (FR-094 / FR-156)
@@ -194,6 +279,55 @@ const Settings: Component = () => {
     </div>
   );
 };
+
+const Toggle: Component<{
+  label: string;
+  value: boolean;
+  onChange: (v: boolean) => void;
+  disabled?: boolean;
+  note?: string;
+}> = (props) => (
+  <label class="flex flex-col gap-1 text-sm">
+    <span class="flex items-center justify-between gap-3">
+      <span class="text-myth-text-hi">{props.label}</span>
+      <input
+        type="checkbox"
+        checked={props.value}
+        disabled={props.disabled}
+        class="h-4 w-4"
+        onChange={(e) => props.onChange(e.currentTarget.checked)}
+      />
+    </span>
+    <Show when={props.note}>
+      <span class="text-xs text-myth-text-lo">{props.note}</span>
+    </Show>
+  </label>
+);
+
+const Radio: Component<{
+  label: string;
+  value: string;
+  options: { value: string; label: string }[];
+  onChange: (v: string) => void;
+}> = (props) => (
+  <fieldset class="flex flex-col gap-2 text-sm">
+    <legend class="text-myth-text-hi">{props.label}</legend>
+    <div class="flex gap-4 pl-1">
+      {props.options.map((o) => (
+        <label class="flex items-center gap-2">
+          <input
+            type="radio"
+            name={props.label}
+            value={o.value}
+            checked={props.value === o.value}
+            onChange={() => props.onChange(o.value)}
+          />
+          <span class="text-myth-text-md">{o.label}</span>
+        </label>
+      ))}
+    </div>
+  </fieldset>
+);
 
 const Row: Component<{ label: string; value: string }> = (props) => (
   <tr>

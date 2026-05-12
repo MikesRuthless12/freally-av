@@ -18,7 +18,9 @@
 //! UI subscribers should throttle their own re-render rate (≤ 10 Hz
 //! per FR-085); the engine emits hot and the channel can fall behind.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 
 use mythkernel::{
@@ -27,8 +29,10 @@ use mythkernel::{
         hash_blacklist::HashBlacklistDetector,
     },
     engine::ScanEngine,
+    exclusions::{self, ExclusionKind, ExclusionScope},
     findings::{self, FindingAction as KernelAction},
     quarantine::{BatchProgress, ProgressCallback, QuarantineVault},
+    realtime::shields::{ShieldsActor, ShieldsBroker, ShieldsState},
     scan::{ScanOptions, ScanProgress, ScanTarget},
     updater::{abusech::AbuseChUpdater, nsrl::NsrlSource, nsrl::NsrlUpdater},
 };
@@ -202,6 +206,20 @@ pub struct AppState {
     /// the tokio multi-thread runtime.
     pub db: Arc<Mutex<Connection>>,
     pub vault: Arc<QuarantineVault>,
+    /// Shields master kill-switch (FR-160, TASK-156). Broker is cheap
+    /// to clone; the frontend store subscribes via shields_get +
+    /// shields:changed events.
+    pub shields: ShieldsBroker,
+    /// Live TOML config snapshot + path (TASK-041). The Mutex protects
+    /// the in-memory copy; every `settings_update` mutates this and
+    /// `config::save()`s atomically.
+    pub config: Arc<Mutex<mythkernel::config::Config>>,
+    pub config_path: PathBuf,
+    /// Active scan pause flags (TASK-040). `scan_start` registers a
+    /// flag; the forwarder removes it on the terminal event. `scan_pause`
+    /// looks up by id and flips the flag — the worker observes it at
+    /// the next iteration boundary, persists the resume token, and exits.
+    pub active_pause_flags: Arc<Mutex<HashMap<i64, Arc<AtomicBool>>>>,
     pub data_dir: PathBuf,
     pub engine_version: String,
 }
@@ -233,11 +251,67 @@ pub async fn scan_start(
     };
     let handle = state.engine.scan(target, opts).map_err(stringify)?;
     let scan_id = handle.scan_id;
+    let pause_flag = handle.pause_flag.clone();
+    if let Ok(mut flags) = state.active_pause_flags.lock() {
+        flags.insert(scan_id, pause_flag);
+    }
     let mut rx = handle.progress;
     let app_for_task = app.clone();
     let db_for_task = state.db.clone();
+    let flags_for_task = state.active_pause_flags.clone();
     tauri::async_runtime::spawn(async move {
         run_scan_event_forwarder(app_for_task, db_for_task, scan_id, &mut rx).await;
+        // Forwarder exited — the scan is in a terminal state. Drop the
+        // pause flag so the map doesn't accrete dead entries.
+        if let Ok(mut flags) = flags_for_task.lock() {
+            flags.remove(&scan_id);
+        }
+    });
+    Ok(scan_id)
+}
+
+/// Pause a running scan. The engine writes a resume token + flips the
+/// row to `paused` + emits `ScanProgress::Paused`; the caller can later
+/// invoke `scan_resume(scan_id)` to continue from where it stopped.
+#[tauri::command]
+pub async fn scan_pause(state: State<'_, AppState>, scan_id: ScanId) -> Result<(), String> {
+    let flag = {
+        let flags = state
+            .active_pause_flags
+            .lock()
+            .map_err(|_| "pause flag map poisoned".to_string())?;
+        flags
+            .get(&scan_id)
+            .cloned()
+            .ok_or_else(|| format!("scan {scan_id} is not running"))?
+    };
+    flag.store(true, std::sync::atomic::Ordering::Relaxed);
+    Ok(())
+}
+
+/// Resume a previously paused scan from its persisted resume_token.
+/// Returns the same scan_id; the worker re-walks the original target
+/// paths and skips files in the token's `processed_paths` set.
+#[tauri::command]
+pub async fn scan_resume(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    scan_id: ScanId,
+) -> Result<ScanId, String> {
+    let handle = state.engine.resume(scan_id).map_err(stringify)?;
+    let pause_flag = handle.pause_flag.clone();
+    if let Ok(mut flags) = state.active_pause_flags.lock() {
+        flags.insert(scan_id, pause_flag);
+    }
+    let mut rx = handle.progress;
+    let app_for_task = app.clone();
+    let db_for_task = state.db.clone();
+    let flags_for_task = state.active_pause_flags.clone();
+    tauri::async_runtime::spawn(async move {
+        run_scan_event_forwarder(app_for_task, db_for_task, scan_id, &mut rx).await;
+        if let Ok(mut flags) = flags_for_task.lock() {
+            flags.remove(&scan_id);
+        }
     });
     Ok(scan_id)
 }
@@ -284,7 +358,9 @@ async fn run_scan_event_forwarder(
             Ok(Ok(event)) => {
                 let terminal = matches!(
                     &event,
-                    ScanProgress::Completed { .. } | ScanProgress::Failed { .. }
+                    ScanProgress::Completed { .. }
+                        | ScanProgress::Failed { .. }
+                        | ScanProgress::Paused { .. }
                 );
 
                 if matches!(&event, ScanProgress::File { .. }) {
@@ -303,6 +379,7 @@ async fn run_scan_event_forwarder(
                         ScanProgress::Error { .. } => "scan:error",
                         ScanProgress::Completed { .. } => "scan:completed",
                         ScanProgress::Failed { .. } => "scan:failed",
+                        ScanProgress::Paused { .. } => "scan:paused",
                     };
                     if let Err(err) = app.emit(topic, &event) {
                         tracing::warn!(error = %err, "tauri emit failed");
@@ -420,11 +497,29 @@ pub async fn scan_status(
     fetch_scan_summary(&conn, scan_id).map_err(stringify)
 }
 
-/// Phase 3 stub: not yet implementable without TASK-040 pause/resume.
-/// Returns an error so the UI surfaces "not supported yet" cleanly.
+/// Cancel a scan. Wave 2 (TASK-040): we use the same pause flag — the
+/// worker exits cleanly on next iteration and the row is marked paused;
+/// the caller then deletes the row to fully discard. A first-class
+/// `cancelled` terminal state with full cleanup lands in a later wave;
+/// for now `scan_pause` is the recommended graceful exit, and clients
+/// can call `scan_pause` + ignore the resume token to achieve cancel.
 #[tauri::command]
-pub async fn scan_cancel(_scan_id: ScanId) -> Result<(), String> {
-    Err("scan_cancel: pause/resume + cancel are Phase 4 (TASK-040).".to_string())
+pub async fn scan_cancel(state: State<'_, AppState>, scan_id: ScanId) -> Result<(), String> {
+    // Re-uses the pause machinery; the caller is responsible for
+    // deciding whether to call `scan_resume` later or to leave the row
+    // in `paused` state.
+    let flag = {
+        let flags = state
+            .active_pause_flags
+            .lock()
+            .map_err(|_| "pause flag map poisoned".to_string())?;
+        flags
+            .get(&scan_id)
+            .cloned()
+            .ok_or_else(|| format!("scan {scan_id} is not running"))?
+    };
+    flag.store(true, std::sync::atomic::Ordering::Relaxed);
+    Ok(())
 }
 
 // ============================================================================
@@ -842,19 +937,29 @@ fn compute_definition_count(data_dir: &std::path::Path) -> DefinitionCount {
 #[tauri::command]
 pub async fn settings_get(state: State<'_, AppState>) -> Result<SettingsSnapshot, String> {
     let definitions = compute_definition_count(&state.data_dir);
+    let cfg = state
+        .config
+        .lock()
+        .map_err(|_| "config lock poisoned".to_string())?
+        .clone();
     Ok(SettingsSnapshot {
         general: GeneralSettings {
+            // OS-state mirrors (FR-161 autostart, FR-162 tray) are not
+            // owned by config.toml — they live in the OS (registry,
+            // SMAppService, .desktop file). Phase 4 wave 1 surfaces a
+            // safe default; TASK-157/158 will replace these with reads
+            // from the actual OS state.
             start_with_os: false,
             show_tray_icon: true,
-            close_action: "minimize_to_tray".to_string(),
+            close_action: cfg.general.close_action.clone(),
         },
         privacy: PrivacySettings {
-            telemetry_enabled: false,
+            telemetry_enabled: cfg.telemetry.enabled,
         },
         scanning: ScanningSettings {
-            archives_enabled: true,
-            follow_symlinks: false,
-            skip_hidden: false,
+            archives_enabled: cfg.scanning.archives_enabled,
+            follow_symlinks: cfg.scanning.follow_symlinks,
+            skip_hidden: cfg.scanning.skip_hidden,
         },
         about: AboutInfo {
             engine_version: state.engine_version.clone(),
@@ -863,13 +968,88 @@ pub async fn settings_get(state: State<'_, AppState>) -> Result<SettingsSnapshot
     })
 }
 
-/// Phase 3 stub: accepts the patch shape but persists nothing. Real
-/// persistence (with OS-state mirrors for FR-161/162) lands in Phase 4
-/// TASK-041.
+/// Merge a partial patch into the live config and persist. Each section
+/// is optional; within a section each field is optional. We never write
+/// disk unless at least one field actually changed.
 #[tauri::command]
-pub async fn settings_update(_patch: SettingsPatch) -> Result<(), String> {
-    tracing::info!("settings_update called — Phase 3 stub, no-op until TASK-041");
+pub async fn settings_update(
+    state: State<'_, AppState>,
+    patch: SettingsPatch,
+) -> Result<(), String> {
+    let path = state.config_path.clone();
+    let mut guard = state
+        .config
+        .lock()
+        .map_err(|_| "config lock poisoned".to_string())?;
+    let before = guard.clone();
+    if let Some(g) = patch.general {
+        if let Some(action) = g.close_action {
+            // Whitelist: only the two documented values reach config.
+            // Anything else is rejected so a malicious frontend can't
+            // store an arbitrary string here.
+            match action.as_str() {
+                "minimize_to_tray" | "quit" => guard.general.close_action = action,
+                other => {
+                    return Err(format!(
+                        "invalid close_action: {other:?} (expected minimize_to_tray | quit)"
+                    ));
+                }
+            }
+        }
+        // start_with_os and show_tray_icon are OS-state and are not
+        // persisted to config.toml — TASK-157/158 will route them to
+        // the Tauri autostart plugin + tray builder. Silently ignore
+        // here so the frontend can send the full GeneralPatch shape.
+    }
+    if let Some(p) = patch.privacy
+        && let Some(t) = p.telemetry_enabled
+    {
+        guard.telemetry.enabled = t;
+    }
+    if let Some(s) = patch.scanning {
+        if let Some(v) = s.archives_enabled {
+            guard.scanning.archives_enabled = v;
+        }
+        if let Some(v) = s.follow_symlinks {
+            guard.scanning.follow_symlinks = v;
+        }
+        if let Some(v) = s.skip_hidden {
+            guard.scanning.skip_hidden = v;
+        }
+    }
+    let dirty = !configs_equal(&before, &guard);
+    if !dirty {
+        return Ok(());
+    }
+    let snapshot = guard.clone();
+    drop(guard);
+    mythkernel::config::save(&path, &snapshot).map_err(stringify)?;
+    tracing::info!(
+        "settings_update persisted to {}: {} field group(s) changed",
+        path.display(),
+        section_change_count(&before, &snapshot),
+    );
     Ok(())
+}
+
+/// Tiny structural-equality helper. `Config` doesn't derive `PartialEq`
+/// (its nested vecs/maps could grow), so we compare on the fields the
+/// patch can actually touch.
+fn configs_equal(a: &mythkernel::config::Config, b: &mythkernel::config::Config) -> bool {
+    a.general.close_action == b.general.close_action
+        && a.telemetry.enabled == b.telemetry.enabled
+        && a.scanning.archives_enabled == b.scanning.archives_enabled
+        && a.scanning.follow_symlinks == b.scanning.follow_symlinks
+        && a.scanning.skip_hidden == b.scanning.skip_hidden
+}
+
+fn section_change_count(a: &mythkernel::config::Config, b: &mythkernel::config::Config) -> usize {
+    let g = (a.general.close_action != b.general.close_action) as usize;
+    let p = (a.telemetry.enabled != b.telemetry.enabled) as usize;
+    let s = ((a.scanning.archives_enabled != b.scanning.archives_enabled) as usize)
+        + ((a.scanning.follow_symlinks != b.scanning.follow_symlinks) as usize)
+        + ((a.scanning.skip_hidden != b.scanning.skip_hidden) as usize);
+    g + p + s
 }
 
 #[tauri::command]
@@ -877,6 +1057,113 @@ pub async fn engine_version(state: State<'_, AppState>) -> Result<EngineVersionI
     Ok(EngineVersionInfo {
         version: state.engine_version.clone(),
     })
+}
+
+/// Read the most-recent scheduled-feed run summary (TASK-043). Returns
+/// `None` when the scheduler has not yet completed a cycle (first run,
+/// or no feeds configured).
+#[tauri::command]
+pub async fn updater_status(
+    state: State<'_, AppState>,
+) -> Result<Option<UpdaterStatusView>, String> {
+    let feeds_dir = feeds_dir(&state.data_dir);
+    Ok(
+        mythkernel::updater::scheduler::read_last_run(&feeds_dir).map(|r| UpdaterStatusView {
+            started_at_utc: r.started_at_utc,
+            finished_at_utc: r.finished_at_utc,
+            outcome: r.outcome,
+            detail: r.detail,
+            next_run_at_utc: r.next_run_at_utc,
+        }),
+    )
+}
+
+// ============================================================================
+// Exclusions (FR-060/061/062/134, TASK-042)
+// ============================================================================
+
+#[tauri::command]
+pub async fn exclusion_list(state: State<'_, AppState>) -> Result<Vec<ExclusionView>, String> {
+    let conn = state
+        .db
+        .lock()
+        .map_err(|_| "db lock poisoned".to_string())?;
+    let rows = exclusions::list(&conn).map_err(stringify)?;
+    Ok(rows.into_iter().map(to_exclusion_view).collect())
+}
+
+#[tauri::command]
+pub async fn exclusion_add(
+    state: State<'_, AppState>,
+    request: ExclusionRequest,
+) -> Result<ExclusionView, String> {
+    let kind: ExclusionKind = request.kind.parse().map_err(stringify)?;
+    let scope: ExclusionScope = request.scope.parse().map_err(stringify)?;
+    let conn = state
+        .db
+        .lock()
+        .map_err(|_| "db lock poisoned".to_string())?;
+    let id = exclusions::add(
+        &conn,
+        kind,
+        &request.value,
+        scope,
+        request.expires_at_utc,
+        request.reason.as_deref(),
+    )
+    .map_err(stringify)?;
+    let row = exclusions::get(&conn, id).map_err(stringify)?;
+    Ok(to_exclusion_view(row))
+}
+
+#[tauri::command]
+pub async fn exclusion_remove(state: State<'_, AppState>, id: i64) -> Result<(), String> {
+    let conn = state
+        .db
+        .lock()
+        .map_err(|_| "db lock poisoned".to_string())?;
+    exclusions::remove(&conn, id).map_err(stringify)
+}
+
+fn to_exclusion_view(e: exclusions::Exclusion) -> ExclusionView {
+    ExclusionView {
+        id: e.id,
+        kind: e.kind.as_str().to_string(),
+        value: e.value,
+        scope: e.scope.as_str().to_string(),
+        expires_at_utc: e.expires_at_utc,
+        created_at_utc: e.created_at_utc,
+        reason: e.reason,
+    }
+}
+
+// ============================================================================
+// Shields (FR-160 / TASK-156)
+// ============================================================================
+
+#[tauri::command]
+pub async fn shields_get(state: State<'_, AppState>) -> Result<ShieldsState, String> {
+    Ok(state.shields.get())
+}
+
+/// `enabled = true` clears any pause. `enabled = false` + pause_minutes
+/// = None is the "until I turn it back on" form; Some(n) schedules an
+/// auto-resume at now + n minutes. Emits `shields:changed` event.
+#[tauri::command]
+pub async fn shields_set(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    enabled: bool,
+    pause_minutes: Option<u32>,
+) -> Result<ShieldsState, String> {
+    let next = state
+        .shields
+        .set(enabled, pause_minutes, ShieldsActor::Ui)
+        .map_err(stringify)?;
+    if let Err(err) = app.emit("shields:changed", &next) {
+        tracing::warn!(error = %err, "tauri emit (shields:changed) failed");
+    }
+    Ok(next)
 }
 
 // ============================================================================
@@ -1025,6 +1312,8 @@ macro_rules! invoke_handler {
             $crate::commands::scan_start,
             $crate::commands::scan_status,
             $crate::commands::scan_cancel,
+            $crate::commands::scan_pause,
+            $crate::commands::scan_resume,
             $crate::commands::history_list,
             $crate::commands::history_get,
             $crate::commands::finding_list,
@@ -1042,6 +1331,12 @@ macro_rules! invoke_handler {
             $crate::commands::settings_get,
             $crate::commands::settings_update,
             $crate::commands::engine_version,
+            $crate::commands::updater_status,
+            $crate::commands::shields_get,
+            $crate::commands::shields_set,
+            $crate::commands::exclusion_list,
+            $crate::commands::exclusion_add,
+            $crate::commands::exclusion_remove,
         ]
     };
 }

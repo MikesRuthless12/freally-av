@@ -68,7 +68,7 @@ This license posture is unusual for an AV product. The reasoning is in [`docs/pr
 
 The roadmap targets stable **v0.19.84**, sequenced across 16 phases. Current phase status is tracked live in [`docs/product-roadmap.md`](docs/product-roadmap.md).
 
-**Current state:** Phases 0, 1, 2, and 3 are committed and pushed on the corresponding feature branches. Active work is moving into Phase 4 (Linux MVP & Magic Moment) next.
+**Current state:** Phases 0, 1, 2, 3 are shipped. Phase 4 wave 1 (ETA + adaptive throttle + Shields kill-switch + Exclusions CRUD + Throughput chart + First-run flow) is committed; remaining Phase 4 tasks (real-time Linux fanotify daemon + auto-update + UN-removed roadmap items) land in subsequent waves before v0.4.0 promotes from `[Unreleased]`.
 
 | Phase | Goal | Version | Status |
 |---|---|---|---|
@@ -76,7 +76,7 @@ The roadmap targets stable **v0.19.84**, sequenced across 16 phases. Current pha
 | 1 | Engine Core | v0.1.x | ✅ Shipped |
 | 2 | Detection Pipeline | v0.2.x | ✅ Shipped |
 | 3 | UI Alpha | v0.3.x | ✅ Shipped |
-| 4 | Linux MVP & Magic Moment | v0.4.x | Next |
+| 4 | Linux MVP & Magic Moment | v0.4.x | 🟡 Wave 1 in-flight |
 | 5 | Windows MFT Superpowers | v0.5.x | Pending |
 | 6 | macOS Port (unsigned, see `docs/prd.md` § 1.5.3) | v0.6.x | Pending |
 | 7 | YARA & Rule Manager | v0.7.x | Pending |

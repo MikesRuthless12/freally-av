@@ -3,4 +3,5 @@
 
 pub mod abusech;
 pub mod nsrl;
+pub mod scheduler;
 pub mod yara_forge;

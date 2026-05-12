@@ -24,6 +24,7 @@ pub struct Config {
     pub scanning: Scanning,
     pub telemetry: Telemetry,
     pub realtime: Realtime,
+    pub updater: Updater,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -49,7 +50,7 @@ impl Default for General {
     }
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Scanning {
     /// Static worker count for the cross-platform walker. `0` = auto
@@ -59,6 +60,26 @@ pub struct Scanning {
     pub follow_symlinks: bool,
     /// Compute SHA-256 lazily alongside BLAKE3 (default `false` per FR-009).
     pub compute_sha256: bool,
+    /// Descend into archive files (zip/7z/tar/gz/etc.). Default `true`
+    /// per FR-018; off when the user has a slow target with mostly
+    /// archive content and wants to focus on outside files.
+    pub archives_enabled: bool,
+    /// Skip dot-files / hidden-attribute files on Windows. Default
+    /// `false` so a fresh install scans everything; the user can flip
+    /// this on if their home dir is dominated by `.cache` / `.npm`.
+    pub skip_hidden: bool,
+}
+
+impl Default for Scanning {
+    fn default() -> Self {
+        Self {
+            workers: 0,
+            follow_symlinks: false,
+            compute_sha256: false,
+            archives_enabled: true,
+            skip_hidden: false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -81,6 +102,31 @@ impl Default for Realtime {
     fn default() -> Self {
         Self {
             shields_enabled: true,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Updater {
+    /// Auto-update feeds on a schedule. Default `true`; manual users
+    /// can disable and call `feed_update_now` from the UI.
+    pub auto_update_enabled: bool,
+    /// Hours between successful runs. `0` means "use scheduler default
+    /// (24h)". The scheduler clamps internally.
+    pub interval_hours: u32,
+    /// Auth-Key for abuse.ch. Free at <https://auth.abuse.ch/>. Empty
+    /// string means "no scheduled abuse.ch run" — the scheduler skips
+    /// the feed rather than spamming a 401 every interval.
+    pub abusech_auth_key: String,
+}
+
+impl Default for Updater {
+    fn default() -> Self {
+        Self {
+            auto_update_enabled: true,
+            interval_hours: 24,
+            abusech_auth_key: String::new(),
         }
     }
 }
@@ -131,6 +177,8 @@ mod tests {
         assert_eq!(cfg.general.theme, "dark");
         assert_eq!(cfg.general.close_action, "minimize_to_tray");
         assert!(cfg.realtime.shields_enabled, "shields default ON");
+        assert!(cfg.scanning.archives_enabled, "FR-018: archives default ON");
+        assert!(!cfg.scanning.skip_hidden);
     }
 
     #[test]
