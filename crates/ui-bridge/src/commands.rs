@@ -247,6 +247,10 @@ pub async fn scan_start(
     let opts = ScanOptions {
         compute_sha256: request.compute_sha256,
         follow_symlinks: request.follow_symlinks,
+        // Sec-review/code-review blocker R-B1: the TASK-134 partial-hash
+        // toggle flows through here. Without this wire-up the engine
+        // never emits `scan:partial_hash` from the Tauri app.
+        emit_partial_hash: request.emit_partial_hash,
         ..ScanOptions::default()
     };
     let handle = state.engine.scan(target, opts).map_err(stringify)?;
@@ -380,6 +384,7 @@ async fn run_scan_event_forwarder(
                         ScanProgress::Completed { .. } => "scan:completed",
                         ScanProgress::Failed { .. } => "scan:failed",
                         ScanProgress::Paused { .. } => "scan:paused",
+                        ScanProgress::PartialHash { .. } => "scan:partial_hash",
                     };
                     if let Err(err) = app.emit(topic, &event) {
                         tracing::warn!(error = %err, "tauri emit failed");
@@ -910,6 +915,8 @@ pub async fn definition_count(state: State<'_, AppState>) -> Result<DefinitionCo
 
 /// Synchronous, non-Tauri-State variant for code paths that need the
 /// definition counts but already have a `&Path` instead of `&State`.
+/// TASK-132: extended to include per-feed last-updated timestamps so
+/// the About page can render "Last updated 2 h ago" per source.
 fn compute_definition_count(data_dir: &std::path::Path) -> DefinitionCount {
     let feeds_dir = feeds_dir(data_dir);
     let count_for = |name: &str| -> u64 {
@@ -921,6 +928,17 @@ fn compute_definition_count(data_dir: &std::path::Path) -> DefinitionCount {
             .map(|f| f.len())
             .unwrap_or(0)
     };
+    let mtime_for = |name: &str| -> Option<i64> {
+        let path = feeds_dir.join(name);
+        if !path.exists() {
+            return None;
+        }
+        std::fs::metadata(&path)
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_secs() as i64)
+    };
     let abusech_hashes = count_for("abusech_sha256.bin");
     let nsrl_hashes = count_for("nsrl_sha256.bin");
     let total = abusech_hashes + nsrl_hashes;
@@ -931,6 +949,8 @@ fn compute_definition_count(data_dir: &std::path::Path) -> DefinitionCount {
         byovd_entries: 0,
         user_rules: 0,
         total,
+        abusech_last_updated_utc: mtime_for("abusech_sha256.bin"),
+        nsrl_last_updated_utc: mtime_for("nsrl_sha256.bin"),
     }
 }
 

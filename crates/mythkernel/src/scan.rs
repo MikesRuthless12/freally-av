@@ -68,6 +68,10 @@ pub struct ScanOptions {
     pub skip_hidden: bool,
     pub max_depth: Option<usize>,
     pub compute_sha256: bool,
+    /// Emit `ScanProgress::PartialHash` events at ≤ 10 Hz while hashing
+    /// each file (TASK-134, FR-136). Off by default; the Scan dashboard's
+    /// operator-mode toggle flips this on per-scan.
+    pub emit_partial_hash: bool,
 }
 
 impl Default for ScanOptions {
@@ -78,6 +82,7 @@ impl Default for ScanOptions {
             skip_hidden: false,
             max_depth: None,
             compute_sha256: false,
+            emit_partial_hash: false,
         }
     }
 }
@@ -98,6 +103,12 @@ pub struct ResumeToken {
     pub follow_symlinks: bool,
     pub skip_hidden: bool,
     pub compute_sha256: bool,
+    /// TASK-134 / sec-review R-B2: persist the operator-mode partial-hash
+    /// toggle so a resumed scan emits events with the same cadence the
+    /// user originally requested. `#[serde(default)]` keeps old (schema
+    /// v1) tokens loading cleanly.
+    #[serde(default)]
+    pub emit_partial_hash: bool,
     /// Files we've already hashed + processed. On resume we skip these.
     /// Capped at [`RESUME_TOKEN_PATH_CAP`]; if the original scan exceeded
     /// the cap the engine just re-scans the overage (cheap correctness
@@ -110,7 +121,10 @@ pub struct ResumeToken {
 }
 
 impl ResumeToken {
-    pub const CURRENT_SCHEMA: u32 = 1;
+    /// Bumped to 2 when `emit_partial_hash` was added (TASK-134). Older
+    /// tokens (schema 1) still load via `#[serde(default)]` — engine
+    /// resume re-runs them with the field defaulted to `false`.
+    pub const CURRENT_SCHEMA: u32 = 2;
 }
 
 /// One progress event emitted by a running scan.
@@ -135,6 +149,17 @@ pub enum ScanProgress {
         /// `Hh Mm Ss` counting down (see frontend `formatEta`).
         #[serde(default)]
         eta_secs: Option<f64>,
+    },
+    /// Live mid-flight BLAKE3 partial of the file currently being hashed.
+    /// Throttled at ≤ 10 Hz by the engine (TASK-134 / FR-136). Optional —
+    /// off by default; the engine emits this variant only when the scan
+    /// was started with `ScanOptions::emit_partial_hash = true`.
+    PartialHash {
+        scan_id: i64,
+        path: PathBuf,
+        /// Hex BLAKE3 of the bytes hashed so far.
+        blake3_partial: String,
+        bytes_done: u64,
     },
     /// A detector matched the file. Carries the persisted `findings.id` so
     /// the UI can request follow-up actions (quarantine, ignore) without

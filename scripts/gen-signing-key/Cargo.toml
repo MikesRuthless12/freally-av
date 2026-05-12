@@ -1,0 +1,13 @@
+[package]
+name = "gen-signing-key"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+minisign = "0.7"
+clap = { version = "4", features = ["derive"] }
+
+[[bin]]
+name = "gen-signing-key"
+path = "src/main.rs"

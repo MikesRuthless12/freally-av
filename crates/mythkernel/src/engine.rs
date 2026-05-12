@@ -18,7 +18,7 @@ use crate::detect::{DetectionPipeline, FileCtx, PipelineOutcome, blake3_hex_to_b
 use crate::error::EngineError;
 use crate::eta::{EtaEstimator, Progress as EtaSample};
 use crate::exclusions::{self, MatchCtx, MatchScope};
-use crate::hasher::Hasher;
+use crate::hasher::{HashResult, Hasher, StreamingHasher};
 use crate::history::{self, ScanStatus};
 use crate::scan::{
     RESUME_TOKEN_PATH_CAP, ResumeToken, ScanHandle, ScanOptions, ScanProgress, ScanTarget,
@@ -103,6 +103,10 @@ impl ScanEngine {
             follow_symlinks: token.follow_symlinks,
             skip_hidden: token.skip_hidden,
             compute_sha256: token.compute_sha256,
+            // Code-review R-B2: restore the user's TASK-134 partial-hash
+            // preference so a resumed scan keeps emitting the same event
+            // stream the original scan was emitting before pause.
+            emit_partial_hash: token.emit_partial_hash,
             ..ScanOptions::default()
         };
         self.scan_internal(target, opts, Some((scan_id, token)))
@@ -181,6 +185,7 @@ impl ScanEngine {
         let pause_flag_for_worker = pause_flag.clone();
         let target_for_worker = target;
         let opts_for_token = opts.clone();
+        let emit_partial = opts.emit_partial_hash;
 
         // The walker uses rayon internally and the hash step is CPU-bound, so
         // this work belongs on the blocking pool, not the tokio reactor.
@@ -253,6 +258,14 @@ impl ScanEngine {
 
                 // Path/glob exclusion check first — if hit, skip this file
                 // entirely (don't hash, don't detect).
+                //
+                // TODO(TASK-136-wire-engine): the `MatchCtx.publisher`
+                // field stays `None` here in Phase 4 wave 3 — the engine
+                // doesn't yet extract the signer per file before the
+                // matcher runs. The publisher whitelist Settings UI +
+                // engine wiring lands together in a follow-up wave. For
+                // now publisher-kind exclusion rules persist but never
+                // match, by design.
                 let path_excluded = match db.lock() {
                     Ok(conn) => exclusions::matches(
                         &conn,
@@ -260,6 +273,7 @@ impl ScanEngine {
                             path: path_str_owned.as_str(),
                             blake3_hex: None,
                             sha256_hex: None,
+                            publisher: None,
                             scope: MatchScope::Scan,
                         },
                     )
@@ -279,7 +293,18 @@ impl ScanEngine {
                 // Adaptive yield per TASK-039.
                 yield_per_throttle(&mut throttle);
 
-                match hasher.hash_file(&path) {
+                let hash_outcome = if emit_partial {
+                    hash_file_with_partial_events(
+                        &path,
+                        opts_for_token.compute_sha256,
+                        scan_id,
+                        &tx_for_worker,
+                    )
+                } else {
+                    hasher.hash_file(&path)
+                };
+
+                match hash_outcome {
                     Ok(result) => {
                         files_hashed += 1;
                         let sample = EtaSample {
@@ -340,6 +365,7 @@ impl ScanEngine {
                     follow_symlinks: opts_for_token.follow_symlinks,
                     skip_hidden: opts_for_token.skip_hidden,
                     compute_sha256: opts_for_token.compute_sha256,
+                    emit_partial_hash: opts_for_token.emit_partial_hash,
                     processed_paths,
                     files_visited,
                     files_hashed,
@@ -532,6 +558,41 @@ fn decode_sha256(s: &str) -> Option<[u8; 32]> {
     let mut out = [0u8; 32];
     hex::decode_to_slice(s, &mut out).ok()?;
     Some(out)
+}
+
+/// Stream-hash `path` and emit `ScanProgress::PartialHash` events at
+/// ≤ 10 Hz (TASK-134 / FR-136). Identical contract to `Hasher::hash_file`
+/// except for the per-chunk progress events. Used only when the scan was
+/// started with `ScanOptions::emit_partial_hash = true`.
+fn hash_file_with_partial_events(
+    path: &std::path::Path,
+    compute_sha256: bool,
+    scan_id: i64,
+    tx: &tokio::sync::broadcast::Sender<ScanProgress>,
+) -> std::io::Result<HashResult> {
+    use std::io::Read;
+    let mut f = std::fs::File::open(path)?;
+    let mut streaming = StreamingHasher::new(compute_sha256);
+    let mut buf = vec![0u8; crate::hasher::DEFAULT_CHUNK_SIZE];
+    let mut last_emit = std::time::Instant::now();
+    let throttle = std::time::Duration::from_millis(100);
+    loop {
+        let n = f.read(&mut buf)?;
+        if n == 0 {
+            break;
+        }
+        streaming.update(&buf[..n]);
+        if last_emit.elapsed() >= throttle {
+            let _ = tx.send(ScanProgress::PartialHash {
+                scan_id,
+                path: path.to_path_buf(),
+                blake3_partial: streaming.partial(),
+                bytes_done: streaming.bytes_seen(),
+            });
+            last_emit = std::time::Instant::now();
+        }
+    }
+    Ok(streaming.finalize())
 }
 
 #[cfg(test)]

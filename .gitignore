@@ -51,6 +51,13 @@ vision.json
 .tmp-*.ps1
 .tmp-*.sh
 
+# Tauri Updater signing keys (TASK-044). Generated locally by
+# `cargo run --manifest-path scripts/gen-signing-key/Cargo.toml`; the
+# private half lives ONLY in GitHub Actions secrets.
+/private/
+*.key
+*.key.pub
+
 # Session-local Claude Code state (do not commit)
 .claude/
 

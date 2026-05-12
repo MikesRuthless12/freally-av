@@ -42,6 +42,10 @@ pub enum ExclusionKind {
     Glob,
     HashBlake3,
     HashSha256,
+    /// Publisher identity (Authenticode / codesign / GPG). The `value`
+    /// is the canonical signer identity string returned by
+    /// [`crate::detect::publisher::extract_signer`]. TASK-136.
+    Publisher,
 }
 
 impl ExclusionKind {
@@ -51,6 +55,7 @@ impl ExclusionKind {
             ExclusionKind::Glob => "glob",
             ExclusionKind::HashBlake3 => "hash_blake3",
             ExclusionKind::HashSha256 => "hash_sha256",
+            ExclusionKind::Publisher => "publisher",
         }
     }
 }
@@ -63,6 +68,7 @@ impl std::str::FromStr for ExclusionKind {
             "glob" => ExclusionKind::Glob,
             "hash_blake3" => ExclusionKind::HashBlake3,
             "hash_sha256" => ExclusionKind::HashSha256,
+            "publisher" => ExclusionKind::Publisher,
             other => {
                 return Err(ExclusionsError::Invalid(format!(
                     "unknown exclusion kind: {other}"
@@ -145,6 +151,9 @@ pub struct MatchCtx<'a> {
     pub path: &'a str,
     pub blake3_hex: Option<&'a str>,
     pub sha256_hex: Option<&'a str>,
+    /// Canonical publisher identity for this file (TASK-136). `None`
+    /// when the file is unsigned or the publisher extractor hasn't run.
+    pub publisher: Option<&'a str>,
     /// Which scope the caller is in — `applies_to_scan` filters out
     /// realtime-only rules and vice versa.
     pub scope: MatchScope,
@@ -201,6 +210,16 @@ pub fn add(
             kind.as_str(),
             trimmed.len()
         )));
+    }
+    // Publisher kind: reject suspicious characters (newlines / NUL) so
+    // the stored value renders correctly in the UI. Otherwise accept any
+    // free-text signer identity.
+    if matches!(kind, ExclusionKind::Publisher)
+        && trimmed.chars().any(|c| c == '\n' || c == '\r' || c == '\0')
+    {
+        return Err(ExclusionsError::Invalid(
+            "publisher value must not contain newlines or NUL bytes".into(),
+        ));
     }
     // Path kind: reject traversal segments at insert time. Per security
     // review M2 a stored `..` would let a tampered row redirect the
@@ -327,6 +346,13 @@ pub fn matches(
             },
             ExclusionKind::HashSha256 => match ctx.sha256_hex {
                 Some(h) => h.eq_ignore_ascii_case(&rule.value),
+                None => false,
+            },
+            ExclusionKind::Publisher => match ctx.publisher {
+                // Case-insensitive match — Authenticode subjects on
+                // Windows are commonly mixed-case ("Microsoft Corporation"
+                // vs "microsoft corporation").
+                Some(p) => p.eq_ignore_ascii_case(&rule.value),
                 None => false,
             },
         };
@@ -524,6 +550,7 @@ mod tests {
             path: "/home/me/safe",
             blake3_hex: None,
             sha256_hex: None,
+            publisher: None,
             scope: MatchScope::Scan,
         };
         let hit = matches(&conn, &ctx).unwrap().unwrap();
@@ -546,6 +573,7 @@ mod tests {
             path: "/home/me/safe/inner/file.txt",
             blake3_hex: None,
             sha256_hex: None,
+            publisher: None,
             scope: MatchScope::Scan,
         };
         let hit = matches(&conn, &ctx).unwrap();
@@ -568,6 +596,7 @@ mod tests {
             path: "c:/users/me/safe/inner",
             blake3_hex: None,
             sha256_hex: None,
+            publisher: None,
             scope: MatchScope::Scan,
         };
         assert!(matches(&conn, &ctx).unwrap().is_some());
@@ -592,6 +621,7 @@ mod tests {
             path: "/home/me/proj/node_modules/foo/index.js",
             blake3_hex: None,
             sha256_hex: None,
+            publisher: None,
             scope: MatchScope::Scan,
         };
         assert!(matches(&conn, &ctx).unwrap().is_some());
@@ -599,6 +629,7 @@ mod tests {
             path: "/home/me/proj/src/index.js",
             blake3_hex: None,
             sha256_hex: None,
+            publisher: None,
             scope: MatchScope::Scan,
         };
         assert!(matches(&conn, &miss).unwrap().is_none());
@@ -624,6 +655,7 @@ mod tests {
             path: "app.log",
             blake3_hex: None,
             sha256_hex: None,
+            publisher: None,
             scope: MatchScope::Scan,
         };
         assert!(matches(&conn, &ctx_hit).unwrap().is_some());
@@ -631,6 +663,7 @@ mod tests {
             path: "/var/logs/app.log",
             blake3_hex: None,
             sha256_hex: None,
+            publisher: None,
             scope: MatchScope::Scan,
         };
         assert!(matches(&conn, &ctx_miss).unwrap().is_none());
@@ -654,6 +687,7 @@ mod tests {
             path: "/anywhere",
             blake3_hex: Some(&upper),
             sha256_hex: None,
+            publisher: None,
             scope: MatchScope::Scan,
         };
         assert!(matches(&conn, &ctx).unwrap().is_some());
@@ -675,6 +709,7 @@ mod tests {
             path: "/realtime/only",
             blake3_hex: None,
             sha256_hex: None,
+            publisher: None,
             scope: MatchScope::Scan,
         };
         let rt_ctx = MatchCtx {
@@ -702,6 +737,7 @@ mod tests {
             path: "/x",
             blake3_hex: None,
             sha256_hex: None,
+            publisher: None,
             scope: MatchScope::Scan,
         };
         assert!(matches(&conn, &ctx).unwrap().is_none());

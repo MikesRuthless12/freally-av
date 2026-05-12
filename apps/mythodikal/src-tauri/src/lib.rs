@@ -12,6 +12,8 @@ use mythkernel::{
         scheduler::{self, AbuseChScheduledFeed, ScheduledFeed, SchedulerHandle},
     },
 };
+use tauri::Manager;
+use tauri_plugin_autostart::MacosLauncher;
 use ui_bridge::commands::{AppState, build_pipeline_from_feeds};
 use ui_bridge::invoke_handler;
 
@@ -47,8 +49,36 @@ pub fn run() {
     // scheduler idles without making network calls.
     let scheduler_handle = state.as_ref().map(spawn_feed_scheduler);
 
+    // TASK-157 / sec-review L6: `tauri.conf.json :: window.visible = false`
+    // keeps the window hidden during plugin init so the autostart flow
+    // can decide whether to show it. When the binary launches without
+    // `--start-minimized` we show the window from the `setup()` hook
+    // below; with `--start-minimized` we leave it hidden until the user
+    // clicks the tray icon (TASK-158).
+    let start_minimized = std::env::args().any(|a| a == "--start-minimized");
+
     let mut builder = tauri::Builder::default()
-        .plugin(tauri_plugin_single_instance::init(|_app, _argv, _cwd| {}));
+        .plugin(tauri_plugin_single_instance::init(|_app, _argv, _cwd| {}))
+        // TASK-044 / TASK-130 — engine self-update. Endpoint + ed25519
+        // pubkey live in tauri.conf.json :: plugins.updater.
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        // TASK-157 — start-with-OS auto-launch. `--start-minimized` is
+        // the canonical autostart argv; the main window suppresses
+        // initial show when this arg is present.
+        .plugin(tauri_plugin_autostart::init(
+            MacosLauncher::LaunchAgent,
+            Some(vec!["--start-minimized"]),
+        ))
+        // TASK-158 — required by the tray menu's "Quit" item to trigger
+        // a clean app exit + restart-after-update flow.
+        .plugin(tauri_plugin_process::init())
+        .setup(move |app| {
+            if !start_minimized && let Some(win) = app.get_webview_window("main") {
+                let _ = win.show();
+                let _ = win.set_focus();
+            }
+            Ok(())
+        });
     if let Some(s) = state {
         builder = builder.manage(s);
     }
