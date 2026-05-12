@@ -14,6 +14,11 @@ mod commands;
     long_about = None,
 )]
 struct Cli {
+    /// Override the SQLite database path. Defaults to
+    /// `<data_dir>/mythodikal.db` per PRD § 3.
+    #[arg(long, global = true)]
+    db: Option<PathBuf>,
+
     #[command(subcommand)]
     command: Commands,
 }
@@ -38,6 +43,20 @@ enum Commands {
         #[arg(long)]
         follow_symlinks: bool,
     },
+
+    /// Manage the quarantine vault. List, restore, delete, and bulk ops
+    /// per FR-041..047.
+    Quarantine {
+        #[command(subcommand)]
+        sub: commands::quarantine::QuarantineCmd,
+    },
+
+    /// Manage signature feeds. `feed update` pulls abuse.ch + NSRL and
+    /// rebuilds the local `.bin` indexes per FR-094.
+    Feed {
+        #[command(subcommand)]
+        sub: commands::feed::FeedCmd,
+    },
 }
 
 #[derive(ValueEnum, Clone, Copy, Debug)]
@@ -61,6 +80,8 @@ fn main() -> anyhow::Result<()> {
                 sha256,
                 follow_symlinks,
             } => commands::scan::run(path, format, sha256, follow_symlinks).await,
+            Commands::Quarantine { sub } => commands::quarantine::run(sub, cli.db.clone()),
+            Commands::Feed { sub } => commands::feed::run(sub).await,
         }
     })
 }

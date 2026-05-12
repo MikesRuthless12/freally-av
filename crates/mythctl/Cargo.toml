@@ -20,3 +20,4 @@ anyhow = { workspace = true }
 mythkernel = { path = "../mythkernel" }
 tokio = { workspace = true }
 serde_json = { workspace = true }
+rusqlite = { workspace = true }
