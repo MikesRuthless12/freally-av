@@ -11,15 +11,18 @@ import {
   onScanError,
   onScanFailed,
   onScanFinding,
+  onScanPaused,
   onScanProgress,
   onScanStarted,
   scanStart,
+  scanResume as ipcScanResume,
 } from "@/ipc/invoke";
 import type { FindingView, ScanId, ScanRequest } from "@/ipc/types";
 
 export type ScanState =
   | { kind: "idle" }
   | { kind: "running"; scanId: ScanId; startedAt: number }
+  | { kind: "paused"; scanId: ScanId }
   | { kind: "completed"; scanId: ScanId; durationMs: number }
   | { kind: "failed"; scanId: ScanId; message: string };
 
@@ -80,6 +83,14 @@ export async function startScan(request: ScanRequest): Promise<ScanId> {
   setFindings([]);
   setThroughput([]);
   const id = await scanStart(request);
+  setState({ kind: "running", scanId: id, startedAt: Date.now() });
+  return id;
+}
+
+/** Resume a previously-paused scan. Re-uses the same scan_id; the
+ *  backend re-walks the target and skips already-completed paths. */
+export async function resumeScan(scanId: ScanId): Promise<ScanId> {
+  const id = await ipcScanResume(scanId);
   setState({ kind: "running", scanId: id, startedAt: Date.now() });
   return id;
 }
@@ -191,6 +202,22 @@ export function attachScanEvents(): void {
         scanId: payload.scan_id,
         message: payload.message,
       });
+    }),
+  );
+
+  handles.push(
+    onScanPaused((payload) => {
+      setState({ kind: "paused", scanId: payload.scan_id });
+      setCounters((c) => ({
+        ...c,
+        filesVisited: payload.files_visited,
+        filesHashed: payload.files_hashed,
+        bytesVisited: payload.bytes_visited,
+        findingsCount: payload.findings_count,
+        currentPath: null,
+        etaSecs: null,
+        etaReceivedAt: null,
+      }));
     }),
   );
 

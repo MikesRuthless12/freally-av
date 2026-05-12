@@ -100,7 +100,9 @@ pub async fn run(
                         Format::Json => writeln!(stdout, "{}", serde_json::to_string(&event)?)?,
                     }
                 }
-                ScanProgress::Completed { .. } | ScanProgress::Failed { .. } => {
+                ScanProgress::Completed { .. }
+                | ScanProgress::Failed { .. }
+                | ScanProgress::Paused { .. } => {
                     last_completed = Some(event);
                     break;
                 }

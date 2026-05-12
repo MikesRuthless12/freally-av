@@ -149,6 +149,14 @@ export interface EngineVersionInfo {
   version: string;
 }
 
+export interface UpdaterStatusView {
+  started_at_utc: number;
+  finished_at_utc: number;
+  outcome: string;
+  detail: string;
+  next_run_at_utc: number;
+}
+
 // Exclusions (TASK-042 / FR-060/061/062/134)
 export type ExclusionKind = "path" | "glob" | "hash_blake3" | "hash_sha256";
 export type ExclusionScope = "scan_only" | "realtime_only" | "both";
@@ -205,7 +213,15 @@ export type ScanProgress =
       findings_count: number;
       duration_ms: number;
     }
-  | { kind: "failed"; scan_id: ScanId; message: string };
+  | { kind: "failed"; scan_id: ScanId; message: string }
+  | {
+      kind: "paused";
+      scan_id: ScanId;
+      files_visited: number;
+      files_hashed: number;
+      bytes_visited: number;
+      findings_count: number;
+    };
 
 // Severity ordering used by the UI for sort + color.
 export const SEVERITY_RANK: Record<string, number> = {

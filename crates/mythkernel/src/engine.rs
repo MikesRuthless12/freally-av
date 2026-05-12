@@ -6,6 +6,8 @@
 //! [`crate::scan::ScanHandle`] with a broadcast receiver of
 //! [`crate::scan::ScanProgress`] events.
 
+use std::collections::BTreeSet;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
@@ -18,7 +20,9 @@ use crate::eta::{EtaEstimator, Progress as EtaSample};
 use crate::exclusions::{self, MatchCtx, MatchScope};
 use crate::hasher::Hasher;
 use crate::history::{self, ScanStatus};
-use crate::scan::{ScanHandle, ScanOptions, ScanProgress, ScanTarget};
+use crate::scan::{
+    RESUME_TOKEN_PATH_CAP, ResumeToken, ScanHandle, ScanOptions, ScanProgress, ScanTarget,
+};
 use crate::throttle::{AdaptiveThrottle, Throttle};
 use crate::walker::{FileWalker, PosixWalker, WalkEvent, WalkOpts};
 
@@ -62,13 +66,78 @@ impl ScanEngine {
     /// gets an id immediately), then spawns the worker that walks + hashes +
     /// finalizes.
     pub fn scan(&self, target: ScanTarget, opts: ScanOptions) -> Result<ScanHandle, EngineError> {
+        self.scan_internal(target, opts, None)
+    }
+
+    /// Resume a previously paused scan. Reads the row's resume_token,
+    /// re-walks the target paths, skips already-processed files, and
+    /// continues from the persisted counters. The token's schema must
+    /// match `ResumeToken::CURRENT_SCHEMA`; older versions return an
+    /// error so the caller can re-run the scan from scratch rather than
+    /// risk a corrupted continuation.
+    pub fn resume(&self, scan_id: i64) -> Result<ScanHandle, EngineError> {
+        let token_bytes = {
+            let conn = self
+                .db
+                .lock()
+                .map_err(|_| EngineError::Db(crate::db::DbError::Poisoned.to_string()))?;
+            history::read_resume_token(&conn, scan_id)
+                .map_err(|e| EngineError::Db(e.to_string()))?
+                .ok_or_else(|| EngineError::Config(format!("scan {scan_id} has no resume token")))?
+        };
+        let token: ResumeToken = serde_json::from_slice(&token_bytes)
+            .map_err(|e| EngineError::Config(format!("resume token decode: {e}")))?;
+        if token.schema_version != ResumeToken::CURRENT_SCHEMA {
+            return Err(EngineError::Config(format!(
+                "resume token schema {} unsupported (current {})",
+                token.schema_version,
+                ResumeToken::CURRENT_SCHEMA
+            )));
+        }
+        let target = if token.target_paths.len() == 1 && token.target_kind == "path" {
+            ScanTarget::Path(token.target_paths[0].clone())
+        } else {
+            ScanTarget::Paths(token.target_paths.clone())
+        };
+        let opts = ScanOptions {
+            follow_symlinks: token.follow_symlinks,
+            skip_hidden: token.skip_hidden,
+            compute_sha256: token.compute_sha256,
+            ..ScanOptions::default()
+        };
+        self.scan_internal(target, opts, Some((scan_id, token)))
+    }
+
+    fn scan_internal(
+        &self,
+        target: ScanTarget,
+        opts: ScanOptions,
+        resume_from: Option<(i64, ResumeToken)>,
+    ) -> Result<ScanHandle, EngineError> {
         let started_at_utc = now_utc();
         let started_at_instant = Instant::now();
         let target_paths_json = target.to_paths_json();
         let target_kind = target.kind();
         let trigger = opts.trigger;
+        let resume_carry = resume_from.as_ref().map(|(_, t)| t.clone());
 
-        let (scan_id, exclusions_snap) = {
+        let (scan_id, exclusions_snap) = if let Some((existing_id, _)) = resume_from.as_ref() {
+            // Resume: keep the same scan_id; clear the resume_token so
+            // a follow-up pause writes a fresh one, and flip the row
+            // back to `running`.
+            let conn = self
+                .db
+                .lock()
+                .map_err(|_| EngineError::Db(crate::db::DbError::Poisoned.to_string()))?;
+            history::set_resume_token(&conn, *existing_id, &[])
+                .map_err(|e| EngineError::Db(e.to_string()))?;
+            conn.execute(
+                "UPDATE scans SET status = 'running' WHERE id = ?1",
+                rusqlite::params![*existing_id],
+            )
+            .map_err(|e| EngineError::Db(e.to_string()))?;
+            (*existing_id, String::from("[]"))
+        } else {
             let conn = self
                 .db
                 .lock()
@@ -108,21 +177,34 @@ impl ScanEngine {
             skip_hidden: opts.skip_hidden,
             max_depth: opts.max_depth,
         };
+        let pause_flag = Arc::new(AtomicBool::new(false));
+        let pause_flag_for_worker = pause_flag.clone();
         let target_for_worker = target;
+        let opts_for_token = opts.clone();
 
         // The walker uses rayon internally and the hash step is CPU-bound, so
         // this work belongs on the blocking pool, not the tokio reactor.
+        let target_paths_for_token: Vec<std::path::PathBuf> =
+            target_for_worker.paths().cloned().collect();
+        let target_kind_for_token = target_kind.to_string();
         let worker = tokio::task::spawn_blocking(move || {
             let walker = PosixWalker::new();
+            // TASK-040 — resume context. When `resume_carry` is Some,
+            // pre-load counters and the set of already-completed paths so
+            // we skip them in the hash loop.
+            let mut processed_paths: BTreeSet<String> = resume_carry
+                .as_ref()
+                .map(|t| t.processed_paths.clone())
+                .unwrap_or_default();
+            let mut files_visited: i64 =
+                resume_carry.as_ref().map(|t| t.files_visited).unwrap_or(0);
+            let mut files_hashed: i64 = resume_carry.as_ref().map(|t| t.files_hashed).unwrap_or(0);
+            let mut bytes_visited: i64 =
+                resume_carry.as_ref().map(|t| t.bytes_visited).unwrap_or(0);
+            let mut findings_count: i64 =
+                resume_carry.as_ref().map(|t| t.findings_count).unwrap_or(0);
 
             // Phase A — enumeration pass (TASK-038 ETA + early TASK-137).
-            //
-            // We need files_total + bytes_total before the hash loop so the
-            // ETA estimator has a denominator to compute "seconds remaining"
-            // against. For Phase 4 this is a serial pre-walk; FR-135 calls
-            // for concurrent producer-consumer enumeration (TASK-137, Phase
-            // 5), which will replace this pre-walk with a streaming worklist.
-            // Until then, we accept paying for one extra walkdir pass.
             let mut files_total: u64 = 0;
             let mut bytes_total: u64 = 0;
             let mut worklist: Vec<(std::path::PathBuf, u64)> = Vec::new();
@@ -144,38 +226,38 @@ impl ScanEngine {
             }
 
             // Phase B — hash + detect pass with live ETA + adaptive throttle.
-            //
-            // FR-061 + FR-062 (TASK-042): consult `exclusions::matches()`
-            // before hashing. Path/glob hits skip the file entirely (no
-            // hash, no detect). Hash-keyed hits run after hashing because
-            // we need the digest to compare.
-            //
-            // TASK-039: the AdaptiveThrottle decides how aggressively we
-            // should yield to other processes. Phase-4 ships a simple
-            // yield-between-files heuristic: at full throttle (idle box)
-            // we don't sleep; under high external load we sleep ~50 ms
-            // per file so foreground apps stay responsive. Multi-worker
-            // rayon parallelism is TASK-053 (Phase 5).
-            let mut files_visited: i64 = 0;
-            let mut files_hashed: i64 = 0;
-            let mut bytes_visited: i64 = 0;
-            let mut findings_count: i64 = 0;
             let mut estimator = EtaEstimator::new();
             let throttle_base = Throttle::default();
             let mut throttle = AdaptiveThrottle::new(throttle_base);
+            let mut paused_mid_run = false;
 
             for (path, size) in worklist {
+                // TASK-040 — pause check at the top of every iteration.
+                // We persist a resume token and exit cleanly so the
+                // caller can pick this scan up later via `engine.resume`.
+                if pause_flag_for_worker.load(Ordering::Relaxed) {
+                    paused_mid_run = true;
+                    break;
+                }
+
+                let path_str_owned = path.to_string_lossy().into_owned();
+
+                // Skip files we already processed in a prior run that
+                // got paused. Counters carry over from the resume_carry.
+                if processed_paths.contains(&path_str_owned) {
+                    continue;
+                }
+
                 files_visited += 1;
                 bytes_visited += size as i64;
 
                 // Path/glob exclusion check first — if hit, skip this file
                 // entirely (don't hash, don't detect).
-                let path_str = path.to_string_lossy();
                 let path_excluded = match db.lock() {
                     Ok(conn) => exclusions::matches(
                         &conn,
                         &MatchCtx {
-                            path: path_str.as_ref(),
+                            path: path_str_owned.as_str(),
                             blake3_hex: None,
                             sha256_hex: None,
                             scope: MatchScope::Scan,
@@ -186,14 +268,15 @@ impl ScanEngine {
                     Err(_) => None,
                 };
                 if path_excluded.is_some() {
-                    // Pre-hash skip — files_visited still increments so the
-                    // user sees us advance through the tree.
+                    // Pre-hash skip — count it as processed so a resume
+                    // doesn't re-evaluate the rule for the same path.
+                    if processed_paths.len() < RESUME_TOKEN_PATH_CAP {
+                        processed_paths.insert(path_str_owned.clone());
+                    }
                     continue;
                 }
 
-                // Adaptive yield per TASK-039. `current_workers()` returns
-                // [1..=max_workers]; we map that to a per-file sleep so
-                // the engine self-throttles under interactive load.
+                // Adaptive yield per TASK-039.
                 yield_per_throttle(&mut throttle);
 
                 match hasher.hash_file(&path) {
@@ -214,10 +297,6 @@ impl ScanEngine {
                             eta_secs,
                         });
 
-                        // Run the detection pipeline. Empty pipeline
-                        // short-circuits without touching FileCtx, so
-                        // the zero-detector default case has no per-file
-                        // overhead.
                         if !pipeline.is_empty() {
                             evaluate_pipeline(
                                 &pipeline,
@@ -229,6 +308,13 @@ impl ScanEngine {
                                 &result,
                                 &mut findings_count,
                             );
+                        }
+
+                        // Record the path as done so a follow-up resume
+                        // skips it. Cap protects the token from
+                        // unbounded growth on giant scans.
+                        if processed_paths.len() < RESUME_TOKEN_PATH_CAP {
+                            processed_paths.insert(path_str_owned);
                         }
                     }
                     Err(err) => {
@@ -242,6 +328,49 @@ impl ScanEngine {
 
             let ended_at_utc = now_utc();
             let duration_ms = started_at_instant.elapsed().as_millis() as u64;
+
+            if paused_mid_run {
+                // Persist the resume token, flip the row status, fire the
+                // Paused event, and exit. The DB row keeps its
+                // `files_visited` etc. up to date for the History page.
+                let token = ResumeToken {
+                    schema_version: ResumeToken::CURRENT_SCHEMA,
+                    target_paths: target_paths_for_token,
+                    target_kind: target_kind_for_token,
+                    follow_symlinks: opts_for_token.follow_symlinks,
+                    skip_hidden: opts_for_token.skip_hidden,
+                    compute_sha256: opts_for_token.compute_sha256,
+                    processed_paths,
+                    files_visited,
+                    files_hashed,
+                    bytes_visited,
+                    findings_count,
+                };
+                let encoded = serde_json::to_vec(&token).unwrap_or_else(|_| b"{}".to_vec());
+                if let Ok(conn) = db.lock() {
+                    let _ = history::set_resume_token(&conn, scan_id, &encoded);
+                    let _ = history::finalize_scan(
+                        &conn,
+                        scan_id,
+                        ended_at_utc,
+                        ScanStatus::Paused,
+                        files_visited,
+                        files_hashed,
+                        0,
+                        0,
+                        bytes_visited,
+                        findings_count,
+                    );
+                }
+                let _ = tx_for_worker.send(ScanProgress::Paused {
+                    scan_id,
+                    files_visited,
+                    files_hashed,
+                    bytes_visited,
+                    findings_count,
+                });
+                return;
+            }
 
             let finalize_status = match db.lock() {
                 Ok(conn) => history::finalize_scan(
@@ -283,6 +412,7 @@ impl ScanEngine {
             scan_id,
             progress: rx,
             worker,
+            pause_flag,
         })
     }
 
@@ -562,6 +692,91 @@ mod tests {
             )
             .unwrap();
         assert_eq!(scan_findings_count, 1);
+    }
+
+    #[tokio::test]
+    async fn pause_then_resume_completes_all_files() {
+        // Build a tree with 10 files, kick off a scan, pause it after
+        // the first File event, then resume the same scan and assert
+        // the totals match a clean scan of the same tree.
+        let conn = db::open_in_memory().unwrap();
+        let engine = ScanEngine::new(conn);
+        let dir = tempdir().unwrap();
+        for i in 0..10 {
+            fs::write(dir.path().join(format!("f_{i}.txt")), format!("p{i}")).unwrap();
+        }
+
+        let handle = engine
+            .scan(
+                ScanTarget::Path(dir.path().to_path_buf()),
+                ScanOptions::default(),
+            )
+            .unwrap();
+        let scan_id = handle.scan_id;
+        let pause_flag = handle.pause_flag.clone();
+        let mut rx = handle.progress;
+        let worker = handle.worker;
+
+        // Wait for the first File event, then request a pause.
+        let mut got_paused = false;
+        let mut paused_files: i64 = 0;
+        loop {
+            match rx.recv().await {
+                Ok(ScanProgress::File { .. }) => {
+                    pause_flag.store(true, std::sync::atomic::Ordering::Relaxed);
+                }
+                Ok(ScanProgress::Paused { files_visited, .. }) => {
+                    got_paused = true;
+                    paused_files = files_visited;
+                    break;
+                }
+                Ok(ScanProgress::Completed { .. }) => {
+                    // Scan finished before our pause flag landed — fine on
+                    // a very small tree.
+                    break;
+                }
+                Ok(_) => {}
+                Err(_) => break,
+            }
+        }
+        worker.await.unwrap();
+
+        // The row should reflect either paused or completed.
+        let (status, files_after_pause): (String, i64) = {
+            let db = engine.db.lock().unwrap();
+            db.query_row(
+                "SELECT status, files_visited FROM scans WHERE id = ?1",
+                [scan_id],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap()
+        };
+
+        if got_paused {
+            assert_eq!(status, "paused");
+            assert!(
+                (1..10).contains(&files_after_pause),
+                "should have paused mid-scan, got {files_after_pause}"
+            );
+            assert!(paused_files >= 1);
+
+            // Resume and let it complete.
+            let resumed = engine.resume(scan_id).unwrap();
+            assert_eq!(resumed.scan_id, scan_id);
+            resumed.worker.await.unwrap();
+
+            let (status, files_after_resume): (String, i64) = {
+                let db = engine.db.lock().unwrap();
+                db.query_row(
+                    "SELECT status, files_visited FROM scans WHERE id = ?1",
+                    [scan_id],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .unwrap()
+            };
+            assert_eq!(status, "completed");
+            assert_eq!(files_after_resume, 10);
+        }
     }
 
     #[tokio::test]

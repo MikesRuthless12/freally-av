@@ -28,6 +28,7 @@ import type {
   ScanSummary,
   SettingsPatch,
   SettingsSnapshot,
+  UpdaterStatusView,
 } from "./types";
 
 // ============================================================================
@@ -44,6 +45,14 @@ export function scanStatus(scanId: ScanId): Promise<ScanSummary> {
 
 export function scanCancel(scanId: ScanId): Promise<void> {
   return invoke<void>("scan_cancel", { scanId });
+}
+
+export function scanPause(scanId: ScanId): Promise<void> {
+  return invoke<void>("scan_pause", { scanId });
+}
+
+export function scanResume(scanId: ScanId): Promise<ScanId> {
+  return invoke<ScanId>("scan_resume", { scanId });
 }
 
 // ============================================================================
@@ -153,6 +162,10 @@ export function engineVersion(): Promise<EngineVersionInfo> {
   return invoke<EngineVersionInfo>("engine_version");
 }
 
+export function updaterStatus(): Promise<UpdaterStatusView | null> {
+  return invoke<UpdaterStatusView | null>("updater_status");
+}
+
 // Exclusions
 export function exclusionList(): Promise<ExclusionView[]> {
   return invoke<ExclusionView[]>("exclusion_list");
@@ -216,6 +229,12 @@ export function onScanFailed(
   handler: Handler<Extract<ScanProgress, { kind: "failed" }>>,
 ): Promise<UnlistenFn> {
   return on("scan:failed", handler);
+}
+
+export function onScanPaused(
+  handler: Handler<Extract<ScanProgress, { kind: "paused" }>>,
+): Promise<UnlistenFn> {
+  return on("scan:paused", handler);
 }
 
 export function onQuarantineBatchProgress(

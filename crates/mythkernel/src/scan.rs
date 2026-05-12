@@ -4,12 +4,21 @@
 //! resume across reboot is TASK-040 (Phase 4), MFT/USN per-volume parallelism
 //! is TASK-053 (Phase 5), and the locked-Y two-phase counter is TASK-137.
 
+use std::collections::BTreeSet;
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 
 use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast;
 
 use crate::history::ScanTrigger;
+
+/// Cap on the number of completed paths we persist into a single
+/// resume_token. Beyond this we let resume re-do the duplicate work —
+/// findings persist DB-side, so the worst case is a couple extra
+/// hash passes (cheap) rather than a giant token (slow to read/write).
+pub const RESUME_TOKEN_PATH_CAP: usize = 100_000;
 
 /// What the user asked us to scan.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -49,8 +58,9 @@ impl ScanTarget {
 }
 
 /// Per-scan options. Phase 1 keeps it small; later phases extend with
-/// pause/resume tokens (FR-011), throttle (FR-012), exclusions snapshot
-/// (FR-062), and archive depth (FR-017).
+/// throttle (FR-012), exclusions snapshot (FR-062), and archive depth
+/// (FR-017). TASK-040 (Phase 4 wave 2) added `Clone` so the worker can
+/// stash the options into a resume token.
 #[derive(Debug, Clone)]
 pub struct ScanOptions {
     pub trigger: ScanTrigger,
@@ -70,6 +80,37 @@ impl Default for ScanOptions {
             compute_sha256: false,
         }
     }
+}
+
+/// Resume token persisted on pause (TASK-040). The token is JSON-
+/// serialized into `scans.resume_token` so a fresh process can pick the
+/// scan up by reading the DB. We re-walk the original target paths on
+/// resume and skip any path in `processed_paths`; counters carry over.
+///
+/// `schema_version` lets us evolve the layout without a migration; a
+/// resume token from an older version is silently discarded (rerun
+/// from scratch) rather than risk a botched continuation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResumeToken {
+    pub schema_version: u32,
+    pub target_paths: Vec<PathBuf>,
+    pub target_kind: String,
+    pub follow_symlinks: bool,
+    pub skip_hidden: bool,
+    pub compute_sha256: bool,
+    /// Files we've already hashed + processed. On resume we skip these.
+    /// Capped at [`RESUME_TOKEN_PATH_CAP`]; if the original scan exceeded
+    /// the cap the engine just re-scans the overage (cheap correctness
+    /// vs. an unbounded blob).
+    pub processed_paths: BTreeSet<String>,
+    pub files_visited: i64,
+    pub files_hashed: i64,
+    pub bytes_visited: i64,
+    pub findings_count: i64,
+}
+
+impl ResumeToken {
+    pub const CURRENT_SCHEMA: u32 = 1;
 }
 
 /// One progress event emitted by a running scan.
@@ -118,6 +159,15 @@ pub enum ScanProgress {
         findings_count: i64,
         duration_ms: u64,
     },
+    /// Worker observed a pause request, persisted a resume token, and
+    /// exited cleanly. The scan can be resumed by `engine.resume(id)`.
+    Paused {
+        scan_id: i64,
+        files_visited: i64,
+        files_hashed: i64,
+        bytes_visited: i64,
+        findings_count: i64,
+    },
     Failed {
         scan_id: i64,
         message: String,
@@ -131,6 +181,10 @@ pub struct ScanHandle {
     pub scan_id: i64,
     pub progress: broadcast::Receiver<ScanProgress>,
     pub worker: tokio::task::JoinHandle<()>,
+    /// Pause flag (TASK-040). The worker checks this between each file;
+    /// when `true` it persists a resume token, emits `ScanProgress::Paused`,
+    /// and exits. Cloning is cheap (`Arc::clone`).
+    pub pause_flag: Arc<AtomicBool>,
 }
 
 impl ScanHandle {
@@ -138,5 +192,13 @@ impl ScanHandle {
     /// per-file events.
     pub async fn join(self) -> Result<(), tokio::task::JoinError> {
         self.worker.await
+    }
+
+    /// Signal the worker to pause at the next iteration boundary. The
+    /// worker writes a resume token and emits `ScanProgress::Paused`
+    /// before exiting; callers should `join()` to observe that exit.
+    pub fn request_pause(&self) {
+        self.pause_flag
+            .store(true, std::sync::atomic::Ordering::Relaxed);
     }
 }
