@@ -2496,11 +2496,15 @@ dependencies = [
 name = "mythodikal-app"
 version = "0.0.1"
 dependencies = [
+ "mythkernel",
  "serde",
  "serde_json",
  "tauri",
  "tauri-build",
  "tauri-plugin-single-instance",
+ "tracing",
+ "tracing-subscriber",
+ "ui-bridge",
 ]
 
 [[package]]
@@ -4833,10 +4837,14 @@ dependencies = [
 name = "ui-bridge"
 version = "0.0.1"
 dependencies = [
+ "hex",
  "mythkernel",
+ "rusqlite",
  "serde",
  "serde_json",
  "tauri",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
