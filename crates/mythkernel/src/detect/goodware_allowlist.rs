@@ -1,11 +1,19 @@
 //! NSRL goodware allowlist detector (TASK-021, Phase 2).
 //!
-//! Reads `<data_dir>/feeds/nsrl_hashes.bin` — same on-disk format as the
-//! abuse.ch blacklist (see [`super::hash_set_file`]) — and returns
+//! Reads `<data_dir>/feeds/nsrl_sha256.bin` — same on-disk 32-byte-key format
+//! as the abuse.ch blacklist (see [`super::hash_set_file`]) — and returns
 //! [`DetectorVerdict::SkipFile`] on hit. The pipeline short-circuits when a
 //! `SkipFile` is returned, so an NSRL match ends evaluation before any
 //! blacklist detector is consulted. This is the "fast skip" mentioned in the
 //! Phase 2 roadmap for TASK-019.
+//!
+//! **Hash function:** SHA-256 by default. NSRL RDS Modern publishes SHA-256
+//! per hash (alongside SHA-1 and MD5 for legacy compatibility); BLAKE3 is
+//! not available upstream. The engine must therefore set
+//! `ScanOptions::compute_sha256 = true` whenever this detector is loaded,
+//! otherwise the allowlist short-circuit never fires. Override via
+//! [`GoodwareAllowlistDetector::with_hash_kind`] if a BLAKE3-keyed corpus
+//! is ever shipped.
 //!
 //! Built by the NSRL feed updater (TASK-023) from NIST's Reference Data Set
 //! (RDS) — a US public-domain corpus of known-good file hashes for OS
@@ -16,7 +24,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use super::hash_set_file::{HashSetError, HashSetFile};
-use super::{Detector, DetectorVerdict, FileCtx};
+use super::{Detector, DetectorVerdict, FileCtx, HashKind};
 
 /// Stable detector id used in logs, audit, and the pipeline's
 /// `feed_versions` summary.
@@ -31,19 +39,35 @@ pub const PRIORITY: u32 = 10;
 #[derive(Clone)]
 pub struct GoodwareAllowlistDetector {
     set: Arc<HashSetFile>,
+    hash_kind: HashKind,
 }
 
 impl GoodwareAllowlistDetector {
-    /// Open the NSRL hash-set file at the given path.
+    /// Open the NSRL hash-set file at the given path. Defaults to
+    /// [`HashKind::Sha256`] (the format NSRL RDS Modern publishes).
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self, HashSetError> {
         let set = HashSetFile::open(path)?;
-        Ok(Self { set: Arc::new(set) })
+        Ok(Self {
+            set: Arc::new(set),
+            hash_kind: HashKind::Sha256,
+        })
+    }
+
+    /// Override the default hash kind.
+    pub fn with_hash_kind(mut self, kind: HashKind) -> Self {
+        self.hash_kind = kind;
+        self
     }
 
     /// Number of hashes loaded — surfaced in `scans.feed_versions` and the
     /// About page (FR-157).
     pub fn loaded_count(&self) -> u64 {
         self.set.len()
+    }
+
+    /// Which hash this detector queries.
+    pub fn hash_kind(&self) -> HashKind {
+        self.hash_kind
     }
 }
 
@@ -57,7 +81,13 @@ impl Detector for GoodwareAllowlistDetector {
     }
 
     fn check(&self, ctx: &FileCtx<'_>) -> DetectorVerdict {
-        if self.set.contains(ctx.blake3) {
+        let Some(digest) = self.hash_kind.select(ctx) else {
+            // SHA-256 not computed — engine misconfigured. Fail clean (no
+            // allowlist match) so the pipeline still evaluates blacklists
+            // rather than silently skipping every file.
+            return DetectorVerdict::Clean;
+        };
+        if self.set.contains(digest) {
             DetectorVerdict::SkipFile
         } else {
             DetectorVerdict::Clean
@@ -83,13 +113,22 @@ mod tests {
         (dir, path)
     }
 
-    fn ctx<'a>(path: &'a Path, hash: &'a [u8; 32]) -> FileCtx<'a> {
+    /// SHA-256 ctx — matches production wiring (NSRL is SHA-256, engine
+    /// must set `compute_sha256 = true` when this detector is loaded).
+    fn ctx_sha<'a>(path: &'a Path, zero_blake3: &'a [u8; 32], sha: &'a [u8; 32]) -> FileCtx<'a> {
         FileCtx {
             path,
             size_bytes: 0,
-            blake3: hash,
-            sha256: None,
+            blake3: zero_blake3,
+            sha256: Some(sha),
         }
+    }
+
+    #[test]
+    fn defaults_to_sha256() {
+        let (_dir, path) = make_set(&[[0; 32]]);
+        let d = GoodwareAllowlistDetector::open(&path).unwrap();
+        assert_eq!(d.hash_kind(), super::HashKind::Sha256);
     }
 
     #[test]
@@ -98,8 +137,9 @@ mod tests {
         let (_dir, path) = make_set(&[good]);
         let d = GoodwareAllowlistDetector::open(&path).unwrap();
         let other = [0x99; 32];
+        let zero = [0u8; 32];
         assert_eq!(
-            d.check(&ctx(Path::new("/x"), &other)),
+            d.check(&ctx_sha(Path::new("/x"), &zero, &other)),
             DetectorVerdict::Clean
         );
     }
@@ -111,10 +151,28 @@ mod tests {
         let d = GoodwareAllowlistDetector::open(&path).unwrap();
         assert_eq!(d.id(), "goodware_allowlist");
         assert_eq!(d.priority(), 10);
+        let zero = [0u8; 32];
         assert_eq!(
-            d.check(&ctx(Path::new("/y"), &good)),
+            d.check(&ctx_sha(Path::new("/y"), &zero, &good)),
             DetectorVerdict::SkipFile
         );
+    }
+
+    #[test]
+    fn missing_sha256_in_ctx_returns_clean() {
+        // Engine misconfiguration: SHA-256 not computed. Allowlist must
+        // fail clean so the pipeline still evaluates blacklists rather
+        // than silently allowing every file.
+        let good = [0x77; 32];
+        let (_dir, path) = make_set(&[good]);
+        let d = GoodwareAllowlistDetector::open(&path).unwrap();
+        let ctx = FileCtx {
+            path: Path::new("/x"),
+            size_bytes: 0,
+            blake3: &good,
+            sha256: None,
+        };
+        assert_eq!(d.check(&ctx), DetectorVerdict::Clean);
     }
 
     #[test]
@@ -133,7 +191,8 @@ mod tests {
             .with_severity(Severity::High);
 
         let pipeline = DetectionPipeline::new(vec![Box::new(block), Box::new(allow)]);
-        let outcome = pipeline.evaluate(&ctx(Path::new("/z"), &h));
+        let zero = [0u8; 32];
+        let outcome = pipeline.evaluate(&ctx_sha(Path::new("/z"), &zero, &h));
         assert_eq!(
             outcome,
             PipelineOutcome::SkippedByAllowlist {

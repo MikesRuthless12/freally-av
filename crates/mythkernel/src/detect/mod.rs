@@ -39,6 +39,38 @@ pub struct FileCtx<'a> {
     pub sha256: Option<&'a [u8; 32]>,
 }
 
+/// Which hash function a hash-keyed detector should query the [`FileCtx`]
+/// against. abuse.ch (MalwareBazaar + ThreatFox) and NIST NSRL both publish
+/// **SHA-256**, so the hash blacklist (TASK-020) and goodware allowlist
+/// (TASK-021) default to [`HashKind::Sha256`]. A future Mythodikal-internal
+/// blacklist (e.g. user-discovered samples) could use [`HashKind::Blake3`]
+/// since the engine computes BLAKE3 unconditionally.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HashKind {
+    Blake3,
+    Sha256,
+}
+
+impl HashKind {
+    /// Look up the matching 32-byte digest in a [`FileCtx`]. Returns `None`
+    /// only for `Sha256` when `ScanOptions::compute_sha256` was disabled.
+    pub fn select<'a>(self, ctx: &'a FileCtx<'_>) -> Option<&'a [u8; 32]> {
+        match self {
+            HashKind::Blake3 => Some(ctx.blake3),
+            HashKind::Sha256 => ctx.sha256,
+        }
+    }
+
+    /// Short name written into rule IDs and the per-finding explainer.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            HashKind::Blake3 => "blake3",
+            HashKind::Sha256 => "sha256",
+        }
+    }
+}
+
 /// Severity ladder used by every detector. Stored as the `findings.severity`
 /// column. The ordering (`Critical` > `Info`) is meaningful — UI and CLI
 /// sort by it.
