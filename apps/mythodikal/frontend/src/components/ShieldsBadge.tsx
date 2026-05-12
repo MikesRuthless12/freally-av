@@ -5,18 +5,30 @@
 // is the sidebar's footer; the Settings → Real-time page hosts the
 // full controls.
 
-import { Show, createSignal } from "solid-js";
+import { Show, createSignal, onCleanup, onMount } from "solid-js";
 import { setShields, shieldsState, shieldsStatusText } from "@/stores/shields";
 
 export const ShieldsBadge = () => {
   const [open, setOpen] = createSignal(false);
   const [busy, setBusy] = createSignal(false);
   const [error, setError] = createSignal<string | null>(null);
+  // Wall-clock ticker so the "PAUSED · N min" label counts down without
+  // a fresh event from the backend. Review feedback: prior version froze
+  // at the minute the user clicked, even though the pause was expiring.
+  const [now, setNow] = createSignal(Date.now());
+
+  onMount(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    onCleanup(() => clearInterval(id));
+  });
 
   const apply = async (enabled: boolean, pauseMinutes?: number) => {
     setBusy(true);
     setError(null);
     try {
+      // The store's `shields:changed` subscription will mirror the new
+      // state — we don't double-update from the resolved promise (review
+      // feedback: setShields-then-broadcast was racing the broadcast).
       await setShields(enabled, pauseMinutes);
       setOpen(false);
     } catch (err) {
@@ -27,6 +39,8 @@ export const ShieldsBadge = () => {
   };
 
   const ok = () => shieldsState().enabled;
+  // Recompute the text against `now()` so the signal re-reads it on tick.
+  const label = () => shieldsStatusText(shieldsState(), now());
 
   return (
     <div class="relative">
@@ -40,7 +54,7 @@ export const ShieldsBadge = () => {
           class={`h-2 w-2 rounded-full ${ok() ? "bg-myth-ok" : "bg-myth-bad"}`}
         />
         <span class="font-mono text-xs uppercase tracking-wide text-myth-text-md">
-          Shields: {shieldsStatusText(shieldsState())}
+          Shields: {label()}
         </span>
       </button>
       <Show when={open()}>

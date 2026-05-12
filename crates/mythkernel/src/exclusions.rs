@@ -156,8 +156,16 @@ pub enum MatchScope {
     Realtime,
 }
 
+/// Maximum length of a value string. Cap protects the matcher from
+/// degenerate inputs (security review M3); 4 KiB is plenty for any real
+/// path or glob.
+const MAX_VALUE_LEN: usize = 4096;
+/// Maximum length of the `reason` audit string (security review L2).
+const MAX_REASON_LEN: usize = 1024;
+
 /// Insert a new exclusion. Returns the row id. Validates non-empty
-/// value and well-formed hash strings.
+/// value, length cap, hash format, and (for path kind) absence of `..`
+/// traversal segments.
 pub fn add(
     conn: &Connection,
     kind: ExclusionKind,
@@ -170,6 +178,22 @@ pub fn add(
     if trimmed.is_empty() {
         return Err(ExclusionsError::Invalid("value is empty".into()));
     }
+    if trimmed.len() > MAX_VALUE_LEN {
+        return Err(ExclusionsError::Invalid(format!(
+            "value too long ({} chars, max {})",
+            trimmed.len(),
+            MAX_VALUE_LEN
+        )));
+    }
+    if let Some(r) = reason
+        && r.len() > MAX_REASON_LEN
+    {
+        return Err(ExclusionsError::Invalid(format!(
+            "reason too long ({} chars, max {})",
+            r.len(),
+            MAX_REASON_LEN
+        )));
+    }
     if matches!(kind, ExclusionKind::HashBlake3 | ExclusionKind::HashSha256) && trimmed.len() != 64
     {
         return Err(ExclusionsError::Invalid(format!(
@@ -177,6 +201,19 @@ pub fn add(
             kind.as_str(),
             trimmed.len()
         )));
+    }
+    // Path kind: reject traversal segments at insert time. Per security
+    // review M2 a stored `..` would let a tampered row redirect the
+    // matcher at `/etc/passwd` even though the rule "looks like"
+    // `/home/me/safe`. Reject early.
+    if matches!(kind, ExclusionKind::Path) {
+        for seg in trimmed.split(['/', '\\']) {
+            if seg == ".." {
+                return Err(ExclusionsError::Invalid(
+                    "path exclusions must not contain `..` segments".into(),
+                ));
+            }
+        }
     }
     let now = now_utc_secs();
     conn.execute(
@@ -229,6 +266,24 @@ pub fn list(conn: &Connection) -> Result<Vec<Exclusion>, ExclusionsError> {
     Ok(out)
 }
 
+/// Same as [`list`] but only returns rules that are still active at
+/// `now_utc`. Used by the matcher to avoid re-checking expiry per-rule
+/// on the hot path (review MINOR — push the filter into SQL).
+pub fn list_active(conn: &Connection, now_utc: i64) -> Result<Vec<Exclusion>, ExclusionsError> {
+    let mut stmt = conn.prepare(
+        "SELECT id, kind, value, scope, expires_at_utc, created_at_utc, reason
+         FROM exclusions
+         WHERE expires_at_utc IS NULL OR expires_at_utc > ?1
+         ORDER BY created_at_utc DESC, id DESC",
+    )?;
+    let mut out = Vec::new();
+    let mut rows = stmt.query([now_utc])?;
+    while let Some(row) = rows.next()? {
+        out.push(row_to_exclusion(row)??);
+    }
+    Ok(out)
+}
+
 /// Snapshot every currently-active exclusion as a JSON array. Stored
 /// into `scans.exclusions_snap` per FR-062 so a re-run of an old scan
 /// uses the rules in force at the original scan time, not whatever the
@@ -250,11 +305,8 @@ pub fn matches(
     ctx: &MatchCtx<'_>,
 ) -> Result<Option<Exclusion>, ExclusionsError> {
     let now = now_utc_secs();
-    let rules = list(conn)?;
+    let rules = list_active(conn, now)?;
     for rule in rules {
-        if !rule.is_active(now) {
-            continue;
-        }
         let scope_ok = match ctx.scope {
             MatchScope::Scan => rule.scope.applies_to_scan(),
             MatchScope::Realtime => rule.scope.applies_to_realtime(),
@@ -266,6 +318,10 @@ pub fn matches(
             ExclusionKind::Path => path_eq_ignore_sep(&rule.value, ctx.path),
             ExclusionKind::Glob => glob_match(&rule.value, ctx.path),
             ExclusionKind::HashBlake3 => match ctx.blake3_hex {
+                // Note: a non-constant-time compare here is fine — file
+                // hashes are public inputs in this engine (they appear in
+                // threat-intel feeds), so timing leaks aren't a
+                // confidentiality concern (security review L4).
                 Some(h) => h.eq_ignore_ascii_case(&rule.value),
                 None => false,
             },
@@ -289,10 +345,14 @@ fn path_eq_ignore_sep(rule: &str, candidate: &str) -> bool {
     norm(rule) == norm(candidate) || norm(candidate).starts_with(&format!("{}/", norm(rule)))
 }
 
-/// Minimal glob matcher — supports `*` (any chars except `/`) and `?`
-/// (single non-separator char). Sufficient for FR-060 patterns like
-/// `**/node_modules/**` (we treat `**` as `*` since we walk recursively
-/// and the matcher is applied per-path).
+/// Glob matcher — supports:
+///   * `**` — any chars *including* path separators (deep wildcard)
+///   * `*`  — any chars within a single path segment (no `/`)
+///   * `?`  — single non-separator char
+///
+/// Per security review the prior version treated `**` as `*`, so
+/// `node_modules/**` wouldn't match a nested file. The matcher now
+/// distinguishes `*` from `**`.
 fn glob_match(pattern: &str, candidate: &str) -> bool {
     let p = pattern.replace('\\', "/").to_lowercase();
     let c = candidate.replace('\\', "/").to_lowercase();
@@ -300,25 +360,43 @@ fn glob_match(pattern: &str, candidate: &str) -> bool {
 }
 
 fn glob_inner(pat: &[u8], s: &[u8]) -> bool {
-    // Iterative backtracking glob; O(p + s) for `*`-only patterns.
+    // Iterative backtracking glob.
+    // `star_i` is the last `*` position whose match can be extended;
+    // `star_deep` records whether that star was the `**` (deep) form.
     let (mut i, mut j) = (0usize, 0usize);
-    let (mut star_i, mut match_j): (Option<usize>, usize) = (None, 0);
+    let mut star_i: Option<usize> = None;
+    let mut star_deep = false;
+    let mut match_j: usize = 0;
     while j < s.len() {
-        if i < pat.len() && (pat[i] == b'?' || pat[i] == s[j]) {
+        // Detect `**` and `*` lookahead.
+        if i < pat.len() && pat[i] == b'*' {
+            let deep = i + 1 < pat.len() && pat[i + 1] == b'*';
+            star_i = Some(i);
+            star_deep = deep;
+            i += if deep { 2 } else { 1 };
+            match_j = j;
+            continue;
+        }
+        if i < pat.len() && (pat[i] == b'?' && s[j] != b'/' || pat[i] == s[j]) {
             i += 1;
             j += 1;
-        } else if i < pat.len() && pat[i] == b'*' {
-            star_i = Some(i);
-            match_j = j;
-            i += 1;
         } else if let Some(si) = star_i {
-            i = si + 1;
+            // Backtrack to the last star and try matching one more
+            // character. A shallow `*` may not cross a `/`; `**` may.
             match_j += 1;
+            if match_j > s.len() {
+                return false;
+            }
+            if !star_deep && match_j > 0 && s[match_j - 1] == b'/' {
+                return false;
+            }
+            i = si + if star_deep { 2 } else { 1 };
             j = match_j;
         } else {
             return false;
         }
     }
+    // Skip any trailing `*`/`**` in the pattern.
     while i < pat.len() && pat[i] == b'*' {
         i += 1;
     }
@@ -496,12 +574,15 @@ mod tests {
     }
 
     #[test]
-    fn matches_glob_star() {
+    fn matches_glob_double_star_crosses_slashes() {
+        // `**` is the explicit deep-wildcard form and crosses path
+        // separators. Confirms the security-review fix: prior to it,
+        // `**` was silently downgraded to `*`.
         let conn = open_in_memory().unwrap();
         add(
             &conn,
             ExclusionKind::Glob,
-            "*node_modules*",
+            "**/node_modules/**",
             ExclusionScope::Both,
             None,
             None,
@@ -521,6 +602,38 @@ mod tests {
             scope: MatchScope::Scan,
         };
         assert!(matches(&conn, &miss).unwrap().is_none());
+    }
+
+    #[test]
+    fn matches_glob_single_star_stays_in_segment() {
+        // POSIX-strict: `*` matches within a single segment only.
+        // Documents the new behavior so a user-typed `*.log` doesn't
+        // accidentally allowlist `/etc/foo/passwd.log` plus everything
+        // under `/etc/`.
+        let conn = open_in_memory().unwrap();
+        add(
+            &conn,
+            ExclusionKind::Glob,
+            "*.log",
+            ExclusionScope::Both,
+            None,
+            None,
+        )
+        .unwrap();
+        let ctx_hit = MatchCtx {
+            path: "app.log",
+            blake3_hex: None,
+            sha256_hex: None,
+            scope: MatchScope::Scan,
+        };
+        assert!(matches(&conn, &ctx_hit).unwrap().is_some());
+        let ctx_miss = MatchCtx {
+            path: "/var/logs/app.log",
+            blake3_hex: None,
+            sha256_hex: None,
+            scope: MatchScope::Scan,
+        };
+        assert!(matches(&conn, &ctx_miss).unwrap().is_none());
     }
 
     #[test]

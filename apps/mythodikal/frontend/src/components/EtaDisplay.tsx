@@ -31,6 +31,17 @@ export const EtaDisplay = () => {
   };
 
   const running = () => scanState().kind === "running";
+  // The estimator returns null for the first ~3% of a scan (the
+  // baseline-monotone clamp warm-up). Show "calibrating…" only while
+  // we have at least one File event so a brand-new scan doesn't flash
+  // the calibrating string before any progress is reported.
+  const seenProgress = () => scanCounters().filesHashed > 0;
+
+  const placeholder = () => {
+    if (!running()) return "—";
+    if (!seenProgress()) return "starting…";
+    return "calibrating…";
+  };
 
   return (
     <div>
@@ -41,7 +52,7 @@ export const EtaDisplay = () => {
         when={running() && liveEta() !== null}
         fallback={
           <div class="font-mono text-lg tabular-nums text-myth-text-lo">
-            {running() ? "calibrating…" : "—"}
+            {placeholder()}
           </div>
         }
       >

@@ -37,6 +37,21 @@ interface ScanCounters {
   etaReceivedAt: number | null;
 }
 
+/** One throughput sample = files-per-second over the prior ~1 s window
+ *  plus the local timestamp. Stored in a fixed-length ring so the chart
+ *  renders a sliding window without unbounded growth on a long scan
+ *  (TASK-045). */
+export interface ThroughputSample {
+  tMs: number;
+  filesPerSec: number;
+  bytesPerSec: number;
+}
+
+/** Sliding window length. 30 samples × 1 s ≈ a 30 s view, which matches
+ *  the operator-feedback target ("show me the last half-minute of
+ *  activity"). Larger windows blur the spike that signals an I/O stall. */
+const THROUGHPUT_WINDOW = 30;
+
 const initialCounters: ScanCounters = {
   filesVisited: 0,
   filesHashed: 0,
@@ -51,15 +66,19 @@ const initialCounters: ScanCounters = {
 const [state, setState] = createSignal<ScanState>({ kind: "idle" });
 const [counters, setCounters] = createSignal<ScanCounters>(initialCounters);
 const [findings, setFindings] = createSignal<FindingView[]>([]);
+const [throughput, setThroughput] = createSignal<ThroughputSample[]>([]);
 
 export const scanState = state;
 export const scanCounters = counters;
 export const scanFindings = findings;
+/** Rolling files/sec + bytes/sec window for the Scan throughput chart. */
+export const scanThroughput = throughput;
 
 export async function startScan(request: ScanRequest): Promise<ScanId> {
   setState({ kind: "idle" });
   setCounters(initialCounters);
   setFindings([]);
+  setThroughput([]);
   const id = await scanStart(request);
   setState({ kind: "running", scanId: id, startedAt: Date.now() });
   return id;
@@ -72,6 +91,31 @@ export async function startScan(request: ScanRequest): Promise<ScanId> {
  */
 export function attachScanEvents(): void {
   const handles: Promise<UnlistenFn>[] = [];
+  // Sample throughput once per second from the counter deltas. We do
+  // this client-side rather than over the wire because the engine
+  // already throttles File events to 10 Hz; computing a per-second
+  // figure here is cheap and avoids inflating IPC traffic.
+  let lastSampleAt = Date.now();
+  let lastFiles = 0;
+  let lastBytes = 0;
+  const samplerId = setInterval(() => {
+    if (state().kind !== "running") return;
+    const now = Date.now();
+    const c = counters();
+    const dtS = Math.max(0.001, (now - lastSampleAt) / 1000);
+    const filesPerSec = Math.max(0, (c.filesHashed - lastFiles) / dtS);
+    const bytesPerSec = Math.max(0, (c.bytesVisited - lastBytes) / dtS);
+    lastSampleAt = now;
+    lastFiles = c.filesHashed;
+    lastBytes = c.bytesVisited;
+    setThroughput((prev) => {
+      const next = prev.concat([{ tMs: now, filesPerSec, bytesPerSec }]);
+      return next.length > THROUGHPUT_WINDOW
+        ? next.slice(next.length - THROUGHPUT_WINDOW)
+        : next;
+    });
+  }, 1000);
+  onCleanup(() => clearInterval(samplerId));
 
   handles.push(
     onScanStarted(() => {

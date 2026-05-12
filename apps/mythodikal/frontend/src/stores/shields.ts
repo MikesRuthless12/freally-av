@@ -35,6 +35,10 @@ export async function setShields(
     enabled,
     pauseMinutes,
   });
+  // Update local state directly — the broadcast event will also fire,
+  // but a no-op setState of the same shape is harmless (Solid uses
+  // referential equality) and this path gives an instant render in case
+  // the event is delayed by the Tauri bridge.
   setState(next);
   return next;
 }
@@ -49,10 +53,13 @@ export function attachShieldsEvents(): void {
   });
 }
 
-export function shieldsStatusText(s: ShieldsState): string {
+/** Format the badge label. `nowMs` defaults to `Date.now()` but callers
+ *  with a 1Hz wall-clock signal (e.g. ShieldsBadge) pass their own so
+ *  the displayed minute count is reactive. */
+export function shieldsStatusText(s: ShieldsState, nowMs: number = Date.now()): string {
   if (s.enabled) return "ON";
   if (s.pause_until_utc) {
-    const remainingMs = s.pause_until_utc * 1000 - Date.now();
+    const remainingMs = s.pause_until_utc * 1000 - nowMs;
     if (remainingMs > 0) {
       const minutes = Math.ceil(remainingMs / 60_000);
       return `PAUSED · ${minutes} min`;

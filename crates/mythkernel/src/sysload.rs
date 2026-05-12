@@ -13,7 +13,7 @@
 
 use std::time::{Duration, Instant};
 
-use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System};
+use sysinfo::{Pid, ProcessRefreshKind, ProcessesToUpdate, System};
 
 /// Minimum time between full-system CPU refreshes. The sysinfo crate
 /// computes CPU% as a delta between refreshes; refreshing too often
@@ -57,12 +57,20 @@ impl Default for SysLoadSampler {
 }
 
 impl SysLoadSampler {
+    /// Build a fresh sampler. **Takes a warm-up sample** because
+    /// `sysinfo` computes CPU% as a delta between refreshes — the very
+    /// first refresh always reads 0.0 / 0.0 regardless of true load.
+    /// The warm-up call here means a caller's first `observe()` is
+    /// already a useful number, not a misleading "machine is idle"
+    /// signal (review MAJOR — first sample is always 0%).
     pub fn new() -> Self {
-        Self {
+        let mut s = Self {
             system: System::new(),
             last_refresh: None,
             last_reading: None,
-        }
+        };
+        s.refresh_now();
+        s
     }
 
     /// Refresh the system reader and return the current load. Calls
@@ -75,20 +83,26 @@ impl SysLoadSampler {
                 return cached;
             }
         }
+        self.refresh_now()
+    }
 
+    fn refresh_now(&mut self) -> SysLoad {
+        // Only refresh our own process. Per security review L3 the
+        // prior `ProcessesToUpdate::All` enumerated every PID on the
+        // box — slow on a busy build server. We just want our own
+        // CPU% to subtract from the global figure.
+        let me_pid = Pid::from_u32(std::process::id());
         self.system.refresh_cpu_usage();
         self.system.refresh_processes_specifics(
-            ProcessesToUpdate::All,
+            ProcessesToUpdate::Some(&[me_pid]),
             true,
             ProcessRefreshKind::new().with_cpu(),
         );
 
         let global = self.system.global_cpu_usage();
-
-        let me = std::process::id();
         let mine = self
             .system
-            .process(sysinfo::Pid::from_u32(me))
+            .process(me_pid)
             .map(|p| p.cpu_usage())
             .unwrap_or(0.0);
 
@@ -96,7 +110,7 @@ impl SysLoadSampler {
             global_cpu_percent: global,
             mythodikal_cpu_percent: mine,
         };
-        self.last_refresh = Some(now);
+        self.last_refresh = Some(Instant::now());
         self.last_reading = Some(reading);
         reading
     }

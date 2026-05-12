@@ -20,6 +20,7 @@ import { FindingRow } from "@/components/FindingRow";
 import { PathDisplay } from "@/components/PathDisplay";
 import { ProgressBar } from "@/components/ProgressBar";
 import { StatusPill } from "@/components/StatusPill";
+import { ThroughputChart } from "@/components/ThroughputChart";
 
 const Scan: Component = () => {
   const [target, setTarget] = createSignal("");
@@ -176,6 +177,7 @@ const Scan: Component = () => {
             </div>
           </Show>
         </section>
+        <ThroughputChart />
       </Show>
 
       <Show when={error()}>

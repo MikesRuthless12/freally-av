@@ -15,9 +15,11 @@ use tokio::sync::broadcast;
 use crate::detect::{DetectionPipeline, FileCtx, PipelineOutcome, blake3_hex_to_bytes};
 use crate::error::EngineError;
 use crate::eta::{EtaEstimator, Progress as EtaSample};
+use crate::exclusions::{self, MatchCtx, MatchScope};
 use crate::hasher::Hasher;
 use crate::history::{self, ScanStatus};
 use crate::scan::{ScanHandle, ScanOptions, ScanProgress, ScanTarget};
+use crate::throttle::{AdaptiveThrottle, Throttle};
 use crate::walker::{FileWalker, PosixWalker, WalkEvent, WalkOpts};
 
 /// The default progress-channel capacity. Subscribers that lag past this
@@ -66,23 +68,30 @@ impl ScanEngine {
         let target_kind = target.kind();
         let trigger = opts.trigger;
 
-        let scan_id = {
+        let (scan_id, exclusions_snap) = {
             let conn = self
                 .db
                 .lock()
                 .map_err(|_| EngineError::Db(crate::db::DbError::Poisoned.to_string()))?;
-            history::create_scan(
+            // FR-062: snapshot the rule set in force at this moment into
+            // `scans.exclusions_snap` so rerunning the scan later uses these
+            // rules, not whatever the user has configured then.
+            let snap = exclusions::snapshot_active_json(&conn)
+                .map_err(|e| EngineError::Db(e.to_string()))?;
+            let id = history::create_scan(
                 &conn,
                 started_at_utc,
                 trigger,
                 target_kind,
                 &target_paths_json,
-                "[]",
+                &snap,
                 self.engine_version,
                 "{}",
             )
-            .map_err(|e| EngineError::Db(e.to_string()))?
+            .map_err(|e| EngineError::Db(e.to_string()))?;
+            (id, snap)
         };
+        let _ = exclusions_snap; // reserved for future per-scan matcher
 
         let (tx, rx) = broadcast::channel(PROGRESS_CHANNEL_CAPACITY);
         let _ = tx.send(ScanProgress::Started {
@@ -134,16 +143,59 @@ impl ScanEngine {
                 }
             }
 
-            // Phase B — hash + detect pass with live ETA.
+            // Phase B — hash + detect pass with live ETA + adaptive throttle.
+            //
+            // FR-061 + FR-062 (TASK-042): consult `exclusions::matches()`
+            // before hashing. Path/glob hits skip the file entirely (no
+            // hash, no detect). Hash-keyed hits run after hashing because
+            // we need the digest to compare.
+            //
+            // TASK-039: the AdaptiveThrottle decides how aggressively we
+            // should yield to other processes. Phase-4 ships a simple
+            // yield-between-files heuristic: at full throttle (idle box)
+            // we don't sleep; under high external load we sleep ~50 ms
+            // per file so foreground apps stay responsive. Multi-worker
+            // rayon parallelism is TASK-053 (Phase 5).
             let mut files_visited: i64 = 0;
             let mut files_hashed: i64 = 0;
             let mut bytes_visited: i64 = 0;
             let mut findings_count: i64 = 0;
             let mut estimator = EtaEstimator::new();
+            let throttle_base = Throttle::default();
+            let mut throttle = AdaptiveThrottle::new(throttle_base);
 
             for (path, size) in worklist {
                 files_visited += 1;
                 bytes_visited += size as i64;
+
+                // Path/glob exclusion check first — if hit, skip this file
+                // entirely (don't hash, don't detect).
+                let path_str = path.to_string_lossy();
+                let path_excluded = match db.lock() {
+                    Ok(conn) => exclusions::matches(
+                        &conn,
+                        &MatchCtx {
+                            path: path_str.as_ref(),
+                            blake3_hex: None,
+                            sha256_hex: None,
+                            scope: MatchScope::Scan,
+                        },
+                    )
+                    .ok()
+                    .flatten(),
+                    Err(_) => None,
+                };
+                if path_excluded.is_some() {
+                    // Pre-hash skip — files_visited still increments so the
+                    // user sees us advance through the tree.
+                    continue;
+                }
+
+                // Adaptive yield per TASK-039. `current_workers()` returns
+                // [1..=max_workers]; we map that to a per-file sleep so
+                // the engine self-throttles under interactive load.
+                yield_per_throttle(&mut throttle);
+
                 match hasher.hash_file(&path) {
                     Ok(result) => {
                         files_hashed += 1;
@@ -249,6 +301,24 @@ fn now_utc() -> i64 {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0)
+}
+
+/// Map the AdaptiveThrottle's "current workers" reading to a per-file
+/// sleep that lets the user's foreground apps stay responsive. At full
+/// throttle we don't sleep; at 1 worker (high external load) we sleep
+/// 50 ms between files.
+fn yield_per_throttle(throttle: &mut AdaptiveThrottle) {
+    let max = throttle.base().max_workers as i64;
+    let now_workers = throttle.current_workers() as i64;
+    if now_workers >= max {
+        return;
+    }
+    // Linear ramp: full throttle → 0 ms, 1 worker → ~50 ms.
+    let denom = (max - 1).max(1);
+    let scale = ((max - now_workers) * 50) / denom;
+    if scale > 0 {
+        std::thread::sleep(std::time::Duration::from_millis(scale as u64));
+    }
 }
 
 /// Build a [`FileCtx`] from the hasher's hex output and evaluate the

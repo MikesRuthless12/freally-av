@@ -161,22 +161,25 @@ impl ShieldsBroker {
 
     /// Snapshot the current state, applying any expired-pause
     /// resolution so callers always see a consistent view.
+    ///
+    /// **Note (security review L1):** the auto-resume disk write only
+    /// fires when `resolved != prior` so a UI badge that polls
+    /// `shields_get` at 10 Hz does not rewrite `shields.json` repeatedly.
     pub fn get(&self) -> ShieldsState {
         let now = now_utc();
         let mut guard = self.inner.lock().expect("shields lock poisoned");
-        let resolved = guard.state.resolved_at(now);
-        if resolved != guard.state {
+        let prior = guard.state;
+        let resolved = prior.resolved_at(now);
+        if resolved != prior {
             guard.state = resolved;
-            // Best-effort persist + audit. A failed write here means
-            // the next start will repeat the resolution; not fatal.
+            // Persist the resolved (resumed) state. Audit preserves the
+            // ORIGINAL `prior` (with the expired pause_until_utc intact)
+            // so the trail reflects what actually expired.
             let _ = write_atomic(&self.data_dir.join(SHIELDS_FILE), &resolved);
             let _ = append_audit(
                 &self.data_dir.join(AUDIT_FILE),
                 ShieldsActor::AutoResume,
-                ShieldsState {
-                    enabled: false,
-                    pause_until_utc: Some(now),
-                },
+                prior,
                 resolved,
                 now,
             );
@@ -189,6 +192,11 @@ impl ShieldsBroker {
     /// `enabled = false` with `pause_minutes = None` is the "until I
     /// turn it back on" form; `Some(n)` schedules an auto-resume at
     /// `now + n` minutes.
+    ///
+    /// **Atomicity (security review H2):** the mutex is held across the
+    /// disk write, audit append, and broadcast send so that concurrent
+    /// callers can't observe an in-memory/disk/broadcast disagreement.
+    /// Two racing `set()` calls now serialize cleanly.
     pub fn set(
         &self,
         enabled: bool,
@@ -210,12 +218,11 @@ impl ShieldsBroker {
                 pause_until_utc: pause_minutes.map(|m| now + (m as i64) * 60),
             }
         };
-        let prior = {
-            let mut guard = self.inner.lock().expect("shields lock poisoned");
-            let prior = guard.state;
-            guard.state = new_state;
-            prior
-        };
+        let mut guard = self.inner.lock().expect("shields lock poisoned");
+        let prior = guard.state;
+        // Disk + audit + broadcast all happen under the lock so a racing
+        // caller can't observe in-memory state ahead of (or behind) the
+        // persisted state.
         write_atomic(&self.data_dir.join(SHIELDS_FILE), &new_state)?;
         append_audit(
             &self.data_dir.join(AUDIT_FILE),
@@ -224,6 +231,11 @@ impl ShieldsBroker {
             new_state,
             now,
         )?;
+        guard.state = new_state;
+        // Send under the lock — broadcast is a non-blocking channel
+        // operation so this doesn't materially extend the critical
+        // section, and ordering of `shields:changed` events now matches
+        // the on-disk state machine exactly.
         let _ = self.tx.send(new_state);
         Ok(new_state)
     }
