@@ -53,3 +53,9 @@ vision.json
 
 # Session-local Claude Code state (do not commit)
 .claude/
+
+# IP scrub (2026-05-11) — pulled out of git history via filter-branch.
+# Reference these locally only; never re-add to the public repo.
+docs/prd.md
+docs/product-vision.md
+SECURITY.md
