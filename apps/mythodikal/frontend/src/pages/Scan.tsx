@@ -15,6 +15,7 @@ import {
   scanState,
   startScan,
 } from "@/stores/scan";
+import { EtaDisplay } from "@/components/EtaDisplay";
 import { FindingRow } from "@/components/FindingRow";
 import { PathDisplay } from "@/components/PathDisplay";
 import { ProgressBar } from "@/components/ProgressBar";
@@ -132,7 +133,7 @@ const Scan: Component = () => {
             Progress
           </h2>
           <ProgressBar done={scanCounters().filesVisited} total={null} />
-          <div class="mt-3 grid grid-cols-3 gap-4 text-sm text-myth-text-md">
+          <div class="mt-3 grid grid-cols-4 gap-4 text-sm text-myth-text-md">
             <Stat
               label="Files visited"
               value={scanCounters().filesVisited.toLocaleString("en-US")}
@@ -145,6 +146,7 @@ const Scan: Component = () => {
               label="Findings"
               value={scanCounters().findingsCount.toLocaleString("en-US")}
             />
+            <EtaDisplay />
           </div>
           <div class="mt-3">
             <div class="text-xs uppercase tracking-wide text-myth-text-lo">

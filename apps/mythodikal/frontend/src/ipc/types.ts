@@ -156,7 +156,14 @@ export interface EngineVersionInfo {
 
 export type ScanProgress =
   | { kind: "started"; scan_id: ScanId; started_at_utc: number }
-  | { kind: "file"; path: string; blake3: string; size: number }
+  | {
+      kind: "file";
+      path: string;
+      blake3: string;
+      size: number;
+      /** ETA in seconds (post-3%-baseline clamp). null while warming up. */
+      eta_secs: number | null;
+    }
   | {
       kind: "finding";
       scan_id: ScanId;

@@ -14,6 +14,7 @@ use tokio::sync::broadcast;
 
 use crate::detect::{DetectionPipeline, FileCtx, PipelineOutcome, blake3_hex_to_bytes};
 use crate::error::EngineError;
+use crate::eta::{EtaEstimator, Progress as EtaSample};
 use crate::hasher::Hasher;
 use crate::history::{self, ScanStatus};
 use crate::scan::{ScanHandle, ScanOptions, ScanProgress, ScanTarget};
@@ -105,56 +106,84 @@ impl ScanEngine {
         let worker = tokio::task::spawn_blocking(move || {
             let walker = PosixWalker::new();
 
-            let mut files_visited: i64 = 0;
-            let mut files_hashed: i64 = 0;
-            let mut bytes_visited: i64 = 0;
-            let mut findings_count: i64 = 0;
-
+            // Phase A — enumeration pass (TASK-038 ETA + early TASK-137).
+            //
+            // We need files_total + bytes_total before the hash loop so the
+            // ETA estimator has a denominator to compute "seconds remaining"
+            // against. For Phase 4 this is a serial pre-walk; FR-135 calls
+            // for concurrent producer-consumer enumeration (TASK-137, Phase
+            // 5), which will replace this pre-walk with a streaming worklist.
+            // Until then, we accept paying for one extra walkdir pass.
+            let mut files_total: u64 = 0;
+            let mut bytes_total: u64 = 0;
+            let mut worklist: Vec<(std::path::PathBuf, u64)> = Vec::new();
             for root in target_for_worker.paths() {
                 let event_rx = walker.walk(root, walk_opts.clone());
                 for event in event_rx.iter() {
                     match event {
                         WalkEvent::File { path, size, .. } => {
-                            files_visited += 1;
-                            bytes_visited += size as i64;
-                            match hasher.hash_file(&path) {
-                                Ok(result) => {
-                                    files_hashed += 1;
-                                    let _ = tx_for_worker.send(ScanProgress::File {
-                                        path: path.clone(),
-                                        blake3: result.blake3.clone(),
-                                        size: result.size,
-                                    });
-
-                                    // Run the detection pipeline. Empty pipeline
-                                    // short-circuits without touching FileCtx,
-                                    // so the zero-detector default case has no
-                                    // per-file overhead.
-                                    if !pipeline.is_empty() {
-                                        evaluate_pipeline(
-                                            &pipeline,
-                                            &db,
-                                            &tx_for_worker,
-                                            scan_id,
-                                            &path,
-                                            size,
-                                            &result,
-                                            &mut findings_count,
-                                        );
-                                    }
-                                }
-                                Err(err) => {
-                                    let _ = tx_for_worker.send(ScanProgress::Error {
-                                        path: path.clone(),
-                                        message: err.to_string(),
-                                    });
-                                }
-                            }
+                            files_total += 1;
+                            bytes_total = bytes_total.saturating_add(size);
+                            worklist.push((path, size));
                         }
                         WalkEvent::Error { path, message } => {
                             let _ = tx_for_worker.send(ScanProgress::Error { path, message });
                         }
                         WalkEvent::Skipped { .. } => {}
+                    }
+                }
+            }
+
+            // Phase B — hash + detect pass with live ETA.
+            let mut files_visited: i64 = 0;
+            let mut files_hashed: i64 = 0;
+            let mut bytes_visited: i64 = 0;
+            let mut findings_count: i64 = 0;
+            let mut estimator = EtaEstimator::new();
+
+            for (path, size) in worklist {
+                files_visited += 1;
+                bytes_visited += size as i64;
+                match hasher.hash_file(&path) {
+                    Ok(result) => {
+                        files_hashed += 1;
+                        let sample = EtaSample {
+                            files_done: files_visited as u64,
+                            files_total: Some(files_total),
+                            bytes_done: bytes_visited as u64,
+                            bytes_total: Some(bytes_total),
+                            now: Instant::now(),
+                        };
+                        let eta_secs = estimator.observe(sample);
+                        let _ = tx_for_worker.send(ScanProgress::File {
+                            path: path.clone(),
+                            blake3: result.blake3.clone(),
+                            size: result.size,
+                            eta_secs,
+                        });
+
+                        // Run the detection pipeline. Empty pipeline
+                        // short-circuits without touching FileCtx, so
+                        // the zero-detector default case has no per-file
+                        // overhead.
+                        if !pipeline.is_empty() {
+                            evaluate_pipeline(
+                                &pipeline,
+                                &db,
+                                &tx_for_worker,
+                                scan_id,
+                                &path,
+                                size,
+                                &result,
+                                &mut findings_count,
+                            );
+                        }
+                    }
+                    Err(err) => {
+                        let _ = tx_for_worker.send(ScanProgress::Error {
+                            path: path.clone(),
+                            message: err.to_string(),
+                        });
                     }
                 }
             }

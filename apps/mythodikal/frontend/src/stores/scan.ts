@@ -30,6 +30,11 @@ interface ScanCounters {
   bytesVisited: number;
   currentPath: string | null;
   lastError: string | null;
+  /** Calibrated ETA seconds from the engine (null while warming up). */
+  etaSecs: number | null;
+  /** Local timestamp (ms) when the most recent ETA was received — used
+   *  by the UI to count down between engine events. */
+  etaReceivedAt: number | null;
 }
 
 const initialCounters: ScanCounters = {
@@ -39,6 +44,8 @@ const initialCounters: ScanCounters = {
   bytesVisited: 0,
   currentPath: null,
   lastError: null,
+  etaSecs: null,
+  etaReceivedAt: null,
 };
 
 const [state, setState] = createSignal<ScanState>({ kind: "idle" });
@@ -81,6 +88,8 @@ export function attachScanEvents(): void {
         filesHashed: c.filesHashed + 1,
         bytesVisited: c.bytesVisited + payload.size,
         currentPath: payload.path,
+        etaSecs: payload.eta_secs,
+        etaReceivedAt: payload.eta_secs !== null ? Date.now() : c.etaReceivedAt,
       }));
     }),
   );

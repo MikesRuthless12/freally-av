@@ -88,6 +88,12 @@ pub enum ScanProgress {
         path: PathBuf,
         blake3: String,
         size: u64,
+        /// Calibrated ETA in seconds, post-3%-baseline-clamp per FR-085 /
+        /// TASK-038. `None` while the estimator is still warming up (first
+        /// sample, or before file/byte totals are known). UI formats as
+        /// `Hh Mm Ss` counting down (see frontend `formatEta`).
+        #[serde(default)]
+        eta_secs: Option<f64>,
     },
     /// A detector matched the file. Carries the persisted `findings.id` so
     /// the UI can request follow-up actions (quarantine, ignore) without
