@@ -207,7 +207,6 @@ impl JournalSubscriber {
     pub fn subscribe(&self) -> impl Stream<Item = JournalEvent> + Send + 'static {
         let (tx, rx) = mpsc::unbounded::<JournalEvent>();
         let volume_root = self.volume_root.clone();
-        let journal = self.journal;
         let cursor_root = self.cursor_root.clone();
         let cache = self.cache.clone();
         let renames = RenameTable::default();
@@ -216,15 +215,9 @@ impl JournalSubscriber {
         std::thread::Builder::new()
             .name("mythkernel-journal/subscribe".into())
             .spawn(move || {
-                if let Err(err) = subscribe_thread(
-                    &volume_root,
-                    &journal,
-                    cursor,
-                    &cursor_root,
-                    &cache,
-                    &renames,
-                    &tx,
-                ) {
+                if let Err(err) =
+                    subscribe_thread(&volume_root, cursor, &cursor_root, &cache, &renames, &tx)
+                {
                     tracing::warn!(error = %err, "subscribe loop exited");
                 }
             })
@@ -372,19 +365,8 @@ fn drain_until_thread(
             if rec.usn >= end_usn {
                 continue;
             }
-            if let Some(event) = handle_record(
-                &handle,
-                &rec,
-                cache,
-                renames,
-                &JournalState {
-                    journal_id: local.journal_id,
-                    first_usn: 0,
-                    next_usn: end_usn,
-                    lowest_valid_usn: 0,
-                    max_usn: 0,
-                },
-            ) && tx.unbounded_send(event).is_err()
+            if let Some(event) = handle_record(&handle, &rec, cache, renames)
+                && tx.unbounded_send(event).is_err()
             {
                 return Ok(());
             }
@@ -405,7 +387,6 @@ fn drain_until_thread(
 
 fn subscribe_thread(
     volume_root: &Path,
-    journal: &JournalState,
     cursor: Arc<Mutex<VolumeCursor>>,
     cursor_root: &Path,
     cache: &PathCache,
@@ -481,7 +462,7 @@ fn subscribe_thread(
             }
 
             for rec in UsnRecordIter::after_initial_frn(&buf[..bytes]) {
-                if let Some(event) = handle_record(&handle, &rec, cache, renames, journal)
+                if let Some(event) = handle_record(&handle, &rec, cache, renames)
                     && tx.unbounded_send(event).is_err()
                 {
                     return Ok(());
@@ -524,7 +505,6 @@ fn handle_record(
     rec: &ParsedUsnRecord,
     cache: &PathCache,
     renames: &RenameTable,
-    _journal: &JournalState,
 ) -> Option<JournalEvent> {
     // Skip NTFS reserved entries.
     let frn_low = rec.file_ref & 0x0000_FFFF_FFFF_FFFF;

@@ -50,6 +50,10 @@ pub mod subscriber;
 pub use cursor::{CursorError, WatchBackend, WatchCursor};
 pub use event::{JournalError, JournalEvent};
 
+// `subscribe()` + the non-Create variants of `JournalEvent` aren't consumed
+// in Phase 5 wave 1 — only `bootstrap()` powers the fast walker. Phase 8
+// (`mythd-linux` fanotify daemon) will consume `subscribe()`. Intentionally
+// retained vendored as-is.
 #[cfg(target_os = "linux")]
 pub use subscriber::{JournalSubscriber, open, open_with_cursor_root};
 

@@ -39,6 +39,10 @@ pub mod subscriber;
 pub use cursor::{CursorError, StreamCursor};
 pub use event::{JournalError, JournalEvent};
 
+// `subscribe()` + the non-Create variants of `JournalEvent` aren't consumed
+// in Phase 5 wave 1 — only `bootstrap()` powers the fast walker. Phase 9
+// (`mythd-macos` ESF NOTIFY-only daemon) will consume `subscribe()`.
+// Intentionally retained vendored as-is.
 #[cfg(target_os = "macos")]
 pub use subscriber::{JournalSubscriber, open, open_with_cursor_root};
 

@@ -61,6 +61,10 @@ windows = { version = "0.62", features = [
 
 # TASK-050 — FSEvents subscriber for the macOS bootstrap walker.
 # Vendored from Sourcerer's sourcerer-journal-mac crate.
+#
+# Sec-review L3 (deferred): `fsevent-sys` is on 4.x; the current crate is
+# 5.x. No known RUSTSEC advisories on 4.x as of 2026-05; bump in a
+# follow-up Phase 5 wave alongside other dep-current passes.
 [target.'cfg(target_os = "macos")'.dependencies]
 core-foundation = "0.10"
 core-foundation-sys = "0.8"

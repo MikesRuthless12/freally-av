@@ -26,6 +26,19 @@ use super::flags::{
 
 const READ_BUFFER_BYTES: usize = 64 * 1024;
 const POLL_TIMEOUT_MS: i32 = 100;
+/// How long a `pending_renames` half lives before the subscriber declares
+/// it orphaned and emits a synthetic `Delete`. Long enough to survive
+/// cross-`read()`-batch rename pairs (the kernel typically delivers both
+/// halves within microseconds even when split across reads), short enough
+/// that an actual orphaned half doesn't sit pinned in memory indefinitely.
+const RENAME_PAIRING_TTL: std::time::Duration = std::time::Duration::from_millis(500);
+/// Hard cap on the `pending_renames` table — sec-review M2 mitigation. An
+/// attacker producing unmatched `IN_MOVED_FROM` events at high rate (file
+/// renames out of the watched tree) could otherwise pin a few MiB of
+/// `PathBuf` over the TTL window. When the cap is hit, the oldest entry
+/// is evicted as a synthetic `Delete` so memory stays bounded regardless
+/// of input rate.
+const MAX_PENDING_RENAMES: usize = 4096;
 
 pub struct JournalSubscriber {
     root: PathBuf,
@@ -192,7 +205,12 @@ fn subscribe_inotify(
     let mut wd_to_path: HashMap<i32, PathBuf> = HashMap::new();
     add_watch_recursive(&inotify, root, &mut wd_to_path)?;
 
-    let mut pending_renames: HashMap<u32, PathBuf> = HashMap::new();
+    // Pending rename halves keyed by inotify cookie. Entries carry their
+    // arrival timestamp so cross-batch rename pairs survive: only halves
+    // older than `RENAME_PAIRING_TTL` get flushed to `Delete` at end of
+    // batch (review fix — Sourcerer's vendored end-of-batch flush
+    // converted legit batch-straddling renames to spurious Delete+Create).
+    let mut pending_renames: HashMap<u32, (PathBuf, std::time::Instant)> = HashMap::new();
 
     let mut buf = vec![0u8; READ_BUFFER_BYTES];
 
@@ -316,7 +334,20 @@ fn subscribe_inotify(
                     };
                     let path = parent.join(&ev.name);
                     if ev.cookie != 0 {
-                        pending_renames.insert(ev.cookie, path);
+                        // Sec-review M2: enforce the entry-count cap before
+                        // inserting. Evict the oldest entry as a synthetic
+                        // Delete so memory stays bounded under attack.
+                        if pending_renames.len() >= MAX_PENDING_RENAMES
+                            && let Some((oldest_cookie, _)) = pending_renames
+                                .iter()
+                                .min_by_key(|(_, (_, t))| *t)
+                                .map(|(c, (p, t))| (*c, (p.clone(), *t)))
+                            && let Some((evicted_path, _)) = pending_renames.remove(&oldest_cookie)
+                        {
+                            let _ = tx.unbounded_send(JournalEvent::Delete { path: evicted_path });
+                            emitted = emitted.saturating_add(1);
+                        }
+                        pending_renames.insert(ev.cookie, (path, std::time::Instant::now()));
                     } else if !flags::is_dir_inotify(ev.mask) {
                         if tx.unbounded_send(JournalEvent::Delete { path }).is_err() {
                             return Ok(());
@@ -331,7 +362,7 @@ fn subscribe_inotify(
                     };
                     let new_path = parent.join(&ev.name);
                     let is_dir = flags::is_dir_inotify(ev.mask);
-                    if let Some(old_path) = pending_renames.remove(&ev.cookie) {
+                    if let Some((old_path, _t)) = pending_renames.remove(&ev.cookie) {
                         if is_dir {
                             if let Some((wd, _)) = wd_to_path
                                 .iter()
@@ -360,10 +391,28 @@ fn subscribe_inotify(
             }
         }
 
+        // Age out rename halves older than the pairing TTL — a legit
+        // cross-batch rename (MOVED_FROM in batch N, MOVED_TO in batch
+        // N+1) now survives the boundary; only truly orphaned halves
+        // (the matching MOVED_TO never arrived because the file was
+        // renamed out of the watch tree) degrade to a `Delete` event.
         if !pending_renames.is_empty() {
-            for (_cookie, old_path) in pending_renames.drain() {
-                let _ = tx.unbounded_send(JournalEvent::Delete { path: old_path });
-                emitted = emitted.saturating_add(1);
+            let now = std::time::Instant::now();
+            let stale_cookies: Vec<u32> = pending_renames
+                .iter()
+                .filter_map(|(cookie, (_, ts))| {
+                    if now.duration_since(*ts) >= RENAME_PAIRING_TTL {
+                        Some(*cookie)
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            for cookie in stale_cookies {
+                if let Some((old_path, _)) = pending_renames.remove(&cookie) {
+                    let _ = tx.unbounded_send(JournalEvent::Delete { path: old_path });
+                    emitted = emitted.saturating_add(1);
+                }
             }
         }
 

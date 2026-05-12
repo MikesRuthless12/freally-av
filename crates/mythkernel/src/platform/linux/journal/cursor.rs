@@ -2,6 +2,18 @@
 //!
 //! Cursors live under `$XDG_DATA_HOME/mythodikal/journal/<root_hash>.json`
 //! (defaults to `~/.local/share/mythodikal/journal/`).
+//!
+//! **Sec-review M1 (deferred to Phase 8):** a tampered cursor with
+//! `bootstrap_complete = true` and valid-shape `device`/`root` causes the
+//! engine to skip the initial filesystem walk on Linux, missing
+//! pre-existing files. The full mitigation is HMAC over the cursor body
+//! using a per-install key from the OS keyring (`crate::quarantine`'s
+//! existing keyring integration extends naturally). Phase 5 wave 1 does
+//! NOT yet consume `bootstrap_complete` for resume decisions — the
+//! `NtfsWalker` adapter always calls `bootstrap()` regardless. The
+//! tamper vector lights up only once Phase 8's `mythd-linux` daemon
+//! starts honoring `bootstrap_complete` for restart-resume. Address
+//! before that consumer lands.
 
 use std::path::{Path, PathBuf};
 

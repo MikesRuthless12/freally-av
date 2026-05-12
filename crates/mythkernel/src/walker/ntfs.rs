@@ -67,30 +67,74 @@ impl FileWalker for NtfsWalker {
 
 #[cfg(any(windows, target_os = "macos", target_os = "linux"))]
 fn path_is_under_root(path: &Path, root: &Path) -> bool {
+    // Fast path: byte-for-byte component prefix match works for every
+    // sane case-sensitive comparison (Linux + macOS native, Windows
+    // when the cases happen to line up).
     if path.starts_with(root) {
         return true;
     }
     // Windows drive-root case: `C:\` is the prefix of every path on the
-    // volume already, but `path.starts_with("C:\\")` returns false for
-    // `C:\Users\foo` on some path forms. Compare lossy lowercase strings
-    // as a fallback.
-    let p = path.to_string_lossy().to_ascii_lowercase();
-    let r = root.to_string_lossy().to_ascii_lowercase();
-    let r_norm = r.trim_end_matches(['\\', '/']).to_string();
-    if r_norm.is_empty() {
-        return true;
+    // volume but `path.starts_with("C:\\")` may return false for some
+    // path forms (8.3 names, mixed-case). Use a wide-char case-folded
+    // comparison rather than `to_string_lossy()` so non-UTF-16 bytes
+    // can't confuse the prefix check (sec-review L1).
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStrExt;
+        let p_wide: Vec<u16> = path
+            .as_os_str()
+            .encode_wide()
+            .map(|c| {
+                // Windows path comparison is ASCII-case-insensitive on
+                // drive letters and POSIX path separators; we lowercase
+                // ASCII range only and leave higher code points alone
+                // so non-ASCII path segments remain byte-exact.
+                if (b'A' as u16..=b'Z' as u16).contains(&c) {
+                    c + 32
+                } else {
+                    c
+                }
+            })
+            .collect();
+        let r_wide: Vec<u16> = root
+            .as_os_str()
+            .encode_wide()
+            .map(|c| {
+                if (b'A' as u16..=b'Z' as u16).contains(&c) {
+                    c + 32
+                } else {
+                    c
+                }
+            })
+            .collect();
+        let r_norm: &[u16] = match r_wide.split_last() {
+            Some((last, head)) if *last == b'\\' as u16 || *last == b'/' as u16 => head,
+            _ => &r_wide,
+        };
+        if r_norm.is_empty() {
+            return true;
+        }
+        // Drive root case: `c:` matches everything on the drive.
+        if r_norm.len() == 2 && r_norm[1] == b':' as u16 && p_wide.starts_with(r_norm) {
+            return true;
+        }
+        if !p_wide.starts_with(r_norm) {
+            return false;
+        }
+        if p_wide.len() == r_norm.len() {
+            return true;
+        }
+        let next = p_wide[r_norm.len()];
+        next == b'\\' as u16 || next == b'/' as u16
     }
-    if r_norm.len() == 2 && r_norm.ends_with(':') && p.starts_with(&r_norm) {
-        return true;
+    #[cfg(not(windows))]
+    {
+        // Non-Windows: paths are case-sensitive and `Path::starts_with`
+        // already handled the only correct match. Anything that fell
+        // through is not under root.
+        let _ = (path, root);
+        false
     }
-    if !p.starts_with(&r_norm) {
-        return false;
-    }
-    if p.len() == r_norm.len() {
-        return true;
-    }
-    let next = p.as_bytes()[r_norm.len()];
-    next == b'\\' || next == b'/'
 }
 
 #[cfg(any(windows, target_os = "macos", target_os = "linux"))]

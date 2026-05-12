@@ -39,4 +39,9 @@ pub mod subscriber;
 
 pub use cursor::{CursorError, VolumeCursor};
 pub use event::{JournalError, JournalEvent};
+// `subscribe()` + the realtime-event variants of `JournalEvent` aren't yet
+// consumed by Mythodikal — Phase 5 wave 1 only uses `bootstrap()` for the
+// fast walker. Phase 12 (`mythd-windows` real-time service) will consume
+// `subscribe()`. Intentionally retained vendored as-is so the daemon
+// pull-up doesn't redo this work.
 pub use subscriber::{JournalSubscriber, open, open_with_cursor_root};

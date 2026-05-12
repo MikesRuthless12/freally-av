@@ -193,28 +193,53 @@ mod windows_impl {
     }
 
     fn path_is_under_root(path: &Path, root: &Path) -> bool {
-        let p = path.to_string_lossy();
-        let r = root.to_string_lossy();
-        if r.is_empty() {
+        // Fast path: byte-for-byte component prefix match.
+        if path.starts_with(root) {
             return true;
         }
-        let p_lower = p.to_ascii_lowercase();
-        let r_lower = r.to_ascii_lowercase();
-        let r_normalized = r_lower.trim_end_matches('\\').to_string();
-        if r_normalized.len() == 2
-            && r_normalized.ends_with(':')
-            && p_lower.starts_with(&r_normalized)
-        {
+        // Windows drive-root fallback — wide-char ASCII-case-fold so non-UTF-16
+        // bytes can't confuse the prefix check (sec-review L1).
+        use std::os::windows::ffi::OsStrExt;
+        let p_wide: Vec<u16> = path
+            .as_os_str()
+            .encode_wide()
+            .map(|c| {
+                if (b'A' as u16..=b'Z' as u16).contains(&c) {
+                    c + 32
+                } else {
+                    c
+                }
+            })
+            .collect();
+        let r_wide: Vec<u16> = root
+            .as_os_str()
+            .encode_wide()
+            .map(|c| {
+                if (b'A' as u16..=b'Z' as u16).contains(&c) {
+                    c + 32
+                } else {
+                    c
+                }
+            })
+            .collect();
+        let r_norm: &[u16] = match r_wide.split_last() {
+            Some((last, head)) if *last == b'\\' as u16 || *last == b'/' as u16 => head,
+            _ => &r_wide,
+        };
+        if r_norm.is_empty() {
             return true;
         }
-        if !p_lower.starts_with(&r_normalized) {
+        if r_norm.len() == 2 && r_norm[1] == b':' as u16 && p_wide.starts_with(r_norm) {
+            return true;
+        }
+        if !p_wide.starts_with(r_norm) {
             return false;
         }
-        if p_lower.len() == r_normalized.len() {
+        if p_wide.len() == r_norm.len() {
             return true;
         }
-        let next_byte = p_lower.as_bytes()[r_normalized.len()];
-        next_byte == b'\\' || next_byte == b'/'
+        let next = p_wide[r_norm.len()];
+        next == b'\\' as u16 || next == b'/' as u16
     }
 
     fn depth_under_root(path: &Path, root: &Path) -> usize {

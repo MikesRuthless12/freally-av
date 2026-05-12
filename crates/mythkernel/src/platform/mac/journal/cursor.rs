@@ -1,6 +1,13 @@
 //! Per-watch FSEvents stream cursor — vendored from Sourcerer.
 //!
 //! Cursors live under `~/Library/Application Support/Mythodikal/journal/<root_hash>.json`.
+//!
+//! **Sec-review M1 (deferred to Phase 9):** a tampered cursor with
+//! `bootstrap_complete = true` and valid-shape `device`/`root` causes the
+//! engine to skip the initial filesystem walk on macOS, missing
+//! pre-existing files. Mitigation deferred to Phase 9 — see the matching
+//! comment in `platform/linux/journal/cursor.rs`. Phase 5 wave 1 does
+//! NOT yet consume `bootstrap_complete` for resume decisions.
 
 use std::path::{Path, PathBuf};
 
