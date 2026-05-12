@@ -10,7 +10,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use rusqlite::Connection;
 
-const MIGRATIONS: &[(i64, &str)] = &[(1, include_str!("../migrations/0001_initial.sql"))];
+const MIGRATIONS: &[(i64, &str)] = &[
+    (1, include_str!("../migrations/0001_initial.sql")),
+    (2, include_str!("../migrations/0002_quarantine_batches.sql")),
+];
 
 #[derive(Debug, thiserror::Error)]
 pub enum DbError {
@@ -144,6 +147,7 @@ mod tests {
             "exclusions",
             "findings",
             "quarantine",
+            "quarantine_batches",
             "scans",
             "schema_migrations",
         ] {
@@ -164,6 +168,6 @@ mod tests {
                 row.get(0)
             })
             .unwrap();
-        assert_eq!(count, 1);
+        assert_eq!(count, MIGRATIONS.len() as i64);
     }
 }

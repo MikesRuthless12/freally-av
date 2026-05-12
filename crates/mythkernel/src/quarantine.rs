@@ -31,10 +31,12 @@
 use std::fs::{File, OpenOptions};
 use std::io::{self, BufReader, BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use rand::RngCore;
 use rusqlite::{Connection, OptionalExtension, params};
+use serde::{Deserialize, Serialize};
 
 use crate::db::DbError;
 
@@ -83,6 +85,67 @@ pub struct QuarantineEntry {
     pub xor_key_id: i64,
     pub quarantined_at_utc: i64,
 }
+
+/// What kind of bulk operation is in flight. Maps to the `kind` column of
+/// `quarantine_batches`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum BatchKind {
+    Restore,
+    Delete,
+}
+
+impl BatchKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            BatchKind::Restore => "restore",
+            BatchKind::Delete => "delete",
+        }
+    }
+}
+
+/// Per-item failure inside a bulk op. Accumulated into the batch row's
+/// `error_log` JSON column and into the [`BatchReport`] returned to the
+/// caller.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BatchItemError {
+    pub quarantine_id: i64,
+    pub error: String,
+}
+
+/// Progress payload emitted to the UI subscriber for each item processed
+/// in a bulk op. Mirrors the `quarantine:batch_progress` Tauri event from
+/// `docs/prd.md` § 4.2 (FR-045/046/047).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BatchProgress {
+    pub batch_id: i64,
+    pub kind: BatchKind,
+    pub items_done: u64,
+    pub items_total: u64,
+    pub bytes_done: u64,
+    pub bytes_total: u64,
+    pub last_error: Option<BatchItemError>,
+}
+
+/// Final summary of one batch run. Returned by
+/// [`QuarantineVault::restore_many`] /
+/// [`QuarantineVault::delete_many`] /
+/// [`QuarantineVault::restore_all`] /
+/// [`QuarantineVault::delete_all`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BatchReport {
+    pub batch_id: i64,
+    pub kind: BatchKind,
+    pub items_total: u64,
+    pub items_done: u64,
+    pub bytes_total: u64,
+    pub bytes_done: u64,
+    pub errors: Vec<BatchItemError>,
+}
+
+/// Progress callback fired once per item in a bulk op. The 10 Hz throttle
+/// in FR-153 is enforced by the UI subscriber, not the engine.
+pub type ProgressCallback = Arc<dyn Fn(BatchProgress) + Send + Sync>;
 
 /// 256-bit XOR key. Cheap to clone (just 32 bytes).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -360,6 +423,170 @@ impl QuarantineVault {
         self.vault_dir.join(format!("{id}.{VAULT_FILE_EXT}"))
     }
 
+    /// Bulk restore a subset of vault entries (FR-047 multi-select variant).
+    /// Per FR-045 the batch is atomic-per-item: a single failure (vault
+    /// missing, restore-would-overwrite, etc.) is appended to `errors`
+    /// and the batch continues. Returns a [`BatchReport`] with the final
+    /// counters and any per-item failures.
+    ///
+    /// A `quarantine_batches` row is inserted at start, updated as items
+    /// complete, and finalized on return. `progress` is invoked once per
+    /// item (the 10 Hz throttle in FR-153 is a UI concern enforced by
+    /// the subscriber, not the engine).
+    pub fn restore_many(
+        &self,
+        conn: &mut Connection,
+        ids: &[i64],
+        progress: Option<&ProgressCallback>,
+    ) -> Result<BatchReport, QuarantineError> {
+        self.run_batch(conn, BatchKind::Restore, ids, progress)
+    }
+
+    /// Bulk delete a subset of vault entries (FR-047 multi-select variant).
+    pub fn delete_many(
+        &self,
+        conn: &mut Connection,
+        ids: &[i64],
+        progress: Option<&ProgressCallback>,
+    ) -> Result<BatchReport, QuarantineError> {
+        self.run_batch(conn, BatchKind::Delete, ids, progress)
+    }
+
+    /// Bulk restore every vault entry (FR-045 Restore-All).
+    pub fn restore_all(
+        &self,
+        conn: &mut Connection,
+        progress: Option<&ProgressCallback>,
+    ) -> Result<BatchReport, QuarantineError> {
+        let ids: Vec<i64> = self.list(conn)?.into_iter().map(|e| e.id).collect();
+        self.run_batch(conn, BatchKind::Restore, &ids, progress)
+    }
+
+    /// Bulk delete every vault entry (FR-046 Delete-All).
+    pub fn delete_all(
+        &self,
+        conn: &mut Connection,
+        progress: Option<&ProgressCallback>,
+    ) -> Result<BatchReport, QuarantineError> {
+        let ids: Vec<i64> = self.list(conn)?.into_iter().map(|e| e.id).collect();
+        self.run_batch(conn, BatchKind::Delete, &ids, progress)
+    }
+
+    fn run_batch(
+        &self,
+        conn: &mut Connection,
+        kind: BatchKind,
+        ids: &[i64],
+        progress: Option<&ProgressCallback>,
+    ) -> Result<BatchReport, QuarantineError> {
+        // Pre-fetch each entry so items_total / bytes_total are accurate
+        // and per-item failures during the run don't double-count.
+        let mut entries: Vec<QuarantineEntry> = Vec::with_capacity(ids.len());
+        let mut prefetch_errors: Vec<BatchItemError> = Vec::new();
+        for &id in ids {
+            match self.get(conn, id) {
+                Ok(e) => entries.push(e),
+                Err(err) => prefetch_errors.push(BatchItemError {
+                    quarantine_id: id,
+                    error: err.to_string(),
+                }),
+            }
+        }
+        let items_total = entries.len() as i64;
+        let bytes_total: i64 = entries.iter().map(|e| e.size_bytes).sum();
+
+        let now = now_unix_seconds();
+        conn.execute(
+            "INSERT INTO quarantine_batches (
+                kind, started_at_utc, items_total, items_done,
+                bytes_total, bytes_done, status, error_log
+             ) VALUES (?1, ?2, ?3, 0, ?4, 0, 'running', NULL)",
+            params![kind.as_str(), now, items_total, bytes_total],
+        )?;
+        let batch_id = conn.last_insert_rowid();
+
+        let mut items_done: i64 = 0;
+        let mut bytes_done: i64 = 0;
+        let mut errors: Vec<BatchItemError> = prefetch_errors;
+
+        for entry in &entries {
+            let result = match kind {
+                BatchKind::Restore => self.restore(conn, entry.id).map(|_| ()),
+                BatchKind::Delete => self.delete(conn, entry.id),
+            };
+            let last_error = match result {
+                Ok(()) => {
+                    items_done += 1;
+                    bytes_done += entry.size_bytes;
+                    None
+                }
+                Err(err) => {
+                    // FR-045/046: "atomic per item" — keep going, capture
+                    // the failure. items_done DOES advance for failed items
+                    // because the UI's progress bar represents work-attempted,
+                    // not work-succeeded; the error_log captures the failure.
+                    items_done += 1;
+                    let item_err = BatchItemError {
+                        quarantine_id: entry.id,
+                        error: err.to_string(),
+                    };
+                    errors.push(item_err.clone());
+                    Some(item_err)
+                }
+            };
+            conn.execute(
+                "UPDATE quarantine_batches
+                 SET items_done = ?2, bytes_done = ?3
+                 WHERE id = ?1",
+                params![batch_id, items_done, bytes_done],
+            )?;
+            if let Some(cb) = progress {
+                cb(BatchProgress {
+                    batch_id,
+                    kind,
+                    items_done: items_done as u64,
+                    items_total: items_total as u64,
+                    bytes_done: bytes_done as u64,
+                    bytes_total: bytes_total as u64,
+                    last_error,
+                });
+            }
+        }
+
+        let status = if errors.is_empty() {
+            "completed"
+        } else {
+            // Per PRD § 3.1 (the `status` column is one of running |
+            // completed | cancelled | failed). With per-item atomicity we
+            // mark the batch `completed` and surface failures via
+            // `error_log`; partial-failure is the expected case and the
+            // UI shows it inline. `failed` is reserved for total-batch
+            // aborts (engine crash, etc.).
+            "completed"
+        };
+        let error_log_json = if errors.is_empty() {
+            None
+        } else {
+            Some(serde_json::to_string(&errors).unwrap_or_else(|_| "[]".to_string()))
+        };
+        conn.execute(
+            "UPDATE quarantine_batches
+             SET ended_at_utc = ?2, status = ?3, error_log = ?4
+             WHERE id = ?1",
+            params![batch_id, now_unix_seconds(), status, error_log_json],
+        )?;
+
+        Ok(BatchReport {
+            batch_id,
+            kind,
+            items_total: items_total as u64,
+            items_done: items_done as u64,
+            bytes_total: bytes_total as u64,
+            bytes_done: bytes_done as u64,
+            errors,
+        })
+    }
+
     /// Stream `src` → `dst`, applying the XOR cipher per byte. The dst file
     /// is created (truncating any existing content) and fsynced before
     /// return.
@@ -626,5 +853,182 @@ mod tests {
         write_fallback_file(&key_path, &key).unwrap();
         let recovered = read_fallback_file(&key_path).unwrap().unwrap();
         assert_eq!(key, recovered);
+    }
+
+    use std::sync::Mutex;
+
+    fn seed_n_quarantined(
+        dir: &Path,
+        vault: &QuarantineVault,
+        conn: &mut Connection,
+        n: usize,
+    ) -> Vec<i64> {
+        let mut ids = Vec::with_capacity(n);
+        for i in 0..n {
+            let source = make_source_file(dir, &format!("f{i}.bin"), &[i as u8; 64]);
+            let entry = vault.quarantine(conn, None, &source).unwrap();
+            ids.push(entry.id);
+        }
+        ids
+    }
+
+    #[test]
+    fn restore_all_restores_every_entry_and_clears_rows() {
+        let dir = tempdir().unwrap();
+        let mut conn = open_in_memory().unwrap();
+        let vault = QuarantineVault::with_key(dir.path().join("v"), fixed_key()).unwrap();
+        let _ids = seed_n_quarantined(dir.path(), &vault, &mut conn, 3);
+        let report = vault.restore_all(&mut conn, None).unwrap();
+        assert_eq!(report.kind, BatchKind::Restore);
+        assert_eq!(report.items_total, 3);
+        assert_eq!(report.items_done, 3);
+        assert!(report.errors.is_empty());
+
+        let remaining: i64 = conn
+            .query_row("SELECT COUNT(*) FROM quarantine", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(remaining, 0);
+        for i in 0..3 {
+            assert!(dir.path().join(format!("f{i}.bin")).exists());
+        }
+    }
+
+    #[test]
+    fn delete_all_removes_every_entry() {
+        let dir = tempdir().unwrap();
+        let mut conn = open_in_memory().unwrap();
+        let vault = QuarantineVault::with_key(dir.path().join("v"), fixed_key()).unwrap();
+        let _ids = seed_n_quarantined(dir.path(), &vault, &mut conn, 4);
+        let report = vault.delete_all(&mut conn, None).unwrap();
+        assert_eq!(report.kind, BatchKind::Delete);
+        assert_eq!(report.items_total, 4);
+        assert_eq!(report.items_done, 4);
+        assert!(report.errors.is_empty());
+
+        let remaining: i64 = conn
+            .query_row("SELECT COUNT(*) FROM quarantine", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(remaining, 0);
+    }
+
+    #[test]
+    fn restore_many_processes_only_selected_ids() {
+        let dir = tempdir().unwrap();
+        let mut conn = open_in_memory().unwrap();
+        let vault = QuarantineVault::with_key(dir.path().join("v"), fixed_key()).unwrap();
+        let ids = seed_n_quarantined(dir.path(), &vault, &mut conn, 3);
+        let report = vault.restore_many(&mut conn, &ids[0..2], None).unwrap();
+        assert_eq!(report.items_total, 2);
+        assert_eq!(report.items_done, 2);
+        assert!(report.errors.is_empty());
+        // Third entry must still be in the vault.
+        let remaining: i64 = conn
+            .query_row("SELECT COUNT(*) FROM quarantine", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(remaining, 1);
+    }
+
+    #[test]
+    fn batch_continues_after_per_item_failure_and_records_error() {
+        let dir = tempdir().unwrap();
+        let mut conn = open_in_memory().unwrap();
+        let vault = QuarantineVault::with_key(dir.path().join("v"), fixed_key()).unwrap();
+        let ids = seed_n_quarantined(dir.path(), &vault, &mut conn, 3);
+
+        // Force a per-item failure on the middle entry: pre-create a file
+        // at its original path so restore() returns RestoreWouldOverwrite.
+        let middle = vault.get(&conn, ids[1]).unwrap();
+        std::fs::write(&middle.original_path, b"squatter").unwrap();
+
+        let report = vault.restore_many(&mut conn, &ids, None).unwrap();
+        assert_eq!(report.items_total, 3);
+        // items_done counts work-attempted, including the failure.
+        assert_eq!(report.items_done, 3);
+        assert_eq!(report.errors.len(), 1);
+        assert_eq!(report.errors[0].quarantine_id, ids[1]);
+
+        // The other two entries restored cleanly; only the failing one
+        // remains in the vault.
+        let remaining_ids: Vec<i64> = vault.list(&conn).unwrap().iter().map(|e| e.id).collect();
+        assert_eq!(remaining_ids, vec![ids[1]]);
+    }
+
+    #[test]
+    fn batch_writes_quarantine_batches_row_with_error_log() {
+        let dir = tempdir().unwrap();
+        let mut conn = open_in_memory().unwrap();
+        let vault = QuarantineVault::with_key(dir.path().join("v"), fixed_key()).unwrap();
+        let ids = seed_n_quarantined(dir.path(), &vault, &mut conn, 2);
+
+        // Pre-populate one path so we get a per-item failure.
+        let first = vault.get(&conn, ids[0]).unwrap();
+        std::fs::write(&first.original_path, b"squatter").unwrap();
+
+        let report = vault.restore_many(&mut conn, &ids, None).unwrap();
+        assert_eq!(report.errors.len(), 1);
+
+        let (kind, items_total, items_done, status, error_log): (
+            String,
+            i64,
+            i64,
+            String,
+            Option<String>,
+        ) = conn
+            .query_row(
+                "SELECT kind, items_total, items_done, status, error_log
+                 FROM quarantine_batches WHERE id = ?1",
+                params![report.batch_id],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(kind, "restore");
+        assert_eq!(items_total, 2);
+        assert_eq!(items_done, 2);
+        assert_eq!(status, "completed");
+        let err_json = error_log.expect("error_log written");
+        assert!(err_json.contains(&format!("\"quarantine_id\":{}", ids[0])));
+    }
+
+    #[test]
+    fn progress_callback_fires_once_per_item() {
+        let dir = tempdir().unwrap();
+        let mut conn = open_in_memory().unwrap();
+        let vault = QuarantineVault::with_key(dir.path().join("v"), fixed_key()).unwrap();
+        seed_n_quarantined(dir.path(), &vault, &mut conn, 4);
+
+        let observed: Arc<Mutex<Vec<u64>>> = Arc::new(Mutex::new(Vec::new()));
+        let observed_for_cb = Arc::clone(&observed);
+        let cb: ProgressCallback = Arc::new(move |p: BatchProgress| {
+            observed_for_cb.lock().unwrap().push(p.items_done);
+        });
+        let report = vault.delete_all(&mut conn, Some(&cb)).unwrap();
+        assert_eq!(report.items_done, 4);
+        let progress = observed.lock().unwrap().clone();
+        assert_eq!(progress, vec![1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn restore_many_with_unknown_id_reports_prefetch_error() {
+        let dir = tempdir().unwrap();
+        let mut conn = open_in_memory().unwrap();
+        let vault = QuarantineVault::with_key(dir.path().join("v"), fixed_key()).unwrap();
+        let real_ids = seed_n_quarantined(dir.path(), &vault, &mut conn, 1);
+        let mut ids = real_ids.clone();
+        ids.push(99_999);
+        let report = vault.restore_many(&mut conn, &ids, None).unwrap();
+        // Only the real entry was processed; the bogus id became a
+        // prefetch_error and never advanced items_done.
+        assert_eq!(report.items_total, 1);
+        assert_eq!(report.items_done, 1);
+        assert_eq!(report.errors.len(), 1);
+        assert_eq!(report.errors[0].quarantine_id, 99_999);
     }
 }
