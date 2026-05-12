@@ -275,19 +275,38 @@ impl ScanEngine {
                 // Path/glob/publisher exclusion check first — if hit,
                 // skip this file entirely (don't hash, don't detect).
                 //
-                // TASK-136: when at least one publisher-kind exclusion
-                // exists, extract the signer identity via the
-                // `publisher` module (cache-backed; shells out only on
-                // first encounter per (path, mtime, size)). The signer
-                // identity feeds `MatchCtx.publisher`; case-insensitive
-                // match against the configured rule values.
+                // TASK-136 + code-review CR-B1: when at least one
+                // publisher-kind exclusion exists, extract the signer
+                // identity in three phases:
+                //   1. cache lookup (lock held briefly)
+                //   2. shell-out to platform signer extractor (NO lock)
+                //   3. cache store on miss (lock held briefly)
+                // The 100 ms+ shell-out never blocks other Tauri
+                // commands that share the Arc<Mutex<Connection>>.
                 let signer_identity: Option<String> = if has_publisher_excl {
-                    match db.lock() {
-                        Ok(conn) => publisher::signer_for(&conn, &path)
-                            .ok()
-                            .filter(|s| s.is_signed())
-                            .map(|s| s.identity),
+                    let probe = match db.lock() {
+                        Ok(conn) => publisher::cache_lookup(&conn, &path).ok(),
                         Err(_) => None,
+                    };
+                    match probe {
+                        Some(probe) => {
+                            let identity = match probe.cached.clone() {
+                                Some(c) => c,
+                                None => {
+                                    let extracted = publisher::extract_io_unlocked(&path);
+                                    if let Ok(conn) = db.lock() {
+                                        let _ = publisher::cache_store(&conn, &probe, &extracted);
+                                    }
+                                    extracted
+                                }
+                            };
+                            if identity.is_signed() {
+                                Some(identity.identity)
+                            } else {
+                                None
+                            }
+                        }
+                        None => None,
                     }
                 } else {
                     None

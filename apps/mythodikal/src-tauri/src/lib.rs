@@ -23,7 +23,7 @@ use ui_bridge::commands::{AppState, build_pipeline_from_feeds};
 use ui_bridge::invoke_handler;
 
 pub mod tray;
-use tray::{TrayIconState, TrayManager};
+use tray::TrayManager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -98,6 +98,11 @@ pub fn run() {
             // TASK-158 — close-to-tray: when the user clicks the X on
             // the main window, hide instead of quitting (matching the
             // default config.general.close_action = "minimize_to_tray").
+            //
+            // Sec-review M3: use `try_lock` instead of `lock` so a
+            // slow `settings_update` mid-flight never blocks the
+            // window-event thread. Lock contention falls through to
+            // the safer "minimize_to_tray" default.
             if let Some(win) = app.get_webview_window("main") {
                 let app_for_close = app.handle().clone();
                 win.on_window_event(move |evt| {
@@ -105,7 +110,10 @@ pub fn run() {
                         let close_action = app_for_close
                             .try_state::<ui_bridge::commands::AppState>()
                             .and_then(|s| {
-                                s.config.lock().ok().map(|c| c.general.close_action.clone())
+                                s.config
+                                    .try_lock()
+                                    .ok()
+                                    .map(|c| c.general.close_action.clone())
                             })
                             .unwrap_or_else(|| "minimize_to_tray".to_string());
                         if close_action == "minimize_to_tray" {
@@ -133,6 +141,7 @@ pub fn run() {
             tray_get_state,
             tray_set_scanning,
             tray_set_update_available,
+            tray_quick_scan_default_path,
             window_show_main,
             window_hide_main,
             app_quit,
@@ -175,7 +184,7 @@ fn tray_set_scanning(
     tray::apply_state(&app, resolved);
     TrayStateView {
         icon: resolved.as_str().to_string(),
-        tooltip: tray_tooltip_for(resolved),
+        tooltip: resolved.tooltip_string(),
     }
 }
 
@@ -191,16 +200,7 @@ fn tray_set_update_available(
     tray::apply_state(&app, resolved);
     TrayStateView {
         icon: resolved.as_str().to_string(),
-        tooltip: tray_tooltip_for(resolved),
-    }
-}
-
-fn tray_tooltip_for(state: TrayIconState) -> String {
-    match state {
-        TrayIconState::Idle => "Mythodikal Anti-Virus — idle".to_string(),
-        TrayIconState::Scanning => "Mythodikal Anti-Virus — scanning".to_string(),
-        TrayIconState::ShieldsOff => "Mythodikal Anti-Virus — Shields OFF".to_string(),
-        TrayIconState::UpdateAvailable => "Mythodikal Anti-Virus — update available".to_string(),
+        tooltip: resolved.tooltip_string(),
     }
 }
 
@@ -219,9 +219,38 @@ fn window_hide_main(app: AppHandle) {
     }
 }
 
+/// Force-quit the app from the renderer. Sec-review M1: gate on no
+/// active scan so a forced exit doesn't kill an in-flight scan mid-iteration
+/// (resume tokens flush only at iteration boundaries). The renderer can
+/// still bypass the guard by passing `force = true` after surfacing a
+/// confirmation modal.
 #[tauri::command]
-fn app_quit(app: AppHandle) {
+fn app_quit(app: AppHandle, force: Option<bool>) -> Result<(), String> {
+    let force = force.unwrap_or(false);
+    if !force
+        && let Some(state) = app.try_state::<ui_bridge::commands::AppState>()
+        && let Ok(flags) = state.active_pause_flags.lock()
+        && !flags.is_empty()
+    {
+        return Err(
+            "scan in progress — pass force = true after the user confirms via the mid-scan modal"
+                .into(),
+        );
+    }
     app.exit(0);
+    Ok(())
+}
+
+/// Return the default target path for the tray-menu "Run quick scan"
+/// item (sec-review H1 + code-review CR-I6). Resolves to the *current*
+/// user's home dir — not the parent directory of every user's home, which
+/// would leak file-existence metadata from sibling accounts into the
+/// engine's history DB.
+#[tauri::command]
+fn tray_quick_scan_default_path() -> Result<String, String> {
+    let home = dirs::home_dir()
+        .ok_or_else(|| "could not resolve current user's home directory".to_string())?;
+    Ok(home.to_string_lossy().to_string())
 }
 
 // ============================================================================

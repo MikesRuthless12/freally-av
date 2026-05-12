@@ -36,3 +36,6 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 tokio = { workspace = true }
 thiserror = { workspace = true }
+# Resolve the current user's home dir for the tray quick-scan command
+# (sec-review H1).
+dirs = "5"

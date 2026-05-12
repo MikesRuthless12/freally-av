@@ -253,9 +253,12 @@ export type UpdateOutcome =
   | "installed"
   | "failed";
 
+/** TASK-129/130/131 — code-review CR-I14: typed as a narrow union so
+ *  consumers can switch on `kind` without losing exhaustiveness. */
+export type ChannelKind = "engine" | "database";
+
 export interface UpdateChannelStateView {
-  /** "engine" | "database" */
-  kind: string;
+  kind: ChannelKind;
   auto_update_enabled: boolean;
   channel: string;
   interval_hours: number;

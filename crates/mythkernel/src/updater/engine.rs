@@ -132,7 +132,29 @@ impl EngineChannel {
     /// `self.current_version`. Returns `Ok(Some(_))` when a newer version
     /// is available, `Ok(None)` when up-to-date, `Err(_)` on network /
     /// parse failure.
+    ///
+    /// **Side effect (code-review CR-I7):** the channel's persisted
+    /// state (`<data_dir>/updater/engine_state.json`) is updated with
+    /// the outcome of this check before this fn returns. Callers don't
+    /// need to do their own `record_check` / `save_state` dance — that
+    /// duplication used to live in the Tauri command layer.
     pub async fn check_for_updates(
+        &self,
+    ) -> Result<Option<EngineUpdateAvailable>, EngineUpdateError> {
+        let outcome = self.check_for_updates_impl().await;
+        let mut state = self.load_state();
+        match &outcome {
+            Ok(Some(_)) => state.record_check(LastCheckOutcome::UpdateAvailable, None),
+            Ok(None) => state.record_check(LastCheckOutcome::UpToDate, None),
+            Err(err) => state.record_check(LastCheckOutcome::Failed, Some(&err.to_string())),
+        }
+        if let Err(err) = self.save_state(&state) {
+            tracing::warn!(error = %err, "engine channel: state persist failed");
+        }
+        outcome
+    }
+
+    async fn check_for_updates_impl(
         &self,
     ) -> Result<Option<EngineUpdateAvailable>, EngineUpdateError> {
         let client = reqwest::Client::builder()

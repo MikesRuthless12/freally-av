@@ -68,16 +68,12 @@ export function attachTrayEvents(): void {
 
   handles.push(
     listen("tray:quick_scan_requested", async () => {
-      // Quick scan target = the user's home dir on Linux/Mac, the user
-      // profile on Windows. Front-end has no permission to query env
-      // vars; we let the user pick from the Scan page if they want
-      // something else. The tray click only opens the page with a
-      // pre-filled hint.
-      const target =
-        navigator.platform.startsWith("Win") ?
-          "C:/Users" :
-          "/home";
+      // Sec-review H1 / code-review CR-I6: resolve the CURRENT user's
+      // home dir server-side. The old behavior (hard-coded `/home` or
+      // `C:/Users`) leaked sibling-user file metadata into the engine
+      // history table on multi-user systems.
       try {
+        const target = await invoke<string>("tray_quick_scan_default_path");
         await startScan({
           target_path: target,
           compute_sha256: true,
@@ -85,7 +81,9 @@ export function attachTrayEvents(): void {
           emit_partial_hash: false,
         });
       } catch (err) {
-        console.warn("tray quick_scan failed:", err);
+        // Sec-review L2: don't echo raw error detail to the renderer
+        // console; the message can include canonical paths.
+        console.warn("tray quick_scan failed");
       }
     }),
   );
@@ -95,8 +93,9 @@ export function attachTrayEvents(): void {
       try {
         const available = await updaterEngineCheckNow();
         await setTrayUpdateAvailable(available !== null);
-      } catch (err) {
-        console.warn("tray check_app failed:", err);
+      } catch {
+        // Sec-review L2: error detail stays in tracing logs Rust-side.
+        console.warn("tray check_app failed");
       }
     }),
   );
@@ -105,8 +104,8 @@ export function attachTrayEvents(): void {
     listen("tray:check_db_requested", async () => {
       try {
         await updaterDbCheckNow();
-      } catch (err) {
-        console.warn("tray check_db failed:", err);
+      } catch {
+        console.warn("tray check_db failed");
       }
     }),
   );

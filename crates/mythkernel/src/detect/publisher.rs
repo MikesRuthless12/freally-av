@@ -105,6 +105,12 @@ pub enum PublisherError {
 /// Extract (or read from cache) the signer identity for `path`. The cache
 /// key is `(path, mtime, size)`; a file with a different mtime or size is
 /// considered changed and the signer is re-extracted.
+///
+/// **Locking note** (code-review CR-B1/B2): this fn holds the connection
+/// across the shell-out to the platform signer extractor (~100 ms cold).
+/// Callers that share the `Connection` with hot scan loops should prefer
+/// [`signer_for_with_release`], which releases the lock around the
+/// shell-out and re-acquires only for the cache upsert.
 pub fn signer_for(conn: &Connection, path: &Path) -> Result<SignerIdentity, PublisherError> {
     let meta = std::fs::metadata(path)?;
     let size = meta.len();
@@ -125,6 +131,63 @@ pub fn signer_for(conn: &Connection, path: &Path) -> Result<SignerIdentity, Publ
     let signer = platform::codesign::extract_signer(path).truncated();
     upsert_cache(conn, &path_str, mtime_unix, size as i64, &signer)?;
     Ok(signer)
+}
+
+/// Three-phase cache-aware signer extraction. Callers must wrap the
+/// `lookup` + `upsert` calls in their own `Mutex<Connection>` guard but
+/// can drop the lock around `extract_io_unlocked` (which performs the
+/// slow shell-out). Used by `engine::scan_internal` and the
+/// `publisher_signer_for_path` Tauri command (code-review CR-B1/B2).
+pub fn cache_lookup(conn: &Connection, path: &Path) -> Result<CacheProbe, PublisherError> {
+    let meta = std::fs::metadata(path)?;
+    let size = meta.len();
+    let mtime_unix = meta
+        .modified()
+        .ok()
+        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    let path_str = path.to_string_lossy().to_string();
+    let cached = lookup_cache(conn, &path_str, mtime_unix, size as i64)?;
+    Ok(CacheProbe {
+        path_str,
+        mtime_unix,
+        size_bytes: size as i64,
+        cached,
+    })
+}
+
+/// Outcome of [`cache_lookup`]. Carries the cache key components so the
+/// caller can hand them back to [`cache_store`] after the lock-free
+/// shell-out.
+#[derive(Debug, Clone)]
+pub struct CacheProbe {
+    pub path_str: String,
+    pub mtime_unix: i64,
+    pub size_bytes: i64,
+    pub cached: Option<SignerIdentity>,
+}
+
+/// Run the signer extractor with no locks held. Pure I/O — no DB
+/// access. Truncates the result to [`MAX_SIGNER_IDENTITY_LEN`] before
+/// returning, so callers persist a bounded value.
+pub fn extract_io_unlocked(path: &Path) -> SignerIdentity {
+    platform::codesign::extract_signer(path).truncated()
+}
+
+/// Persist a signer to the cache. Caller holds the connection lock.
+pub fn cache_store(
+    conn: &Connection,
+    probe: &CacheProbe,
+    signer: &SignerIdentity,
+) -> Result<(), PublisherError> {
+    upsert_cache(
+        conn,
+        &probe.path_str,
+        probe.mtime_unix,
+        probe.size_bytes,
+        signer,
+    )
 }
 
 /// Periodic cleanup: drop cache rows older than `older_than_secs` and

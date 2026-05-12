@@ -129,6 +129,13 @@ const Exclusions: Component = () => {
         return "64-char hex digest";
       case "publisher":
         return "authenticode:THUMB:CN=Microsoft Corporation, ...";
+      default: {
+        // Code-review nit 20: exhaustiveness — surface a compile-time
+        // error if a future ExclusionKind variant is added without a
+        // matching case here.
+        const _exhaustive: never = k;
+        return _exhaustive;
+      }
     }
   };
 

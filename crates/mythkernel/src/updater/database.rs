@@ -395,8 +395,12 @@ impl DatabaseChannel {
     }
 
     /// Run one cycle of every registered feed. Emits progress events
-    /// via `progress`. Returns the aggregate outcome — `true` iff every
-    /// feed succeeded.
+    /// via `progress`. Returns the post-cycle state (which is also
+    /// persisted to disk) so callers don't need a follow-up `load_state`
+    /// — that round-trip was a TOCTOU window per code-review CR-I8.
+    /// The aggregate "did everything succeed" is encoded in the
+    /// returned `common.last_outcome` (`Installed`/`UpToDate` = ok,
+    /// `Failed` = at-least-one-failed).
     ///
     /// Outcome semantics (code-review R-B3):
     ///   * any feed failed → channel outcome = `Failed`
@@ -406,7 +410,7 @@ impl DatabaseChannel {
     /// `last_install_at_utc` is bumped per-feed **only** when that feed
     /// actually changed bytes, so the UI's "Last installed" timestamp
     /// reflects real content updates rather than every successful poll.
-    pub async fn run_once(&self, progress: DbProgressCallback) -> bool {
+    pub async fn run_once(&self, progress: DbProgressCallback) -> DatabaseChannelState {
         let mut state = self.load_state();
         let mut any_failed = false;
         let mut any_installed = false;
@@ -462,7 +466,7 @@ impl DatabaseChannel {
         if let Err(err) = self.save_state(&state) {
             tracing::warn!(error = %err, "database channel: state persist failed");
         }
-        !any_failed
+        state
     }
 }
 
@@ -528,10 +532,12 @@ mod tests {
             fail: false,
         });
         let progress: DbProgressCallback = std::sync::Arc::new(|_p| {});
-        let ok = channel.run_once(progress).await;
-        assert!(ok);
+        let state = channel.run_once(progress).await;
+        assert!(matches!(
+            state.common.last_outcome,
+            LastCheckOutcome::Installed
+        ));
         assert_eq!(counter.load(Ordering::Relaxed), 1);
-        let state = channel.load_state();
         let meta = state.feed_meta("stub");
         assert_eq!(meta.entry_count, 42);
         assert_eq!(meta.last_outcome, "ok");
@@ -554,9 +560,12 @@ mod tests {
                 fail: true,
             });
         let progress: DbProgressCallback = std::sync::Arc::new(|_p| {});
-        let ok = channel.run_once(progress).await;
-        assert!(!ok); // aggregate failed
-        let state = channel.load_state();
+        let state = channel.run_once(progress).await;
+        // Aggregate failed.
+        assert!(matches!(
+            state.common.last_outcome,
+            LastCheckOutcome::Failed
+        ));
         // The "ok" feed still landed.
         assert_eq!(state.feed_meta("ok").last_outcome, "ok");
         // The "bad" feed surfaced its error.

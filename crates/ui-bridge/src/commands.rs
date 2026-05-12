@@ -1187,32 +1187,16 @@ pub async fn updater_engine_state(
 
 /// Trigger an HTTPS probe of the engine `latest.json` (TASK-130).
 /// Returns `Some(...)` when a newer version is published, `None` when
-/// up-to-date. Updates the persisted last-check timestamp.
+/// up-to-date. Persisted state is updated inside
+/// [`EngineChannel::check_for_updates`] — this fn is a thin wrapper.
 #[tauri::command]
 pub async fn updater_engine_check_now(
     state: State<'_, AppState>,
 ) -> Result<Option<EngineUpdateAvailableView>, String> {
     let channel = state.updater_engine.clone();
-    let result = channel.check_for_updates().await;
-    let mut current = channel.load_state();
-    match &result {
-        Ok(Some(_)) => current.record_check(
-            mythkernel::updater::channels::LastCheckOutcome::UpdateAvailable,
-            None,
-        ),
-        Ok(None) => current.record_check(
-            mythkernel::updater::channels::LastCheckOutcome::UpToDate,
-            None,
-        ),
-        Err(err) => current.record_check(
-            mythkernel::updater::channels::LastCheckOutcome::Failed,
-            Some(&err.to_string()),
-        ),
-    };
-    if let Err(err) = channel.save_state(&current) {
-        tracing::warn!(error = %err, "updater_engine_check_now: state persist failed");
-    }
-    result
+    channel
+        .check_for_updates()
+        .await
         .map(|opt| opt.map(engine_update_to_view))
         .map_err(stringify)
 }
@@ -1257,8 +1241,9 @@ pub async fn updater_db_state(
 }
 
 /// Run one cycle of the database channel. Emits
-/// `db_update:progress` events along the way. Returns once every
-/// registered feed has had a chance to run.
+/// `db_update:progress` events along the way. Returns the post-cycle
+/// state directly (code-review CR-I8: avoids the TOCTOU window between
+/// `run_once` finishing and a follow-up `updater_db_state` read).
 ///
 /// Per FR-156 there is no client-side rate limit — the user may invoke
 /// this as often as they like.
@@ -1281,8 +1266,24 @@ pub async fn updater_db_check_now(
             tracing::warn!(error = %err, "tauri emit (db_update:progress) failed");
         }
     });
-    let _all_ok = channel.run_once(progress).await;
-    updater_db_state(state).await
+    let post = channel.run_once(progress).await;
+    let mut feeds: Vec<FeedMetaView> = post
+        .feeds
+        .iter()
+        .map(|(id, meta)| FeedMetaView {
+            feed_id: id.clone(),
+            last_check_at_utc: meta.last_check_at_utc,
+            last_install_at_utc: meta.last_install_at_utc,
+            entry_count: meta.entry_count,
+            last_outcome: meta.last_outcome.clone(),
+            last_error: meta.last_error.clone(),
+        })
+        .collect();
+    feeds.sort_by(|a, b| a.feed_id.cmp(&b.feed_id));
+    Ok(DatabaseChannelStateView {
+        state: channel_state_to_view(&post.common, "database"),
+        feeds,
+    })
 }
 
 /// Toggle the database channel's auto-update flag. Persisted.
@@ -1338,17 +1339,36 @@ fn engine_update_to_view(u: EngineUpdateAvailable) -> EngineUpdateAvailableView 
 /// Exclusions UI's "Add publisher exclusion from signed file" workflow.
 /// The path is canonicalized + system-path-policy-checked before the
 /// signer extractor shells out, matching `scan_start`'s gate.
+///
+/// Three-phase cache pattern (code-review CR-B2): hold the DB lock for
+/// the cache lookup, release for the shell-out, re-acquire for the
+/// cache store. This keeps `scan_status` polling responsive while a
+/// "Probe signer" button is in flight.
 #[tauri::command]
 pub async fn publisher_signer_for_path(
     state: State<'_, AppState>,
     path: PathBuf,
 ) -> Result<PublisherView, String> {
     let canonical = validate_scan_target(&path).map_err(stringify)?;
-    let conn = state
-        .db
-        .lock()
-        .map_err(|_| "db lock poisoned".to_string())?;
-    let signer = publisher::signer_for(&conn, &canonical).map_err(stringify)?;
+    let probe = {
+        let conn = state
+            .db
+            .lock()
+            .map_err(|_| "db lock poisoned".to_string())?;
+        publisher::cache_lookup(&conn, &canonical).map_err(stringify)?
+    };
+    let signer = match probe.cached.clone() {
+        Some(s) => s,
+        None => {
+            let extracted = publisher::extract_io_unlocked(&canonical);
+            let conn = state
+                .db
+                .lock()
+                .map_err(|_| "db lock poisoned".to_string())?;
+            publisher::cache_store(&conn, &probe, &extracted).map_err(stringify)?;
+            extracted
+        }
+    };
     Ok(PublisherView {
         path: canonical.to_string_lossy().to_string(),
         identity: signer.identity,

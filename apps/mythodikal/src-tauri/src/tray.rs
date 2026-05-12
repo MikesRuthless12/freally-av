@@ -24,7 +24,7 @@
 
 use std::sync::{Arc, Mutex};
 
-use mythkernel::realtime::shields::{ShieldsActor, ShieldsBroker};
+use mythkernel::realtime::shields::ShieldsActor;
 use serde::Serialize;
 use tauri::{
     AppHandle, Emitter, Manager, Wry,
@@ -54,13 +54,19 @@ impl TrayIconState {
         }
     }
 
-    fn tooltip(self) -> &'static str {
+    pub fn tooltip(self) -> &'static str {
         match self {
             TrayIconState::Idle => "Mythodikal Anti-Virus — idle",
             TrayIconState::Scanning => "Mythodikal Anti-Virus — scanning",
             TrayIconState::ShieldsOff => "Mythodikal Anti-Virus — Shields OFF",
             TrayIconState::UpdateAvailable => "Mythodikal Anti-Virus — update available",
         }
+    }
+
+    /// Owned `String` variant of [`Self::tooltip`]. Code-review CR-I13
+    /// — replaces the duplicate `tray_tooltip_for` helper in lib.rs.
+    pub fn tooltip_string(self) -> String {
+        self.tooltip().to_string()
     }
 
     /// Resolve the platform-appropriate icon bytes for this state.
@@ -284,17 +290,24 @@ fn handle_menu_event(app: &AppHandle, event: MenuEvent) {
     match id {
         "show_hide" => toggle_main_window(app),
         "quit" => {
+            // Surface a "quit requested" event so the renderer can pop
+            // a mid-scan confirmation modal if needed. The renderer is
+            // responsible for calling `app_quit` (which is itself
+            // scan-aware per sec-review M1) after the user confirms.
             let _ = app.emit("tray:quit_requested", ());
-            // Give the renderer a tick to confirm mid-scan modals etc.,
-            // then exit. Frontend can call `process.exit` directly if it
-            // wants synchronous quit.
-            app.exit(0);
+            show_main_window(app);
         }
         "shields_on" => trigger_shields(app, true, None),
         "shields_off" => trigger_shields(app, false, None),
         "shields_pause_15" => trigger_shields(app, false, Some(15)),
         "shields_pause_60" => trigger_shields(app, false, Some(60)),
-        "shields_pause_until_restart" => trigger_shields(app, false, None),
+        // Code-review CR-I4: a "Pause until restart" is semantically a
+        // very long pause, not the same as "Turn Off". We use 30 days
+        // as the sentinel — the shields broker auto-resumes shields-on
+        // at the end of the pause, and 30 days is longer than any
+        // realistic session (the user will reboot or restart Mythodikal
+        // well before that).
+        "shields_pause_until_restart" => trigger_shields(app, false, Some(30 * 24 * 60)),
         "quick_scan" => {
             let _ = app.emit("tray:quick_scan_requested", ());
             show_main_window(app);
@@ -367,9 +380,6 @@ fn trigger_shields(app: &AppHandle, enabled: bool, pause_minutes: Option<u32>) {
             tracing::warn!(error = %err, "tray: shields.set failed");
         }
     }
-    // Avoid the unused-broker warning when the import lands but the
-    // ShieldsBroker isn't reachable yet.
-    let _ = ShieldsBroker::open;
 }
 
 /// Push a new tray-icon state into the live TrayIcon. The TrayManager
@@ -385,4 +395,78 @@ pub fn apply_state(app: &AppHandle, state: TrayIconState) {
         let _ = tray.set_icon(Some(img));
     }
     let _ = tray.set_tooltip(Some(state.tooltip()));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn priority_resolution_picks_highest() {
+        let mut inputs = TrayStateInputs::default();
+        assert_eq!(inputs.resolve(), TrayIconState::Idle);
+        inputs.scanning = true;
+        assert_eq!(inputs.resolve(), TrayIconState::Scanning);
+        inputs.update_available = true;
+        // update_available wins over scanning
+        assert_eq!(inputs.resolve(), TrayIconState::UpdateAvailable);
+        inputs.shields_off = true;
+        // shields_off wins over everything
+        assert_eq!(inputs.resolve(), TrayIconState::ShieldsOff);
+    }
+
+    #[test]
+    fn priority_falls_back_to_lower_when_higher_clears() {
+        let mut inputs = TrayStateInputs {
+            shields_off: true,
+            update_available: true,
+            scanning: true,
+        };
+        assert_eq!(inputs.resolve(), TrayIconState::ShieldsOff);
+        inputs.shields_off = false;
+        assert_eq!(inputs.resolve(), TrayIconState::UpdateAvailable);
+        inputs.update_available = false;
+        assert_eq!(inputs.resolve(), TrayIconState::Scanning);
+        inputs.scanning = false;
+        assert_eq!(inputs.resolve(), TrayIconState::Idle);
+    }
+
+    #[test]
+    fn state_wire_strings_are_stable() {
+        assert_eq!(TrayIconState::Idle.as_str(), "idle");
+        assert_eq!(TrayIconState::Scanning.as_str(), "scanning");
+        assert_eq!(TrayIconState::ShieldsOff.as_str(), "shields_off");
+        assert_eq!(TrayIconState::UpdateAvailable.as_str(), "update_available");
+    }
+
+    #[test]
+    fn tray_manager_set_round_trips() {
+        let m = TrayManager::new();
+        assert_eq!(m.snapshot().0, TrayIconState::Idle);
+        assert_eq!(m.set_scanning(true), TrayIconState::Scanning);
+        assert_eq!(m.snapshot().0, TrayIconState::Scanning);
+        assert_eq!(m.set_update_available(true), TrayIconState::UpdateAvailable);
+        assert_eq!(m.set_shields_off(true), TrayIconState::ShieldsOff);
+        // Clearing scanning leaves update_available + shields_off; shields still wins.
+        assert_eq!(m.set_scanning(false), TrayIconState::ShieldsOff);
+    }
+
+    #[test]
+    fn tooltips_include_brand_name() {
+        for s in [
+            TrayIconState::Idle,
+            TrayIconState::Scanning,
+            TrayIconState::ShieldsOff,
+            TrayIconState::UpdateAvailable,
+        ] {
+            assert!(s.tooltip().contains("Mythodikal"), "{}", s.as_str());
+        }
+    }
+
+    #[test]
+    fn manager_default_matches_new() {
+        let from_new = TrayManager::new();
+        let from_default = TrayManager::default();
+        assert_eq!(from_new.snapshot().0, from_default.snapshot().0);
+    }
 }

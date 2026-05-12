@@ -8,7 +8,7 @@
 //   * Privacy → telemetry_enabled (off by default per FR-110)
 //   * Updates → dual-pane Engine + Virus database channels (TASK-133)
 
-import type { Component } from "solid-js";
+import type { Component, JSX } from "solid-js";
 import { For, Show, createResource, createSignal, onCleanup } from "solid-js";
 import {
   autostartGet,
@@ -579,7 +579,9 @@ const ChannelPane: Component<{
   onCheck: () => void;
   onToggleAuto: (v: boolean) => Promise<void> | void;
   progress: { phase: string; bytes_done: number; bytes_total: number; message: string } | null;
-  extra?: any;
+  // Code-review CR-I10: precise the prior `any` so callers don't pass
+  // arbitrary values.
+  extra?: JSX.Element;
 }> = (props) => {
   const fmtUtc = (sec: number) => {
     if (!sec) return "—";
