@@ -39,7 +39,7 @@ export const Sidebar: Component = () => {
       </nav>
       <div class="border-t border-myth-line px-4 py-3">
         <div class="flex items-center gap-2">
-          <span class="h-2 w-2 rounded-full bg-myth-good" />
+          <span class="h-2 w-2 rounded-full bg-myth-ok" />
           <span class="font-mono text-xs uppercase tracking-wide text-myth-text-md">
             Shields: ON
           </span>

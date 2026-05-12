@@ -16,7 +16,7 @@ export const StatusPill: Component<Props> = (props) => {
   const style = () => {
     switch (variant()) {
       case "ok":
-        return "bg-myth-bg-2 text-myth-good border-myth-good/30";
+        return "bg-myth-bg-2 text-myth-ok border-myth-ok/30";
       case "warn":
         return "bg-myth-bg-2 text-myth-warn border-myth-warn/30";
       case "bad":

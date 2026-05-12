@@ -182,7 +182,7 @@ const Quarantine: Component = () => {
       </Show>
 
       <Show when={lastReport()}>
-        <div class="rounded-md border border-myth-good/30 bg-myth-good/5 p-3 font-mono text-xs text-myth-text-md">
+        <div class="rounded-md border border-myth-ok/30 bg-myth-ok/5 p-3 font-mono text-xs text-myth-text-md">
           batch #{lastReport()!.batch_id} ({lastReport()!.kind}):{" "}
           {lastReport()!.items_done}/{lastReport()!.items_total} items,{" "}
           {lastReport()!.errors.length} errors
