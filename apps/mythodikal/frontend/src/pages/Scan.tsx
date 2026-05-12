@@ -1,4 +1,4 @@
-// Scan page (TASK-032).
+// Scan page (TASK-032; TASK-056 wave 2 — Windows per-volume target chooser).
 //
 // Single primary action (Start scan). When a scan is running the
 // button row swaps to Pause / Cancel (both wired to the Phase 4 stubs
@@ -6,9 +6,13 @@
 // completion the user can start a new scan.
 
 import type { Component } from "solid-js";
-import { Show, createSignal } from "solid-js";
-import type { FindingAction, FindingView } from "@/ipc/types";
-import { findingAction, scanPause } from "@/ipc/invoke";
+import { For, Show, createSignal, onMount } from "solid-js";
+import type {
+  FindingAction,
+  FindingView,
+  VolumeView,
+} from "@/ipc/types";
+import { enumerateVolumes, findingAction, scanPause } from "@/ipc/invoke";
 import {
   resumeScan,
   scanCounters,
@@ -29,6 +33,12 @@ const Scan: Component = () => {
   const [target, setTarget] = createSignal("");
   const [computeSha, setComputeSha] = createSignal(true);
   const [followSymlinks, setFollowSymlinks] = createSignal(false);
+  // TASK-056 — Windows scan-target chooser. Empty array on non-Windows
+  // hosts: the backend command returns [] and the per-volume row UI
+  // collapses cleanly. `allVolumes` toggle drives TASK-053's
+  // `MultiVolumeWalker.all_volumes(true)` fan-out.
+  const [volumes, setVolumes] = createSignal<VolumeView[]>([]);
+  const [allVolumes, setAllVolumes] = createSignal(false);
   // TASK-134 — operator-mode toggle. Persists in localStorage so the
   // setting survives page reloads.
   const [operatorMode, setOperatorMode] = createSignal(
@@ -50,6 +60,17 @@ const Scan: Component = () => {
   // after the user navigates to History — the singleton store must
   // catch them).
 
+  onMount(async () => {
+    // Best-effort: surface a per-volume chooser when the platform
+    // supports it. Empty array on non-Windows.
+    try {
+      const list = await enumerateVolumes();
+      setVolumes(list);
+    } catch {
+      // Non-fatal — the path-only chooser still works.
+    }
+  });
+
   const onStart = async () => {
     setError(null);
     try {
@@ -58,6 +79,7 @@ const Scan: Component = () => {
         compute_sha256: computeSha(),
         follow_symlinks: followSymlinks(),
         emit_partial_hash: operatorMode(),
+        all_volumes: allVolumes(),
       });
     } catch (err) {
       setError(String(err));
@@ -93,7 +115,8 @@ const Scan: Component = () => {
   };
 
   const startDisabled = () =>
-    target().trim().length === 0 || scanState().kind === "running";
+    (target().trim().length === 0 && !allVolumes()) ||
+    scanState().kind === "running";
 
   const onPause = async () => {
     setError(null);
@@ -133,10 +156,54 @@ const Scan: Component = () => {
         <input
           type="text"
           placeholder="/path/to/scan"
-          class="mt-1 w-full rounded-sm border border-myth-line bg-myth-bg-0 px-3 py-2 font-mono text-sm text-myth-text-hi placeholder-myth-text-lo focus:border-myth-accent focus:outline-none"
+          class="mt-1 w-full rounded-sm border border-myth-line bg-myth-bg-0 px-3 py-2 font-mono text-sm text-myth-text-hi placeholder-myth-text-lo focus:border-myth-accent focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
           value={target()}
           onInput={(e) => setTarget(e.currentTarget.value)}
+          disabled={allVolumes()}
         />
+
+        <Show when={volumes().length > 0}>
+          <div class="mt-3">
+            <div class="mb-2 text-xs uppercase tracking-wide text-myth-text-lo">
+              Volumes ({volumes().length})
+            </div>
+            <div class="flex flex-wrap gap-2">
+              <For each={volumes()}>
+                {(v) => (
+                  <button
+                    type="button"
+                    class="flex items-center gap-2 rounded-sm border border-myth-line bg-myth-bg-0 px-2 py-1 font-mono text-xs text-myth-text-hi hover:border-myth-accent disabled:cursor-not-allowed disabled:opacity-50"
+                    onClick={() => setTarget(v.mount_path)}
+                    disabled={allVolumes()}
+                    title={`${v.fs_name}${v.is_removable ? " · removable" : ""} · serial 0x${v.serial.toString(16).toUpperCase().padStart(8, "0")}`}
+                  >
+                    <span aria-hidden="true">{v.is_removable ? "🔌" : "💽"}</span>
+                    <span>{v.mount_path}</span>
+                    <span
+                      class={`rounded-sm px-1 text-[10px] uppercase tracking-wide ${
+                        v.is_ntfs
+                          ? "bg-myth-accent/20 text-myth-accent"
+                          : "bg-myth-line/40 text-myth-text-md"
+                      }`}
+                    >
+                      {v.fs_name}
+                    </span>
+                  </button>
+                )}
+              </For>
+            </div>
+            <label class="mt-3 flex items-center gap-2 text-sm text-myth-text-md">
+              <input
+                type="checkbox"
+                checked={allVolumes()}
+                onChange={(e) => setAllVolumes(e.currentTarget.checked)}
+              />
+              <span>
+                Scan all volumes (per-volume parallel fan-out — TASK-053)
+              </span>
+            </label>
+          </div>
+        </Show>
 
         <div class="mt-3 flex flex-wrap gap-6 text-sm text-myth-text-md">
           <label class="flex items-center gap-2">
@@ -205,11 +272,24 @@ const Scan: Component = () => {
           <h2 class="mb-2 text-sm font-semibold uppercase tracking-wide text-myth-text-md">
             Progress
           </h2>
-          <ProgressBar done={scanCounters().filesVisited} total={null} />
+          <ProgressBar
+            done={scanCounters().filesVisited}
+            total={scanCounters().filesTotalLocked}
+          />
           <div class="mt-3 grid grid-cols-4 gap-4 text-sm text-myth-text-md">
             <Stat
               label="Files visited"
-              value={scanCounters().filesVisited.toLocaleString("en-US")}
+              value={(() => {
+                // TASK-137 / FR-135 — three-piece during enumeration,
+                // canonical X/Y after the producer locks Y.
+                const c = scanCounters();
+                const visited = c.filesVisited.toLocaleString("en-US");
+                if (c.enumerationLocked && c.filesTotalLocked !== null) {
+                  return `${visited} / ${c.filesTotalLocked.toLocaleString("en-US")}`;
+                }
+                const running = c.filesTotalRunning.toLocaleString("en-US");
+                return `${visited} · ${running} · counting…`;
+              })()}
             />
             <Stat
               label="Files hashed"

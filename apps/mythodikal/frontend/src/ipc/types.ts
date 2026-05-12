@@ -18,6 +18,22 @@ export interface ScanRequest {
   follow_symlinks: boolean;
   /** FR-136 / TASK-134 — emit `scan:partial_hash` events at ≤ 10 Hz. */
   emit_partial_hash?: boolean;
+  /** TASK-053 / TASK-056 — fan out across every detected volume (Windows). */
+  all_volumes?: boolean;
+}
+
+/**
+ * One row in the Windows scan-target chooser. Mirrors
+ * `ui-bridge::types::VolumeView`. Non-Windows hosts return an empty list
+ * from `enumerate_volumes` so the UI degrades cleanly to path-only.
+ */
+export interface VolumeView {
+  mount_path: string;
+  all_mount_paths: string[];
+  fs_name: string;
+  serial: number;
+  is_ntfs: boolean;
+  is_removable: boolean;
 }
 
 export interface ScanSummary {
@@ -204,6 +220,14 @@ export type ScanProgress =
       size: number;
       /** ETA in seconds (post-3%-baseline clamp). null while warming up. */
       eta_secs: number | null;
+      /** TASK-137 / FR-135 — running enumeration count, **unlocked**.
+       *  Set during the enumeration phase; null after the
+       *  `enumeration_complete` event fires (use `files_total_locked`). */
+      files_total_running?: number | null;
+      /** TASK-137 / FR-135 — locked total after enumeration completed.
+       *  null until the `enumeration_complete` event fires; from then on
+       *  this carries the canonical Y in the X/Y UI presentation. */
+      files_total_locked?: number | null;
     }
   | {
       /** TASK-134 / FR-136 — live mid-flight BLAKE3 prefix at ≤ 10 Hz. */
@@ -240,6 +264,15 @@ export type ScanProgress =
       files_hashed: number;
       bytes_visited: number;
       findings_count: number;
+    }
+  | {
+      /** TASK-137 / FR-135 — producer locked Y. Fires exactly once per
+       *  scan. After this event the UI switches its denominator from
+       *  the running counter to `files_total_locked`. */
+      kind: "enumeration_complete";
+      scan_id: ScanId;
+      files_total_locked: number;
+      bytes_total_locked: number;
     };
 
 // ---------------------------------------------------------------------------

@@ -93,3 +93,9 @@ harness = false
 [[bench]]
 name = "hash"
 harness = false
+
+# TASK-057 — Windows MFT vs PosixWalker compare. Runs on every host
+# (the bench is OS-portable; the interesting curve appears on Windows).
+[[bench]]
+name = "win_mft"
+harness = false

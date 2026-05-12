@@ -18,6 +18,8 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
+pub mod byovd;
+pub mod file_mutation;
 pub mod goodware_allowlist;
 pub mod hash_blacklist;
 pub mod hash_set_file;

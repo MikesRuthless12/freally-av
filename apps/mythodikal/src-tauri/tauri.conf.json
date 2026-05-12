@@ -56,6 +56,17 @@
         "bundleMediaFramework": false
       }
     },
+    "windows": {
+      "wix": {
+        "language": ["en-US"]
+      },
+      "nsis": {
+        "installMode": "perMachine",
+        "languages": ["English"],
+        "displayLanguageSelector": false
+      },
+      "allowDowngrades": false
+    },
     "createUpdaterArtifacts": true
   },
   "plugins": {

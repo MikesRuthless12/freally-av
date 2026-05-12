@@ -36,6 +36,7 @@ import type {
   SettingsSnapshot,
   UpdateChannelStateView,
   UpdaterStatusView,
+  VolumeView,
 } from "./types";
 
 // ============================================================================
@@ -244,6 +245,16 @@ export function onScanPaused(
   return on("scan:paused", handler);
 }
 
+/**
+ * TASK-137 — Producer locked Y. UI switches from three-piece
+ * `X scanned · Y enumerated · counting…` to `X/Y`.
+ */
+export function onScanEnumerationComplete(
+  handler: Handler<Extract<ScanProgress, { kind: "enumeration_complete" }>>,
+): Promise<UnlistenFn> {
+  return on("scan:enumeration_complete", handler);
+}
+
 export function onQuarantineBatchProgress(
   handler: Handler<BatchProgressEvent>,
 ): Promise<UnlistenFn> {
@@ -331,4 +342,17 @@ export function autostartGet(): Promise<AutostartState> {
 
 export function autostartSet(enabled: boolean): Promise<AutostartState> {
   return invoke<AutostartState>("autostart_set", { enabled });
+}
+
+// ============================================================================
+// Volumes (TASK-052 / TASK-056) — Windows per-volume scan-target chooser
+// ============================================================================
+
+/**
+ * List every mounted volume on the host. Returns an empty array on
+ * non-Windows platforms so the UI degrades cleanly to its path-only
+ * chooser.
+ */
+export function enumerateVolumes(): Promise<VolumeView[]> {
+  return invoke<VolumeView[]>("enumerate_volumes");
 }

@@ -8,6 +8,7 @@ import { createSignal, onCleanup } from "solid-js";
 import type { UnlistenFn } from "@tauri-apps/api/event";
 import {
   onScanCompleted,
+  onScanEnumerationComplete,
   onScanError,
   onScanFailed,
   onScanFinding,
@@ -45,6 +46,16 @@ interface ScanCounters {
    *  files. */
   partialHash: string | null;
   partialBytesDone: number;
+  /** TASK-137 / FR-135 — running enumeration count (Y unlocked).
+   *  Increments while the producer is still discovering files; the
+   *  UI shows three-piece `X · Y · counting…` until enumerationLocked
+   *  flips. */
+  filesTotalRunning: number;
+  /** TASK-137 / FR-135 — locked Y after `enumeration_complete`. */
+  filesTotalLocked: number | null;
+  /** TASK-137 — true after `enumeration_complete` fires. UI uses this
+   *  to swap the three-piece presentation for the canonical `X/Y`. */
+  enumerationLocked: boolean;
 }
 
 /** One throughput sample = files-per-second over the prior ~1 s window
@@ -73,6 +84,9 @@ const initialCounters: ScanCounters = {
   etaReceivedAt: null,
   partialHash: null,
   partialBytesDone: 0,
+  filesTotalRunning: 0,
+  filesTotalLocked: null,
+  enumerationLocked: false,
 };
 
 const [state, setState] = createSignal<ScanState>({ kind: "idle" });
@@ -148,18 +162,44 @@ export function attachScanEvents(): void {
 
   handles.push(
     onScanProgress((payload) => {
+      setCounters((c) => {
+        // TASK-137: the engine sends `files_total_running` while Y is
+        // still moving, and `files_total_locked` after the producer
+        // emitted `enumeration_complete`. Trust whichever is present
+        // on the event so the denominator stays accurate even if the
+        // standalone `enumeration_complete` listener fires later.
+        const running =
+          payload.files_total_running ?? c.filesTotalRunning;
+        const locked = payload.files_total_locked ?? c.filesTotalLocked;
+        const enumerationLocked = c.enumerationLocked || locked !== null;
+        return {
+          ...c,
+          filesVisited: c.filesVisited + 1,
+          filesHashed: c.filesHashed + 1,
+          bytesVisited: c.bytesVisited + payload.size,
+          currentPath: payload.path,
+          etaSecs: payload.eta_secs,
+          etaReceivedAt:
+            payload.eta_secs !== null ? Date.now() : c.etaReceivedAt,
+          // A `file` event always means a file just finalized — the
+          // partial-hash field belongs to the *next* file. Clear it.
+          partialHash: null,
+          partialBytesDone: 0,
+          filesTotalRunning: running,
+          filesTotalLocked: locked,
+          enumerationLocked,
+        };
+      });
+    }),
+  );
+
+  handles.push(
+    onScanEnumerationComplete((payload) => {
       setCounters((c) => ({
         ...c,
-        filesVisited: c.filesVisited + 1,
-        filesHashed: c.filesHashed + 1,
-        bytesVisited: c.bytesVisited + payload.size,
-        currentPath: payload.path,
-        etaSecs: payload.eta_secs,
-        etaReceivedAt: payload.eta_secs !== null ? Date.now() : c.etaReceivedAt,
-        // A `file` event always means a file just finalized — the
-        // partial-hash field belongs to the *next* file. Clear it.
-        partialHash: null,
-        partialBytesDone: 0,
+        filesTotalRunning: payload.files_total_locked,
+        filesTotalLocked: payload.files_total_locked,
+        enumerationLocked: true,
       }));
     }),
   );

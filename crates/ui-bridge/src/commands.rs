@@ -244,6 +244,41 @@ pub fn feeds_dir(data_dir: &std::path::Path) -> PathBuf {
 }
 
 // ============================================================================
+// Volumes (TASK-056) — Windows per-volume scan-target chooser
+// ============================================================================
+
+/// Enumerate every mounted volume on the host. On Windows this drives the
+/// Scan page's per-volume target chooser (TASK-056); on other platforms
+/// the command returns an empty `Vec` so the UI degrades cleanly to its
+/// path-only chooser.
+#[tauri::command]
+pub async fn enumerate_volumes() -> Result<Vec<VolumeView>, String> {
+    #[cfg(target_os = "windows")]
+    {
+        let raw = mythkernel::platform::win::volumes::enumerate_volumes().map_err(stringify)?;
+        Ok(raw
+            .into_iter()
+            .map(|v| VolumeView {
+                mount_path: v.mount_path.to_string_lossy().into_owned(),
+                all_mount_paths: v
+                    .all_mount_paths
+                    .into_iter()
+                    .map(|p| p.to_string_lossy().into_owned())
+                    .collect(),
+                fs_name: v.fs_name,
+                serial: v.serial,
+                is_ntfs: v.is_ntfs,
+                is_removable: v.is_removable,
+            })
+            .collect())
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        Ok(Vec::new())
+    }
+}
+
+// ============================================================================
 // Scan commands
 // ============================================================================
 
@@ -256,8 +291,24 @@ pub async fn scan_start(
     // Path validation (security review C2): canonicalize and reject
     // system-managed directories before the engine ever sees the
     // target. The frontend's free-text target input is not trusted.
-    let canonical_target = validate_scan_target(&request.target_path).map_err(stringify)?;
-    let target = ScanTarget::Path(canonical_target);
+    //
+    // TASK-056 + sec-review H2 (Phase 5 wave 3): when the user opted
+    // into `all_volumes`, the MultiVolumeWalker ignores the target
+    // path and discovers every mounted volume on its own. We
+    // **discard** any caller-supplied `target_path` entirely (a
+    // compromised renderer might pass `/etc` here and observe the
+    // sentinel in History; dropping it on the IPC boundary keeps the
+    // path-policy gate meaningful end-to-end) and feed a fixed
+    // sentinel into the engine. The walker never touches the sentinel
+    // because `MultiVolumeWalker::all_volumes(true)` resolves roots
+    // through `enumerate_volumes()` before reading the requested
+    // path.
+    let target = if request.all_volumes {
+        ScanTarget::Path(PathBuf::from("<all-volumes>"))
+    } else {
+        let canonical_target = validate_scan_target(&request.target_path).map_err(stringify)?;
+        ScanTarget::Path(canonical_target)
+    };
     let opts = ScanOptions {
         compute_sha256: request.compute_sha256,
         follow_symlinks: request.follow_symlinks,
@@ -265,6 +316,9 @@ pub async fn scan_start(
         // toggle flows through here. Without this wire-up the engine
         // never emits `scan:partial_hash` from the Tauri app.
         emit_partial_hash: request.emit_partial_hash,
+        // TASK-053 / TASK-056: multi-volume fan-out is opt-in via the
+        // Scan dashboard's "scan all volumes" checkbox.
+        all_volumes: request.all_volumes,
         ..ScanOptions::default()
     };
     let handle = state.engine.scan(target, opts).map_err(stringify)?;
@@ -399,6 +453,10 @@ async fn run_scan_event_forwarder(
                         ScanProgress::Failed { .. } => "scan:failed",
                         ScanProgress::Paused { .. } => "scan:paused",
                         ScanProgress::PartialHash { .. } => "scan:partial_hash",
+                        // TASK-137 — fires exactly once per scan when
+                        // the producer locks Y; UI swaps from
+                        // three-piece to X/Y presentation here.
+                        ScanProgress::EnumerationComplete { .. } => "scan:enumeration_complete",
                     };
                     if let Err(err) = app.emit(topic, &event) {
                         tracing::warn!(error = %err, "tauri emit failed");
@@ -1602,6 +1660,7 @@ macro_rules! invoke_handler {
             $crate::commands::updater_db_set_auto,
             $crate::commands::publisher_signer_for_path,
             $crate::commands::publisher_prune_cache,
+            $crate::commands::enumerate_volumes,
         ]
     };
 }

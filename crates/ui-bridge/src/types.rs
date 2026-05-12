@@ -32,6 +32,12 @@ pub struct ScanRequest {
     /// this on per-scan.
     #[serde(default)]
     pub emit_partial_hash: bool,
+    /// TASK-053 / TASK-056 — fan out across every detected volume.
+    /// Windows-only effect; on other platforms the engine's
+    /// `MultiVolumeWalker` discovery falls back to the requested
+    /// `target_path`.
+    #[serde(default)]
+    pub all_volumes: bool,
 }
 
 /// Lightweight row used by the History page.
@@ -365,6 +371,30 @@ pub struct TrayState {
     /// One of `"idle" | "scanning" | "shields_off" | "update_available"`.
     pub icon: String,
     pub tooltip: String,
+}
+
+// ---------------------------------------------------------------------------
+// Volumes (TASK-052 / TASK-056) — Windows per-volume scan-target chooser
+// ---------------------------------------------------------------------------
+
+/// One row in the Windows scan-target chooser. Mirrors
+/// [`mythkernel::platform::win::volumes::VolumeInfo`] for IPC. On
+/// non-Windows hosts the command returns an empty `Vec`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VolumeView {
+    /// Primary user-visible mount path (e.g. `C:\`).
+    pub mount_path: String,
+    /// All mount paths the volume is reachable through. Always contains
+    /// `mount_path` as the first element.
+    pub all_mount_paths: Vec<String>,
+    /// Filesystem name reported by `GetVolumeInformationW` (NTFS / FAT32
+    /// / exFAT / ReFS). Always uppercase.
+    pub fs_name: String,
+    /// Volume serial number from `GetVolumeInformationW` — same number
+    /// the vendored journal subscriber uses to key its cursor file.
+    pub serial: u32,
+    pub is_ntfs: bool,
+    pub is_removable: bool,
 }
 
 // ---------------------------------------------------------------------------

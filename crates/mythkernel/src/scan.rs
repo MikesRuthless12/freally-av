@@ -72,6 +72,11 @@ pub struct ScanOptions {
     /// each file (TASK-134, FR-136). Off by default; the Scan dashboard's
     /// operator-mode toggle flips this on per-scan.
     pub emit_partial_hash: bool,
+    /// TASK-053 / TASK-056 — when set, ignore the target path and fan
+    /// out across every detected volume on the host. Windows-only
+    /// (`MultiVolumeWalker` discovery returns the requested root on
+    /// other platforms). Off by default.
+    pub all_volumes: bool,
 }
 
 impl Default for ScanOptions {
@@ -83,6 +88,7 @@ impl Default for ScanOptions {
             max_depth: None,
             compute_sha256: false,
             emit_partial_hash: false,
+            all_volumes: false,
         }
     }
 }
@@ -109,6 +115,11 @@ pub struct ResumeToken {
     /// v1) tokens loading cleanly.
     #[serde(default)]
     pub emit_partial_hash: bool,
+    /// TASK-053 / TASK-056 — persist the multi-volume fan-out toggle so
+    /// a resumed scan continues across the same volume set. `#[serde(default)]`
+    /// keeps older tokens loading cleanly (defaults to `false` = single root).
+    #[serde(default)]
+    pub all_volumes: bool,
     /// Files we've already hashed + processed. On resume we skip these.
     /// Capped at [`RESUME_TOKEN_PATH_CAP`]; if the original scan exceeded
     /// the cap the engine just re-scans the overage (cheap correctness
@@ -149,6 +160,30 @@ pub enum ScanProgress {
         /// `Hh Mm Ss` counting down (see frontend `formatEta`).
         #[serde(default)]
         eta_secs: Option<f64>,
+        /// FR-135 / TASK-137 — running enumeration count, **unlocked**.
+        /// Tracks the moving denominator while the producer is still
+        /// discovering files. `None` after `EnumerationComplete` fires
+        /// (UI switches to `files_total_locked`).
+        #[serde(default)]
+        files_total_running: Option<u64>,
+        /// FR-135 / TASK-137 — locked total after the producer finished
+        /// enumeration. `None` until the producer emits
+        /// `EnumerationComplete`; from that event onward this carries
+        /// the canonical Y in the "X/Y" UI presentation.
+        #[serde(default)]
+        files_total_locked: Option<u64>,
+    },
+    /// FR-135 / TASK-137 — fires exactly once per scan, when the
+    /// producer finishes walking every requested root. After this event
+    /// the UI swaps from `X scanned · Y enumerated · counting…` to
+    /// `X/Y`. Files surfaced after this point (e.g. mid-scan tree
+    /// mutations) accrue against the `+N discovered after lock` /
+    /// `Y − D not found` scan-summary footnotes; the locked Y here does
+    /// not change.
+    EnumerationComplete {
+        scan_id: i64,
+        files_total_locked: u64,
+        bytes_total_locked: u64,
     },
     /// Live mid-flight BLAKE3 partial of the file currently being hashed.
     /// Throttled at ≤ 10 Hz by the engine (TASK-134 / FR-136). Optional —

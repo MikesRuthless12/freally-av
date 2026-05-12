@@ -109,6 +109,25 @@ pub async fn run(
                         writeln!(stdout, "{}", serde_json::to_string(&event)?)?;
                     }
                 }
+                ScanProgress::EnumerationComplete {
+                    files_total_locked,
+                    bytes_total_locked,
+                    ..
+                } => {
+                    // TASK-137 — UI surfaces transition from `X · Y · counting…`
+                    // to `X/Y`. The CLI just notes the lock so JSON consumers
+                    // see the canonical denominator on stdout.
+                    match format {
+                        Format::Text => {
+                            writeln!(
+                                stderr,
+                                "  · enumeration complete: {} files, {} bytes",
+                                files_total_locked, bytes_total_locked
+                            )?;
+                        }
+                        Format::Json => writeln!(stdout, "{}", serde_json::to_string(&event)?)?,
+                    }
+                }
                 ScanProgress::Completed { .. }
                 | ScanProgress::Failed { .. }
                 | ScanProgress::Paused { .. } => {

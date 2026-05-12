@@ -7,13 +7,14 @@
 //! [`crate::scan::ScanProgress`] events.
 
 use std::collections::BTreeSet;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use rusqlite::Connection;
 use tokio::sync::broadcast;
 
+use crate::detect::file_mutation::FileBaseline;
 use crate::detect::publisher;
 use crate::detect::{DetectionPipeline, FileCtx, PipelineOutcome, blake3_hex_to_bytes};
 use crate::error::EngineError;
@@ -25,7 +26,7 @@ use crate::scan::{
     RESUME_TOKEN_PATH_CAP, ResumeToken, ScanHandle, ScanOptions, ScanProgress, ScanTarget,
 };
 use crate::throttle::{AdaptiveThrottle, Throttle};
-use crate::walker::{FileWalker, PosixWalker, WalkEvent, WalkOpts};
+use crate::walker::{FileWalker, MultiVolumeWalker, WalkEvent, WalkOpts};
 
 /// The default progress-channel capacity. Subscribers that lag past this
 /// buffer drop oldest events (broadcast channel semantics) — that's intended
@@ -108,6 +109,9 @@ impl ScanEngine {
             // preference so a resumed scan keeps emitting the same event
             // stream the original scan was emitting before pause.
             emit_partial_hash: token.emit_partial_hash,
+            // TASK-053 / TASK-056: restore the multi-volume fan-out
+            // toggle so resume continues across the same volume set.
+            all_volumes: token.all_volumes,
             ..ScanOptions::default()
         };
         self.scan_internal(target, opts, Some((scan_id, token)))
@@ -208,8 +212,155 @@ impl ScanEngine {
                 .unwrap_or(false),
             Err(_) => false,
         };
+        // TASK-138 — per-scan file-mutation baseline. Collects autostart
+        // + $PATH binaries once at scan start; the per-file loop below
+        // calls `record_and_check` for every successfully hashed file.
+        // Best-effort: if the platform enumerator returns nothing, the
+        // baseline is disabled and the per-file hook is a no-op.
+        let file_baseline = std::sync::Arc::new(FileBaseline::from_platform());
+        // TASK-053 + TASK-056: every scan goes through `MultiVolumeWalker`.
+        // Single-root behavior passes through to `NtfsWalker` (the platform
+        // fast walker — NTFS MFT on Windows, raw `getdents64` on Linux,
+        // FSEvents-driven recursive walk on macOS — with `PosixWalker`
+        // fallback when the per-OS fast path can't open the volume).
+        // `all_volumes(true)` fans out across every host volume on Windows.
+        let all_volumes = opts.all_volumes;
+
+        // TASK-137 — concurrent producer/consumer. The walker thread
+        // streams `(PathBuf, u64)` into a **bounded** crossbeam channel
+        // (sec-review H2 / wave 3 follow-up — an unbounded queue would
+        // accrete ~300 MB resident on a 5M-file NTFS walk because the
+        // MFT producer's 100K files/s outruns the hash consumer's ~MB/s).
+        // The bound back-pressures the producer at ~32K queued items
+        // (≈ 2 MB of PathBuf+u64 tuples) — enough buffer that the
+        // consumer keeps the CPU saturated, small enough that the
+        // resident-set budget stays predictable.
+        // The hash+detect consumer drains the channel as items arrive
+        // so scanning starts on the first enumerated file. The running
+        // totals live in shared atomics so the consumer can include
+        // them in every File event without locking. The producer fires
+        // `EnumerationComplete` once it has walked every root, then
+        // drops the work sender — the consumer's `recv()` returns
+        // `Err` once the channel drains and the loop exits cleanly.
+        const WORK_CHANNEL_CAPACITY: usize = 32_768;
+        let (work_tx, work_rx) =
+            crossbeam_channel::bounded::<(std::path::PathBuf, u64)>(WORK_CHANNEL_CAPACITY);
+        let files_running = Arc::new(AtomicU64::new(0));
+        let bytes_running = Arc::new(AtomicU64::new(0));
+        let enum_complete = Arc::new(AtomicBool::new(false));
+
+        let files_running_p = files_running.clone();
+        let bytes_running_p = bytes_running.clone();
+        let enum_complete_p = enum_complete.clone();
+        let target_for_producer = target_for_worker.clone();
+        let walk_opts_p = walk_opts.clone();
+        let tx_for_producer = tx_for_worker.clone();
+        let pause_flag_for_producer = pause_flag.clone();
+        // RAII guard: every exit path from the producer body — clean
+        // completion, pause, consumer-dropped, panic — flips
+        // `enum_complete` and emits `EnumerationComplete` exactly once
+        // (sec-review H3 + code-review H3). Without this the UI would
+        // stay stuck on "counting…" when Cancel races the walker.
+        struct ProducerCompletionGuard {
+            files_running: Arc<AtomicU64>,
+            bytes_running: Arc<AtomicU64>,
+            enum_complete: Arc<AtomicBool>,
+            tx: broadcast::Sender<ScanProgress>,
+            scan_id: i64,
+            armed: bool,
+        }
+        impl Drop for ProducerCompletionGuard {
+            fn drop(&mut self) {
+                if !self.armed {
+                    return;
+                }
+                let files_total_locked = self.files_running.load(Ordering::Relaxed);
+                let bytes_total_locked = self.bytes_running.load(Ordering::Relaxed);
+                self.enum_complete.store(true, Ordering::Relaxed);
+                let _ = self.tx.send(ScanProgress::EnumerationComplete {
+                    scan_id: self.scan_id,
+                    files_total_locked,
+                    bytes_total_locked,
+                });
+            }
+        }
+
+        let producer_spawn = std::thread::Builder::new()
+            .name("mythkernel/scan-producer".into())
+            .spawn(move || {
+                let mut guard = ProducerCompletionGuard {
+                    files_running: files_running_p.clone(),
+                    bytes_running: bytes_running_p.clone(),
+                    enum_complete: enum_complete_p.clone(),
+                    tx: tx_for_producer.clone(),
+                    scan_id,
+                    armed: true,
+                };
+                let walker = MultiVolumeWalker::new().all_volumes(all_volumes);
+                'outer: for root in target_for_producer.paths() {
+                    let event_rx = walker.walk(root, walk_opts_p.clone());
+                    for event in event_rx.iter() {
+                        // TASK-040 — a pause during enumeration stops
+                        // pushing new work. The consumer drains the
+                        // remaining buffered items and persists the
+                        // resume token; the producer just exits.
+                        if pause_flag_for_producer.load(Ordering::Relaxed) {
+                            break 'outer;
+                        }
+                        match event {
+                            WalkEvent::File { path, size, .. } => {
+                                files_running_p.fetch_add(1, Ordering::Relaxed);
+                                bytes_running_p.fetch_add(size, Ordering::Relaxed);
+                                // Bounded channel: `send` blocks when the
+                                // consumer falls behind. Walker pacing
+                                // matches hash throughput.
+                                if work_tx.send((path, size)).is_err() {
+                                    // Consumer dropped — abandon producer
+                                    // but still emit EnumerationComplete
+                                    // via the guard drop below.
+                                    return;
+                                }
+                            }
+                            WalkEvent::Error { path, message } => {
+                                let _ = tx_for_producer.send(ScanProgress::Error { path, message });
+                            }
+                            WalkEvent::Skipped { .. } => {}
+                        }
+                    }
+                }
+                // Clean exit → guard's Drop fires EnumerationComplete.
+                let _ = &mut guard;
+                // `work_tx` drops at end of scope → channel closes.
+            });
+
+        // Sec-review M6: a thread-spawn failure (EAGAIN under RLIMIT_NPROC)
+        // is recoverable — surface it as an EngineError so the caller
+        // can finalize the scan row as failed rather than panicking the
+        // tokio runtime.
+        if let Err(err) = producer_spawn {
+            let conn = self
+                .db
+                .lock()
+                .map_err(|_| EngineError::Db(crate::db::DbError::Poisoned.to_string()))?;
+            let _ = history::finalize_scan(
+                &conn,
+                scan_id,
+                now_utc(),
+                ScanStatus::Failed,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+            );
+            return Err(EngineError::Config(format!(
+                "failed to spawn scan producer thread: {err}"
+            )));
+        }
+        let _producer_handle = producer_spawn.expect("checked Ok above");
+
         let worker = tokio::task::spawn_blocking(move || {
-            let walker = PosixWalker::new();
             // TASK-040 — resume context. When `resume_carry` is Some,
             // pre-load counters and the set of already-completed paths so
             // we skip them in the hash loop.
@@ -225,34 +376,16 @@ impl ScanEngine {
             let mut findings_count: i64 =
                 resume_carry.as_ref().map(|t| t.findings_count).unwrap_or(0);
 
-            // Phase A — enumeration pass (TASK-038 ETA + early TASK-137).
-            let mut files_total: u64 = 0;
-            let mut bytes_total: u64 = 0;
-            let mut worklist: Vec<(std::path::PathBuf, u64)> = Vec::new();
-            for root in target_for_worker.paths() {
-                let event_rx = walker.walk(root, walk_opts.clone());
-                for event in event_rx.iter() {
-                    match event {
-                        WalkEvent::File { path, size, .. } => {
-                            files_total += 1;
-                            bytes_total = bytes_total.saturating_add(size);
-                            worklist.push((path, size));
-                        }
-                        WalkEvent::Error { path, message } => {
-                            let _ = tx_for_worker.send(ScanProgress::Error { path, message });
-                        }
-                        WalkEvent::Skipped { .. } => {}
-                    }
-                }
-            }
-
-            // Phase B — hash + detect pass with live ETA + adaptive throttle.
+            // Phase B (concurrent w/ producer) — hash + detect pass
+            // with live ETA + adaptive throttle. Drains `work_rx` until
+            // the producer thread drops its sender (end of enumeration)
+            // OR a pause is requested — whichever comes first.
             let mut estimator = EtaEstimator::new();
             let throttle_base = Throttle::default();
             let mut throttle = AdaptiveThrottle::new(throttle_base);
             let mut paused_mid_run = false;
 
-            for (path, size) in worklist {
+            loop {
                 // TASK-040 — pause check at the top of every iteration.
                 // We persist a resume token and exit cleanly so the
                 // caller can pick this scan up later via `engine.resume`.
@@ -260,6 +393,19 @@ impl ScanEngine {
                     paused_mid_run = true;
                     break;
                 }
+
+                // TASK-137 — drain the producer's work channel. `recv`
+                // blocks until the producer pushes the next file or
+                // drops the sender (enumeration complete). The pause
+                // path uses `recv_timeout` to wake the loop quickly so
+                // a Pause click between two slow-to-arrive files
+                // doesn't get stuck on a blocking recv.
+                let (path, size) = match work_rx.recv_timeout(std::time::Duration::from_millis(100))
+                {
+                    Ok(item) => item,
+                    Err(crossbeam_channel::RecvTimeoutError::Timeout) => continue,
+                    Err(crossbeam_channel::RecvTimeoutError::Disconnected) => break,
+                };
 
                 let path_str_owned = path.to_string_lossy().into_owned();
 
@@ -352,11 +498,19 @@ impl ScanEngine {
                 match hash_outcome {
                     Ok(result) => {
                         files_hashed += 1;
+                        // TASK-137 — pull the moving denominator from
+                        // the producer's atomics. Once enumeration
+                        // locks, swap `files_total_running` for
+                        // `files_total_locked` so the UI's `X/Y`
+                        // presentation stabilizes.
+                        let locked = enum_complete.load(Ordering::Relaxed);
+                        let files_total_now = files_running.load(Ordering::Relaxed);
+                        let bytes_total_now = bytes_running.load(Ordering::Relaxed);
                         let sample = EtaSample {
                             files_done: files_visited as u64,
-                            files_total: Some(files_total),
+                            files_total: Some(files_total_now),
                             bytes_done: bytes_visited as u64,
-                            bytes_total: Some(bytes_total),
+                            bytes_total: Some(bytes_total_now),
                             now: Instant::now(),
                         };
                         let eta_secs = estimator.observe(sample);
@@ -365,6 +519,8 @@ impl ScanEngine {
                             blake3: result.blake3.clone(),
                             size: result.size,
                             eta_secs,
+                            files_total_running: if locked { None } else { Some(files_total_now) },
+                            files_total_locked: if locked { Some(files_total_now) } else { None },
                         });
 
                         if !pipeline.is_empty() {
@@ -376,6 +532,25 @@ impl ScanEngine {
                                 &path,
                                 size,
                                 &result,
+                                &mut findings_count,
+                            );
+                        }
+
+                        // TASK-138 — record + diff baseline for autostart /
+                        // $PATH / script paths. Reuses the
+                        // SignerIdentity we already extracted for
+                        // exclusion matching (cheap; signed/unsigned
+                        // is the only bit the mutation rule needs).
+                        if file_baseline.is_enabled() {
+                            run_file_mutation_hook(
+                                &file_baseline,
+                                &db,
+                                &tx_for_worker,
+                                scan_id,
+                                &path,
+                                size,
+                                &result,
+                                signer_identity.as_deref(),
                                 &mut findings_count,
                             );
                         }
@@ -411,6 +586,7 @@ impl ScanEngine {
                     skip_hidden: opts_for_token.skip_hidden,
                     compute_sha256: opts_for_token.compute_sha256,
                     emit_partial_hash: opts_for_token.emit_partial_hash,
+                    all_volumes: opts_for_token.all_volumes,
                     processed_paths,
                     files_visited,
                     files_hashed,
@@ -603,6 +779,101 @@ fn decode_sha256(s: &str) -> Option<[u8; 32]> {
     let mut out = [0u8; 32];
     hex::decode_to_slice(s, &mut out).ok()?;
     Some(out)
+}
+
+/// TASK-138 — bridge between the engine's per-file loop and
+/// [`FileBaseline`]. Records the new baseline row for autostart /
+/// `$PATH` / script files and, when the diff fires the
+/// "previously signed-or-known → now mutated" rule, persists a
+/// `findings` row + emits `ScanProgress::Finding`.
+///
+/// `nsrl_known` is hard-wired to `false` for now — the live pipeline
+/// already short-circuits NSRL allowlist hits before this hook fires,
+/// so we have no signal that "this file would have been
+/// allowlisted" without an extra DB lookup. Phase 5 wave 3 ships the
+/// hash-drift half of FR-131; the NSRL-known half lands when
+/// goodware_allowlist exposes a "would-this-have-skipped?" probe
+/// (TASK-138 follow-up tracked in the comment block at the top of
+/// `detect/file_mutation.rs`).
+///
+/// Code-review M7: the `signer_kind` is derived from the host OS so
+/// the baseline row's `signer_kind` column carries the right
+/// platform tag (`authenticode` on Windows, `codesign` on macOS,
+/// `gpg` on Linux) rather than always reporting `authenticode`.
+#[allow(clippy::too_many_arguments)]
+fn run_file_mutation_hook(
+    baseline: &FileBaseline,
+    db: &Arc<Mutex<Connection>>,
+    tx: &broadcast::Sender<ScanProgress>,
+    scan_id: i64,
+    path: &std::path::Path,
+    size: u64,
+    hash: &HashResult,
+    signer_identity: Option<&str>,
+    findings_count: &mut i64,
+) {
+    let signer = match signer_identity {
+        Some(s) if !s.is_empty() => {
+            #[cfg(target_os = "windows")]
+            let kind = crate::detect::publisher::SignerKind::Authenticode;
+            #[cfg(target_os = "macos")]
+            let kind = crate::detect::publisher::SignerKind::Codesign;
+            #[cfg(target_os = "linux")]
+            let kind = crate::detect::publisher::SignerKind::Gpg;
+            #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
+            let kind = crate::detect::publisher::SignerKind::Unsigned;
+            crate::detect::publisher::SignerIdentity {
+                identity: s.to_string(),
+                kind,
+            }
+            .truncated()
+        }
+        _ => crate::detect::publisher::SignerIdentity::unsigned(),
+    };
+    let finding = baseline.record_and_check(
+        db,
+        scan_id,
+        path,
+        &hash.blake3,
+        hash.sha256.as_deref(),
+        size,
+        &signer,
+        false,
+    );
+    let Some(finding) = finding else {
+        return;
+    };
+    // Persist the finding row + emit the event so the UI surfaces it.
+    let blake3_bytes = blake3_hex_to_bytes(&hash.blake3);
+    let sha256_bytes = hash.sha256.as_deref().and_then(decode_sha256);
+    let detected_at_utc = now_utc();
+    let finding_id = match db.lock() {
+        Ok(conn) => history::record_finding(
+            &conn,
+            scan_id,
+            path.to_string_lossy().as_ref(),
+            Some(size as i64),
+            blake3_bytes.as_ref().map(|b| b.as_slice()),
+            sha256_bytes.as_ref().map(|s| s.as_slice()),
+            &finding.rule_id,
+            "file_mutation",
+            finding.severity.as_str(),
+            detected_at_utc,
+        )
+        .ok(),
+        Err(_) => None,
+    };
+    if let Some(id) = finding_id {
+        *findings_count += 1;
+        let _ = tx.send(ScanProgress::Finding {
+            scan_id,
+            finding_id: id,
+            path: path.to_path_buf(),
+            rule_id: finding.rule_id,
+            rule_source: "file_mutation".to_string(),
+            severity: finding.severity.as_str().to_string(),
+        });
+    }
 }
 
 /// Stream-hash `path` and emit `ScanProgress::PartialHash` events at

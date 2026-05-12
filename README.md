@@ -68,7 +68,7 @@ This license posture is unusual for an AV product. The reasoning is in [`docs/pr
 
 The roadmap targets stable **v0.19.84**, sequenced across 16 phases. Current phase status is tracked live in [`docs/product-roadmap.md`](docs/product-roadmap.md).
 
-**Current state:** Phases 0, 1, 2, 3 are shipped. **Phase 4 is code-complete (waves 1–6 committed 2026-05-12)** — ETA, adaptive throttle, pause/resume, Shields kill-switch, Exclusions CRUD (incl. publisher kind), throughput chart, first-run flow, feed auto-updater, release pipeline + GH-Releases-signed Tauri Updater, dual-channel (engine vs database) update architecture, About page per-source definition counts, Settings → Updates dual pane, operator-mode live BLAKE3 partial-hash display, per-exclusion 24-hour quick-action, cross-platform publisher whitelist (Authenticode / codesign / GPG), Tauri-plugin-autostart wiring with live Settings toggle (TASK-157), and the FR-162.5 system tray with state-machine icon (TASK-158) all in the tree. Only TASK-049 (launch-checklist sign-off — benchmarks rerun + screenshots + tag procedure) gates the `[Unreleased]` → `v0.4.0` promotion. **Phase 5 wave 1 shipped 2026-05-12** — TASK-050 (cross-platform fast walker via vendored Sourcerer journal subscribers — NTFS MFT on Windows, raw `getdents64` on Linux, FSEvents-driven `read_dir` on macOS, `PosixWalker` fallback everywhere), TASK-051 (USN incremental walker on Windows with rotation-detect-then-fallback-to-MFT), TASK-052 (Windows volume detection + enumeration via `FindFirstVolumeW`/`GetVolumeInformationW`), and TASK-053 (`MultiVolumeWalker` per-volume parallel scan aggregator) are in the tree. Wave 2 work (Windows installer + Windows scan UX + benchmarks + v0.5.0 release wiring) is next.
+**Current state:** Phases 0, 1, 2, 3 are shipped. **Phase 4 is code-complete (waves 1–6 committed 2026-05-12)** — ETA, adaptive throttle, pause/resume, Shields kill-switch, Exclusions CRUD (incl. publisher kind), throughput chart, first-run flow, feed auto-updater, release pipeline + GH-Releases-signed Tauri Updater, dual-channel (engine vs database) update architecture, About page per-source definition counts, Settings → Updates dual pane, operator-mode live BLAKE3 partial-hash display, per-exclusion 24-hour quick-action, cross-platform publisher whitelist (Authenticode / codesign / GPG), Tauri-plugin-autostart wiring with live Settings toggle (TASK-157), and the FR-162.5 system tray with state-machine icon (TASK-158) all in the tree. Only TASK-049 (launch-checklist sign-off — benchmarks rerun + screenshots + tag procedure) gates the `[Unreleased]` → `v0.4.0` promotion. **Phase 5 is code-complete (waves 1 + 2 + 3 committed 2026-05-12)** — TASK-050 (cross-platform fast walker via vendored Sourcerer journal subscribers — NTFS MFT on Windows, raw `getdents64` on Linux, FSEvents-driven `read_dir` on macOS, `PosixWalker` fallback everywhere), TASK-051 (USN incremental walker on Windows with rotation-detect-then-fallback-to-MFT), TASK-052 (Windows volume detection + enumeration via `FindFirstVolumeW`/`GetVolumeInformationW`), TASK-053 (`MultiVolumeWalker` per-volume parallel scan aggregator), TASK-054 (per-machine WiX + NSIS Windows installer, unsigned per § 1.5.3), TASK-056 (Windows per-volume scan-target chooser + "scan all volumes" checkbox driving multi-volume fan-out), TASK-057 (criterion `win_mft` bench comparing `NtfsWalker` vs `PosixWalker` + `scripts/bench-1m-files.ps1` Windows end-to-end harness), TASK-058 (v0.5.0 launch checklist), TASK-137 (concurrent producer/consumer engine with `EnumerationComplete` event + locked-Y UI presentation, FR-135 revision), TASK-138 (file-mutation baseline detector — `file_baseline` table + per-platform autostart enumerators + `$PATH` binary inventory + per-file diff with signed-or-NSRL-known prior gate, FR-131), and TASK-139 (BYOVD blocklist via loldrivers.io — daily JSON pull + `ByovdDetector` at severity `Critical`, FR-141 static portion) are all in the tree. The `Phase 5 Smoke Test` (admin Win 11 VM, 500K+ NTFS C:, throughput ≥ 8K files/s, USN rescan ≤ 30 s, multi-volume aggregator across a USB stick) gates the `[Unreleased]` → `v0.5.0` promotion alongside `v0.4.0`.
 
 | Phase | Goal | Version | Status |
 |---|---|---|---|
@@ -77,7 +77,7 @@ The roadmap targets stable **v0.19.84**, sequenced across 16 phases. Current pha
 | 2 | Detection Pipeline | v0.2.x | ✅ Shipped |
 | 3 | UI Alpha | v0.3.x | ✅ Shipped |
 | 4 | Linux MVP & Magic Moment | v0.4.x | 🟢 Code-complete (tag gated on TASK-049) |
-| 5 | Windows MFT Superpowers | v0.5.x | 🟡 Active (wave 1 shipped 2026-05-12; wave 2 next) |
+| 5 | Windows MFT Superpowers | v0.5.x | 🟢 Code-complete (waves 1+2 shipped 2026-05-12; tag gated on TASK-058 smoke test) |
 | 6 | macOS Port (unsigned, see `docs/prd.md` § 1.5.3) | v0.6.x | Pending |
 | 7 | YARA & Rule Manager | v0.7.x | Pending |
 | 8 | Linux Real-time (fanotify daemon) | v0.8.x | Pending |
@@ -114,6 +114,26 @@ pnpm -C apps/mythodikal/frontend tauri dev
 The first run opens a Mythodikal window with the brand mark and the design tokens applied. From there, follow the active phase's smoke test in [`Mythodikal-Build-Prompts-Guide.md`](Mythodikal-Build-Prompts-Guide.md).
 
 You may build locally for personal learning. You may not redistribute the resulting binaries. See [`LICENSE.md`](LICENSE.md).
+
+---
+
+## First-run on Windows (unsigned bundle)
+
+Mythodikal ships **unsigned** per [`docs/prd.md`](docs/prd.md) § 1.5.3 — the project's zero-cost / no-paid-signing constraint forbids OV or EV code-signing certificates. On Windows 11 the first launch therefore triggers SmartScreen and (depending on how the file was downloaded) the Mark-of-the-Web "blocked" attribute. Both are expected. Workarounds:
+
+1. **SmartScreen Defender prompt** ("Windows protected your PC"):
+   - Click **More info**.
+   - Click **Run anyway**.
+   - The MSI installer launches normally.
+2. **"This file came from another computer and might be blocked"** (Mark-of-the-Web):
+   - Right-click the downloaded `.msi` → **Properties**.
+   - Tick **Unblock** at the bottom of the General tab → **OK**.
+   - Re-launch the MSI.
+3. **Per-machine install** lands at `%ProgramFiles%\Mythodikal Anti-Virus\` with a Start menu shortcut under `Mythodikal Anti-Virus`. Uninstall via **Settings → Apps → Installed apps → Mythodikal Anti-Virus**.
+
+The published `latest.json` and per-bundle `.sig` files on the GitHub Release are ed25519 signatures consumed by the in-app auto-updater (Tauri Updater plugin, FR-152), **not** Authenticode signatures — Windows does not natively verify them. The in-app updater verifies them against the public key compiled into the binary, so subsequent updates are cryptographically authenticated end-to-end even though the original bundle is unsigned at the OS level.
+
+If a sponsor ever covers an OV/EV cert, code-signing would land as a Phase 13 (donor) extra — never as a P0/P1 release-gate. Until then the workarounds above are the canonical path.
 
 ---
 
