@@ -16,6 +16,8 @@ export interface ScanRequest {
   target_path: string;
   compute_sha256: boolean;
   follow_symlinks: boolean;
+  /** FR-136 / TASK-134 — emit `scan:partial_hash` events at ≤ 10 Hz. */
+  emit_partial_hash?: boolean;
 }
 
 export interface ScanSummary {
@@ -109,6 +111,10 @@ export interface DefinitionCount {
   byovd_entries: number;
   user_rules: number;
   total: number;
+  /** TASK-132 — per-feed last-updated timestamps (unix seconds). null
+   *  when the feed file isn't on disk yet (first-run). */
+  abusech_last_updated_utc?: number | null;
+  nsrl_last_updated_utc?: number | null;
 }
 
 export interface SettingsSnapshot {
@@ -157,8 +163,13 @@ export interface UpdaterStatusView {
   next_run_at_utc: number;
 }
 
-// Exclusions (TASK-042 / FR-060/061/062/134)
-export type ExclusionKind = "path" | "glob" | "hash_blake3" | "hash_sha256";
+// Exclusions (TASK-042 / FR-060/061/062/134, TASK-136 added "publisher").
+export type ExclusionKind =
+  | "path"
+  | "glob"
+  | "hash_blake3"
+  | "hash_sha256"
+  | "publisher";
 export type ExclusionScope = "scan_only" | "realtime_only" | "both";
 
 export interface ExclusionView {
@@ -195,6 +206,14 @@ export type ScanProgress =
       eta_secs: number | null;
     }
   | {
+      /** TASK-134 / FR-136 — live mid-flight BLAKE3 prefix at ≤ 10 Hz. */
+      kind: "partial_hash";
+      scan_id: ScanId;
+      path: string;
+      blake3_partial: string;
+      bytes_done: number;
+    }
+  | {
       kind: "finding";
       scan_id: ScanId;
       finding_id: FindingId;
@@ -222,6 +241,97 @@ export type ScanProgress =
       bytes_visited: number;
       findings_count: number;
     };
+
+// ---------------------------------------------------------------------------
+// Updater channels (TASK-129/130/131/132/133)
+// ---------------------------------------------------------------------------
+
+export type UpdateOutcome =
+  | "never"
+  | "up_to_date"
+  | "update_available"
+  | "installed"
+  | "failed";
+
+/** TASK-129/130/131 — code-review CR-I14: typed as a narrow union so
+ *  consumers can switch on `kind` without losing exhaustiveness. */
+export type ChannelKind = "engine" | "database";
+
+export interface UpdateChannelStateView {
+  kind: ChannelKind;
+  auto_update_enabled: boolean;
+  channel: string;
+  interval_hours: number;
+  last_check_at_utc: number;
+  last_install_at_utc: number;
+  last_outcome: UpdateOutcome | string;
+  last_error: string;
+}
+
+export interface FeedMetaView {
+  feed_id: string;
+  last_check_at_utc: number;
+  last_install_at_utc: number;
+  entry_count: number;
+  last_outcome: string;
+  last_error: string;
+}
+
+export interface DatabaseChannelStateView {
+  state: UpdateChannelStateView;
+  feeds: FeedMetaView[];
+}
+
+export interface EngineUpdateAvailableView {
+  current_version: string;
+  latest_version: string;
+  release_url: string;
+  release_notes: string;
+  published_at_utc: number;
+}
+
+export type EngineUpdatePhase =
+  | "download"
+  | "verify"
+  | "install"
+  | "restart_pending";
+
+export interface EngineUpdateProgressEvent {
+  phase: EngineUpdatePhase | string;
+  bytes_done: number;
+  bytes_total: number;
+  message: string;
+}
+
+export type DatabaseUpdatePhase =
+  | "download"
+  | "decompress"
+  | "rebuild_index"
+  | "swap";
+
+export interface DatabaseUpdateProgressEvent {
+  feed_id: string;
+  phase: DatabaseUpdatePhase | string;
+  bytes_done: number;
+  bytes_total: number;
+  message: string;
+}
+
+// ---------------------------------------------------------------------------
+// Autostart (FR-161 / TASK-157) + Publisher (FR-146 / TASK-136)
+// ---------------------------------------------------------------------------
+
+export interface AutostartState {
+  enabled: boolean;
+  mechanism: string;
+}
+
+export interface PublisherView {
+  path: string;
+  identity: string;
+  /** "authenticode" | "codesign" | "gpg" | "unsigned" */
+  kind: string;
+}
 
 // Severity ordering used by the UI for sort + color.
 export const SEVERITY_RANK: Record<string, number> = {

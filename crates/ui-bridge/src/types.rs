@@ -27,6 +27,11 @@ pub struct ScanRequest {
     /// `false` when no feeds are loaded, `true` otherwise.
     pub compute_sha256: bool,
     pub follow_symlinks: bool,
+    /// FR-136 / TASK-134 — emit `scan:partial_hash` events at ≤ 10 Hz.
+    /// Off by default; the Scan dashboard's operator-mode toggle flips
+    /// this on per-scan.
+    #[serde(default)]
+    pub emit_partial_hash: bool,
 }
 
 /// Lightweight row used by the History page.
@@ -165,7 +170,7 @@ pub struct FeedUpdateResult {
     pub error: Option<String>,
 }
 
-/// Definition counts surfaced on the About page (FR-157).
+/// Definition counts surfaced on the About page (FR-157, TASK-132).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DefinitionCount {
     pub abusech_hashes: u64,
@@ -174,6 +179,12 @@ pub struct DefinitionCount {
     pub byovd_entries: u64,
     pub user_rules: u64,
     pub total: u64,
+    /// Per-feed last-updated unix timestamps. Populated for whichever
+    /// feed files exist on disk; missing feeds report `None`.
+    #[serde(default)]
+    pub abusech_last_updated_utc: Option<i64>,
+    #[serde(default)]
+    pub nsrl_last_updated_utc: Option<i64>,
 }
 
 /// Snapshot of every user-configurable setting. Phase 3 stub returns
@@ -260,6 +271,113 @@ pub struct UpdaterStatusView {
     pub outcome: String,
     pub detail: String,
     pub next_run_at_utc: i64,
+}
+
+// ---------------------------------------------------------------------------
+// Updater channels (TASK-129/130/131/132/133)
+// ---------------------------------------------------------------------------
+
+/// Generic channel-state view (engine or database). Mirrors
+/// `mythkernel::updater::channels::ChannelState`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpdateChannelStateView {
+    pub kind: String, // "engine" | "database"
+    pub auto_update_enabled: bool,
+    pub channel: String,
+    pub interval_hours: u32,
+    pub last_check_at_utc: i64,
+    pub last_install_at_utc: i64,
+    /// One of `"never" | "up_to_date" | "update_available" | "installed" | "failed"`.
+    pub last_outcome: String,
+    pub last_error: String,
+}
+
+/// Per-feed metadata inside the database channel state (TASK-131).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FeedMetaView {
+    pub feed_id: String,
+    pub last_check_at_utc: i64,
+    pub last_install_at_utc: i64,
+    pub entry_count: u64,
+    pub last_outcome: String,
+    pub last_error: String,
+}
+
+/// Full database-channel snapshot — channel-level state plus the
+/// per-feed map flattened into a vec the frontend can iterate.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DatabaseChannelStateView {
+    pub state: UpdateChannelStateView,
+    pub feeds: Vec<FeedMetaView>,
+}
+
+/// What `engine_check_for_updates` returns. `None` (TS `null`) means the
+/// running binary is the latest release.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EngineUpdateAvailableView {
+    pub current_version: String,
+    pub latest_version: String,
+    pub release_url: String,
+    pub release_notes: String,
+    pub published_at_utc: i64,
+}
+
+/// Progress event emitted to `engine_update:progress`. Mirrors
+/// `mythkernel::updater::engine::EngineUpdateProgress`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EngineUpdateProgressEvent {
+    /// `"download" | "verify" | "install" | "restart_pending"`.
+    pub phase: String,
+    pub bytes_done: u64,
+    pub bytes_total: u64,
+    pub message: String,
+}
+
+/// Progress event emitted to `db_update:progress`. Mirrors
+/// `mythkernel::updater::database::DatabaseUpdateProgress`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DatabaseUpdateProgressEvent {
+    pub feed_id: String,
+    /// `"download" | "decompress" | "rebuild_index" | "swap"`.
+    pub phase: String,
+    pub bytes_done: u64,
+    pub bytes_total: u64,
+    pub message: String,
+}
+
+// ---------------------------------------------------------------------------
+// Autostart (FR-161 / TASK-157) + Tray (FR-162 / TASK-158)
+// ---------------------------------------------------------------------------
+
+/// Reflects the OS autostart state for the Mythodikal app (FR-161).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AutostartState {
+    pub enabled: bool,
+    /// Free-text description of the OS mechanism used (e.g.
+    /// `"~/.config/autostart/mythodikal.desktop"` on Linux). Empty when
+    /// the plugin reports an unknown mechanism.
+    pub mechanism: String,
+}
+
+/// Tray icon high-level state (FR-162 priority machine).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TrayState {
+    /// One of `"idle" | "scanning" | "shields_off" | "update_available"`.
+    pub icon: String,
+    pub tooltip: String,
+}
+
+// ---------------------------------------------------------------------------
+// Publisher whitelist (FR-146 / TASK-136)
+// ---------------------------------------------------------------------------
+
+/// Reported signer identity for a given file path.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PublisherView {
+    pub path: String,
+    pub identity: String,
+    /// `"authenticode" | "codesign" | "gpg" | "unsigned"`.
+    pub kind: String,
 }
 
 // ---------------------------------------------------------------------------

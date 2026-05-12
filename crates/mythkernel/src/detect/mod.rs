@@ -22,6 +22,7 @@ pub mod goodware_allowlist;
 pub mod hash_blacklist;
 pub mod hash_set_file;
 pub mod heuristics;
+pub mod publisher;
 pub mod yara_engine;
 
 /// What a detector is given for one file. The engine fills this in after the

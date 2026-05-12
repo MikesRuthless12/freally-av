@@ -26,7 +26,7 @@ use std::sync::{Arc, Mutex};
 use mythkernel::{
     detect::{
         DetectionPipeline, HashKind, goodware_allowlist::GoodwareAllowlistDetector,
-        hash_blacklist::HashBlacklistDetector,
+        hash_blacklist::HashBlacklistDetector, publisher,
     },
     engine::ScanEngine,
     exclusions::{self, ExclusionKind, ExclusionScope},
@@ -34,7 +34,14 @@ use mythkernel::{
     quarantine::{BatchProgress, ProgressCallback, QuarantineVault},
     realtime::shields::{ShieldsActor, ShieldsBroker, ShieldsState},
     scan::{ScanOptions, ScanProgress, ScanTarget},
-    updater::{abusech::AbuseChUpdater, nsrl::NsrlSource, nsrl::NsrlUpdater},
+    updater::{
+        abusech::AbuseChUpdater,
+        channels::ChannelState,
+        database::{DatabaseChannel, DatabaseUpdateProgress, DbProgressCallback},
+        engine::{EngineChannel, EngineUpdateAvailable},
+        nsrl::NsrlSource,
+        nsrl::NsrlUpdater,
+    },
 };
 use rusqlite::Connection;
 use tauri::{AppHandle, Emitter, State};
@@ -222,6 +229,13 @@ pub struct AppState {
     pub active_pause_flags: Arc<Mutex<HashMap<i64, Arc<AtomicBool>>>>,
     pub data_dir: PathBuf,
     pub engine_version: String,
+    /// Engine self-update channel (TASK-130). Owns the persisted state
+    /// for the `Settings → Updates → Engine` pane.
+    pub updater_engine: Arc<EngineChannel>,
+    /// Database / signature-feed update channel (TASK-131). The shared
+    /// arc lets `updater_db_state` and `updater_db_check_now` both
+    /// reach the same registry without re-registering feeds.
+    pub updater_db: Arc<DatabaseChannel>,
 }
 
 /// Resolve the canonical feeds directory under `<data_dir>/feeds/`.
@@ -247,6 +261,10 @@ pub async fn scan_start(
     let opts = ScanOptions {
         compute_sha256: request.compute_sha256,
         follow_symlinks: request.follow_symlinks,
+        // Sec-review/code-review blocker R-B1: the TASK-134 partial-hash
+        // toggle flows through here. Without this wire-up the engine
+        // never emits `scan:partial_hash` from the Tauri app.
+        emit_partial_hash: request.emit_partial_hash,
         ..ScanOptions::default()
     };
     let handle = state.engine.scan(target, opts).map_err(stringify)?;
@@ -380,6 +398,7 @@ async fn run_scan_event_forwarder(
                         ScanProgress::Completed { .. } => "scan:completed",
                         ScanProgress::Failed { .. } => "scan:failed",
                         ScanProgress::Paused { .. } => "scan:paused",
+                        ScanProgress::PartialHash { .. } => "scan:partial_hash",
                     };
                     if let Err(err) = app.emit(topic, &event) {
                         tracing::warn!(error = %err, "tauri emit failed");
@@ -910,6 +929,8 @@ pub async fn definition_count(state: State<'_, AppState>) -> Result<DefinitionCo
 
 /// Synchronous, non-Tauri-State variant for code paths that need the
 /// definition counts but already have a `&Path` instead of `&State`.
+/// TASK-132: extended to include per-feed last-updated timestamps so
+/// the About page can render "Last updated 2 h ago" per source.
 fn compute_definition_count(data_dir: &std::path::Path) -> DefinitionCount {
     let feeds_dir = feeds_dir(data_dir);
     let count_for = |name: &str| -> u64 {
@@ -921,6 +942,17 @@ fn compute_definition_count(data_dir: &std::path::Path) -> DefinitionCount {
             .map(|f| f.len())
             .unwrap_or(0)
     };
+    let mtime_for = |name: &str| -> Option<i64> {
+        let path = feeds_dir.join(name);
+        if !path.exists() {
+            return None;
+        }
+        std::fs::metadata(&path)
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_secs() as i64)
+    };
     let abusech_hashes = count_for("abusech_sha256.bin");
     let nsrl_hashes = count_for("nsrl_sha256.bin");
     let total = abusech_hashes + nsrl_hashes;
@@ -931,6 +963,8 @@ fn compute_definition_count(data_dir: &std::path::Path) -> DefinitionCount {
         byovd_entries: 0,
         user_rules: 0,
         total,
+        abusech_last_updated_utc: mtime_for("abusech_sha256.bin"),
+        nsrl_last_updated_utc: mtime_for("nsrl_sha256.bin"),
     }
 }
 
@@ -1138,6 +1172,229 @@ fn to_exclusion_view(e: exclusions::Exclusion) -> ExclusionView {
 }
 
 // ============================================================================
+// Updater channels (TASK-129/130/131/132/133)
+// ============================================================================
+
+/// Read the engine channel's persisted state (last check, last install,
+/// auto-update toggle, channel name).
+#[tauri::command]
+pub async fn updater_engine_state(
+    state: State<'_, AppState>,
+) -> Result<UpdateChannelStateView, String> {
+    let s = state.updater_engine.load_state();
+    Ok(channel_state_to_view(&s, "engine"))
+}
+
+/// Trigger an HTTPS probe of the engine `latest.json` (TASK-130).
+/// Returns `Some(...)` when a newer version is published, `None` when
+/// up-to-date. Persisted state is updated inside
+/// [`EngineChannel::check_for_updates`] — this fn is a thin wrapper.
+#[tauri::command]
+pub async fn updater_engine_check_now(
+    state: State<'_, AppState>,
+) -> Result<Option<EngineUpdateAvailableView>, String> {
+    let channel = state.updater_engine.clone();
+    channel
+        .check_for_updates()
+        .await
+        .map(|opt| opt.map(engine_update_to_view))
+        .map_err(stringify)
+}
+
+/// Toggle the engine channel's auto-update flag. Persisted to disk.
+#[tauri::command]
+pub async fn updater_engine_set_auto(
+    state: State<'_, AppState>,
+    enabled: bool,
+) -> Result<(), String> {
+    let channel = state.updater_engine.clone();
+    let mut current = channel.load_state();
+    current.auto_update_enabled = enabled;
+    channel.save_state(&current).map_err(stringify)?;
+    Ok(())
+}
+
+/// Read the database channel's persisted state including the per-feed
+/// metadata map (TASK-131 / TASK-132).
+#[tauri::command]
+pub async fn updater_db_state(
+    state: State<'_, AppState>,
+) -> Result<DatabaseChannelStateView, String> {
+    let s = state.updater_db.load_state();
+    let mut feeds: Vec<FeedMetaView> = s
+        .feeds
+        .iter()
+        .map(|(id, meta)| FeedMetaView {
+            feed_id: id.clone(),
+            last_check_at_utc: meta.last_check_at_utc,
+            last_install_at_utc: meta.last_install_at_utc,
+            entry_count: meta.entry_count,
+            last_outcome: meta.last_outcome.clone(),
+            last_error: meta.last_error.clone(),
+        })
+        .collect();
+    feeds.sort_by(|a, b| a.feed_id.cmp(&b.feed_id));
+    Ok(DatabaseChannelStateView {
+        state: channel_state_to_view(&s.common, "database"),
+        feeds,
+    })
+}
+
+/// Run one cycle of the database channel. Emits
+/// `db_update:progress` events along the way. Returns the post-cycle
+/// state directly (code-review CR-I8: avoids the TOCTOU window between
+/// `run_once` finishing and a follow-up `updater_db_state` read).
+///
+/// Per FR-156 there is no client-side rate limit — the user may invoke
+/// this as often as they like.
+#[tauri::command]
+pub async fn updater_db_check_now(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<DatabaseChannelStateView, String> {
+    let channel = state.updater_db.clone();
+    let app_for_cb = app.clone();
+    let progress: DbProgressCallback = Arc::new(move |p: DatabaseUpdateProgress| {
+        let payload = DatabaseUpdateProgressEvent {
+            feed_id: p.feed_id,
+            phase: p.phase.as_str().to_string(),
+            bytes_done: p.bytes_done,
+            bytes_total: p.bytes_total,
+            message: p.message,
+        };
+        if let Err(err) = app_for_cb.emit("db_update:progress", &payload) {
+            tracing::warn!(error = %err, "tauri emit (db_update:progress) failed");
+        }
+    });
+    let post = channel.run_once(progress).await;
+    let mut feeds: Vec<FeedMetaView> = post
+        .feeds
+        .iter()
+        .map(|(id, meta)| FeedMetaView {
+            feed_id: id.clone(),
+            last_check_at_utc: meta.last_check_at_utc,
+            last_install_at_utc: meta.last_install_at_utc,
+            entry_count: meta.entry_count,
+            last_outcome: meta.last_outcome.clone(),
+            last_error: meta.last_error.clone(),
+        })
+        .collect();
+    feeds.sort_by(|a, b| a.feed_id.cmp(&b.feed_id));
+    Ok(DatabaseChannelStateView {
+        state: channel_state_to_view(&post.common, "database"),
+        feeds,
+    })
+}
+
+/// Toggle the database channel's auto-update flag. Persisted.
+#[tauri::command]
+pub async fn updater_db_set_auto(state: State<'_, AppState>, enabled: bool) -> Result<(), String> {
+    let channel = state.updater_db.clone();
+    let mut current = channel.load_state();
+    current.common.auto_update_enabled = enabled;
+    channel.save_state(&current).map_err(stringify)?;
+    Ok(())
+}
+
+fn channel_state_to_view(s: &ChannelState, kind: &str) -> UpdateChannelStateView {
+    UpdateChannelStateView {
+        kind: kind.to_string(),
+        auto_update_enabled: s.auto_update_enabled,
+        channel: s.channel.clone(),
+        interval_hours: s.interval_hours,
+        last_check_at_utc: s.last_check_at_utc,
+        last_install_at_utc: s.last_install_at_utc,
+        last_outcome: outcome_to_wire(s.last_outcome),
+        last_error: s.last_error.clone(),
+    }
+}
+
+fn outcome_to_wire(o: mythkernel::updater::channels::LastCheckOutcome) -> String {
+    use mythkernel::updater::channels::LastCheckOutcome::*;
+    match o {
+        Never => "never",
+        UpToDate => "up_to_date",
+        UpdateAvailable => "update_available",
+        Installed => "installed",
+        Failed => "failed",
+    }
+    .to_string()
+}
+
+fn engine_update_to_view(u: EngineUpdateAvailable) -> EngineUpdateAvailableView {
+    EngineUpdateAvailableView {
+        current_version: u.current_version,
+        latest_version: u.latest_version,
+        release_url: u.release_url,
+        release_notes: u.release_notes,
+        published_at_utc: u.published_at_utc,
+    }
+}
+
+// ============================================================================
+// Publisher whitelist (FR-146 / TASK-136)
+// ============================================================================
+
+/// Extract the signer identity for a single file path. Used by the
+/// Exclusions UI's "Add publisher exclusion from signed file" workflow.
+/// The path is canonicalized + system-path-policy-checked before the
+/// signer extractor shells out, matching `scan_start`'s gate.
+///
+/// Three-phase cache pattern (code-review CR-B2): hold the DB lock for
+/// the cache lookup, release for the shell-out, re-acquire for the
+/// cache store. This keeps `scan_status` polling responsive while a
+/// "Probe signer" button is in flight.
+#[tauri::command]
+pub async fn publisher_signer_for_path(
+    state: State<'_, AppState>,
+    path: PathBuf,
+) -> Result<PublisherView, String> {
+    let canonical = validate_scan_target(&path).map_err(stringify)?;
+    let probe = {
+        let conn = state
+            .db
+            .lock()
+            .map_err(|_| "db lock poisoned".to_string())?;
+        publisher::cache_lookup(&conn, &canonical).map_err(stringify)?
+    };
+    let signer = match probe.cached.clone() {
+        Some(s) => s,
+        None => {
+            let extracted = publisher::extract_io_unlocked(&canonical);
+            let conn = state
+                .db
+                .lock()
+                .map_err(|_| "db lock poisoned".to_string())?;
+            publisher::cache_store(&conn, &probe, &extracted).map_err(stringify)?;
+            extracted
+        }
+    };
+    Ok(PublisherView {
+        path: canonical.to_string_lossy().to_string(),
+        identity: signer.identity,
+        kind: signer.kind.as_str().to_string(),
+    })
+}
+
+/// Manually trigger the publisher cache prune (TASK-136 / sec-review M5).
+/// Returns the number of rows removed. Defaults are documented on
+/// `publisher::DEFAULT_CACHE_PURGE_AGE_SECS` and
+/// `DEFAULT_CACHE_PURGE_MAX_ROWS`.
+#[tauri::command]
+pub async fn publisher_prune_cache(state: State<'_, AppState>) -> Result<u64, String> {
+    let conn = state
+        .db
+        .lock()
+        .map_err(|_| "db lock poisoned".to_string())?;
+    publisher::prune_cache(
+        &conn,
+        publisher::DEFAULT_CACHE_PURGE_AGE_SECS,
+        publisher::DEFAULT_CACHE_PURGE_MAX_ROWS,
+    )
+    .map_err(stringify)
+}
+
+// ============================================================================
 // Shields (FR-160 / TASK-156)
 // ============================================================================
 
@@ -1337,6 +1594,14 @@ macro_rules! invoke_handler {
             $crate::commands::exclusion_list,
             $crate::commands::exclusion_add,
             $crate::commands::exclusion_remove,
+            $crate::commands::updater_engine_state,
+            $crate::commands::updater_engine_check_now,
+            $crate::commands::updater_engine_set_auto,
+            $crate::commands::updater_db_state,
+            $crate::commands::updater_db_check_now,
+            $crate::commands::updater_db_set_auto,
+            $crate::commands::publisher_signer_for_path,
+            $crate::commands::publisher_prune_cache,
         ]
     };
 }

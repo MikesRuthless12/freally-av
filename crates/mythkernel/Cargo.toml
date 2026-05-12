@@ -38,6 +38,12 @@ reqwest = { workspace = true }
 keyring = { workspace = true }
 rand = { workspace = true }
 sysinfo = { workspace = true }
+# TASK-130 — ed25519 verification on engine bundle signatures via the same
+# minisign crate Tauri Updater uses internally.
+minisign-verify = { workspace = true }
+base64 = { workspace = true }
+# TASK-131 — `If-Modified-Since` / `ETag` handling for the database channel.
+httpdate = { workspace = true }
 
 [features]
 default = []

@@ -100,6 +100,15 @@ pub async fn run(
                         Format::Json => writeln!(stdout, "{}", serde_json::to_string(&event)?)?,
                     }
                 }
+                ScanProgress::PartialHash { .. } => {
+                    // CLI ignores live partial-hash events (TASK-134) — the
+                    // text-mode line would flicker too fast and the JSON
+                    // mode user can opt into them by piping through
+                    // `--format json`.
+                    if matches!(format, Format::Json) {
+                        writeln!(stdout, "{}", serde_json::to_string(&event)?)?;
+                    }
+                }
                 ScanProgress::Completed { .. }
                 | ScanProgress::Failed { .. }
                 | ScanProgress::Paused { .. } => {

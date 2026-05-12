@@ -6,6 +6,10 @@ members = [
     "crates/mythctl",
     "apps/mythodikal/src-tauri",
 ]
+# `scripts/gen-signing-key` is a one-shot Tauri Updater minisign keypair
+# generator (TASK-044). It's intentionally outside the workspace so its
+# `minisign` dep doesn't pollute the engine's transitive license tree.
+exclude = ["scripts/gen-signing-key"]
 
 [workspace.package]
 version = "0.0.1"
@@ -17,9 +21,17 @@ repository = "https://github.com/MikesRuthless12/mythodikal-av"
 homepage = "https://mythodikal.com"
 
 [workspace.dependencies]
-tauri = { version = "2", features = [] }
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
 tauri-build = { version = "2", features = [] }
 tauri-plugin-single-instance = "2"
+# TASK-044 / TASK-130 — engine self-update via Tauri Updater plugin (GitHub
+# Releases endpoint, ed25519-verified bundles).
+tauri-plugin-updater = "2"
+# TASK-157 — start-with-OS auto-launch (registry/SMAppService/.desktop).
+tauri-plugin-autostart = "2"
+# TASK-158 / engine_update:restart_pending — graceful restart trigger from
+# the tray menu after a successful self-update install.
+tauri-plugin-process = "2"
 
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1", features = ["derive"] }
@@ -36,6 +48,18 @@ clap = { version = "4", features = ["derive", "env"] }
 walkdir = "2"
 rayon = "1"
 crossbeam-channel = "0.5"
+
+# TASK-130 — ed25519 signature verification for engine update bundles
+# (Tauri Updater format is minisign / ed25519). We use the `minisign-verify`
+# crate to get correct key-id binding, magic-byte checks, and both legacy
+# + pre-hashed mode support — exactly the contract `tauri-plugin-updater`
+# uses internally. Hand-rolled byte-slicing was security-audited and
+# replaced with this dep (sec-review C1 + C2).
+minisign-verify = "0.2"
+base64 = "0.22"
+
+# TASK-131 — `If-Modified-Since`/`ETag` parsing for unrestricted free pulls.
+httpdate = "1"
 
 blake3 = "1"
 sha2 = "0.10"

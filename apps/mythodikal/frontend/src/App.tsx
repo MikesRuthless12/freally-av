@@ -18,6 +18,7 @@ import FirstRun from "@/pages/FirstRun";
 import { attachScanEvents } from "@/stores/scan";
 import { attachQuarantineEvents } from "@/stores/quarantine";
 import { attachShieldsEvents } from "@/stores/shields";
+import { attachTrayEvents } from "@/stores/tray";
 import { firstRunCompleted } from "@/stores/firstRun";
 
 const App: Component = () => {
@@ -29,6 +30,7 @@ const App: Component = () => {
   attachScanEvents();
   attachQuarantineEvents();
   attachShieldsEvents();
+  attachTrayEvents();
   return (
     <Show
       when={firstRunCompleted()}

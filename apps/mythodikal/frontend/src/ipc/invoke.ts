@@ -8,9 +8,14 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type Event, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
+  AutostartState,
   BatchOpReport,
   BatchProgressEvent,
+  DatabaseChannelStateView,
+  DatabaseUpdateProgressEvent,
   DefinitionCount,
+  EngineUpdateAvailableView,
+  EngineUpdateProgressEvent,
   EngineVersionInfo,
   ExclusionRequest,
   ExclusionView,
@@ -19,6 +24,7 @@ import type {
   FindingAction,
   FindingId,
   FindingView,
+  PublisherView,
   QuarantineId,
   QuarantineItem,
   ScanDetail,
@@ -28,6 +34,7 @@ import type {
   ScanSummary,
   SettingsPatch,
   SettingsSnapshot,
+  UpdateChannelStateView,
   UpdaterStatusView,
 } from "./types";
 
@@ -247,4 +254,81 @@ export function onFindingUpdated(
   handler: Handler<{ finding_id: FindingId; state: string }>,
 ): Promise<UnlistenFn> {
   return on("finding:updated", handler);
+}
+
+// ============================================================================
+// Updater channels (TASK-129/130/131/132/133)
+// ============================================================================
+
+export function updaterEngineState(): Promise<UpdateChannelStateView> {
+  return invoke<UpdateChannelStateView>("updater_engine_state");
+}
+
+export function updaterEngineCheckNow(): Promise<EngineUpdateAvailableView | null> {
+  return invoke<EngineUpdateAvailableView | null>("updater_engine_check_now");
+}
+
+export function updaterEngineSetAuto(enabled: boolean): Promise<void> {
+  return invoke<void>("updater_engine_set_auto", { enabled });
+}
+
+/** Drives the Tauri Updater plugin's download_and_install. Emits
+ *  `engine_update:progress` events along the way. Returns the new
+ *  version on success. */
+export function engineInstallUpdate(): Promise<string> {
+  return invoke<string>("engine_install_update");
+}
+
+export function updaterDbState(): Promise<DatabaseChannelStateView> {
+  return invoke<DatabaseChannelStateView>("updater_db_state");
+}
+
+export function updaterDbCheckNow(): Promise<DatabaseChannelStateView> {
+  return invoke<DatabaseChannelStateView>("updater_db_check_now");
+}
+
+export function updaterDbSetAuto(enabled: boolean): Promise<void> {
+  return invoke<void>("updater_db_set_auto", { enabled });
+}
+
+export function onEngineUpdateProgress(
+  handler: Handler<EngineUpdateProgressEvent>,
+): Promise<UnlistenFn> {
+  return on("engine_update:progress", handler);
+}
+
+export function onDbUpdateProgress(
+  handler: Handler<DatabaseUpdateProgressEvent>,
+): Promise<UnlistenFn> {
+  return on("db_update:progress", handler);
+}
+
+export function onScanPartialHash(
+  handler: Handler<Extract<ScanProgress, { kind: "partial_hash" }>>,
+): Promise<UnlistenFn> {
+  return on("scan:partial_hash", handler);
+}
+
+// ============================================================================
+// Publisher whitelist (FR-146 / TASK-136)
+// ============================================================================
+
+export function publisherSignerForPath(path: string): Promise<PublisherView> {
+  return invoke<PublisherView>("publisher_signer_for_path", { path });
+}
+
+export function publisherPruneCache(): Promise<number> {
+  return invoke<number>("publisher_prune_cache");
+}
+
+// ============================================================================
+// Autostart (FR-161 / TASK-157)
+// ============================================================================
+
+export function autostartGet(): Promise<AutostartState> {
+  return invoke<AutostartState>("autostart_get");
+}
+
+export function autostartSet(enabled: boolean): Promise<AutostartState> {
+  return invoke<AutostartState>("autostart_set", { enabled });
 }

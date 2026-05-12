@@ -1,0 +1,250 @@
+name: Release
+
+# TASK-047 + TASK-048 — on `v*` tag push, build the Tauri matrix, sign with
+# the ed25519 keypair from `TAURI_SIGNING_PRIVATE_KEY`, upload the bundles
+# to the GitHub Release for the tag, and publish a `latest.json` that the
+# Tauri Updater plugin (TASK-044 / TASK-130) consumes.
+#
+# **Distribution surface:** GitHub Releases only. Per `docs/prd.md` § 1.5.2,
+# there is no `releases.mythodikal.com` mirror — every Tauri Updater check
+# resolves against this repo's Releases endpoint, which means we don't
+# pay for a CDN and the supply-chain stays inside one publicly-auditable
+# surface.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to release (e.g. v0.4.0). Must already exist."
+        required: true
+        type: string
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+# Sec-review L3: workflow-level perms stay minimal; the two jobs that
+# touch GH Releases (`build` via tauri-action, `publish-latest-json` via
+# gh release upload) request `contents: write` per-job below.
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  RUST_BACKTRACE: 1
+
+jobs:
+  build:
+    name: ${{ matrix.target.label }}
+    runs-on: ${{ matrix.target.os }}
+    # Sec-review L3 + supply-chain hygiene: only the tauri-action step
+    # needs to write to the GH Release; the cache + dep-install steps
+    # do not. We grant `contents: write` here because tauri-action's
+    # release-asset upload happens inside this job.
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - { os: ubuntu-22.04, label: linux-x86_64, rust_target: x86_64-unknown-linux-gnu, args: "" }
+          - { os: ubuntu-22.04-arm, label: linux-aarch64, rust_target: aarch64-unknown-linux-gnu, args: "" }
+          - { os: windows-latest, label: windows-x86_64, rust_target: x86_64-pc-windows-msvc, args: "" }
+          - { os: macos-14, label: macos-aarch64, rust_target: aarch64-apple-darwin, args: "--target aarch64-apple-darwin" }
+          - { os: macos-13, label: macos-x86_64, rust_target: x86_64-apple-darwin, args: "--target x86_64-apple-darwin" }
+    steps:
+      # Sec-review H1: every third-party action is pinned to a commit
+      # SHA. Pinning the `v4` / `v0` tag would let the action owner
+      # rewrite history under the tag (supply-chain risk). The version
+      # comment after each SHA documents what we expect.
+      - name: Checkout
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+
+      - name: Install Tauri prerequisites (Linux)
+        if: startsWith(matrix.target.os, 'ubuntu-')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libssl-dev \
+            build-essential \
+            curl \
+            wget \
+            file
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@fe02b34f77f8bc703788d5817da081398fad5dd2 # v4.0.0
+        with:
+          version: 10
+
+      - name: Setup Node
+        uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4.1.0
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: apps/mythodikal/frontend/pnpm-lock.yaml
+
+      - name: Setup Rust
+        # `dtolnay/rust-toolchain` doesn't tag releases; pin to a SHA
+        # known to support the `toolchain:` + `targets:` inputs.
+        uses: dtolnay/rust-toolchain@b3b07ba8b418998c39fb20f53e8b695cdcc8de1b # 2025-08 stable
+        with:
+          toolchain: 1.94.0
+          targets: ${{ matrix.target.rust_target }}
+
+      - name: Cache cargo
+        uses: actions/cache@1bd1e32a3bdc45362d1e726936510720a7c30a57 # v4.2.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          # Cache key includes the rust toolchain version so a bump
+          # invalidates stale builds.
+          key: cargo-release-${{ matrix.target.label }}-rust1.94.0-${{ hashFiles('**/Cargo.lock', '**/Cargo.toml') }}
+          restore-keys: |
+            cargo-release-${{ matrix.target.label }}-rust1.94.0-
+
+      - name: Install frontend dependencies
+        run: pnpm -C apps/mythodikal/frontend install --frozen-lockfile
+
+      - name: Build & sign Tauri bundles
+        # Pinned to a commit SHA per sec-review H1. Update only when
+        # auditing the new tauri-action release diff.
+        uses: tauri-apps/tauri-action@9a2e3bd86a76cfe263e0f5b3a1ad14fa5f72e62c # v0.5.21
+        env:
+          # ed25519 signing keypair pulled from repo secrets. The
+          # `TAURI_SIGNING_PRIVATE_KEY` value is the base64-encoded contents
+          # of the encrypted secret-key file generated by
+          # `scripts/gen-signing-key/`. The password (or empty string)
+          # decrypts it inside the action.
+          #
+          # Missing secret = unset env var = tauri-action SKIPS signing
+          # but still publishes bundles. That's a release operator's
+          # mistake; the workflow does not fail-loud on it because some
+          # downstream forks may intentionally release unsigned. Maintainers
+          # of `MikesRuthless12/mythodikal-av` must ensure both secrets are
+          # set before tagging — see `docs/launch-checklists/v0.4.md`.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # Per `docs/prd.md` § 1.5.3 — no Apple Developer Program, no
+          # Windows OV/EV cert. The Tauri Action's signing inputs are
+          # intentionally **unset** so the workflow doesn't try to
+          # notarize / authenticode-sign. Updater ed25519 signatures are
+          # the sole integrity gate.
+        with:
+          projectPath: apps/mythodikal/src-tauri
+          tagName: ${{ github.event.inputs.tag || github.ref_name }}
+          releaseName: "Mythodikal Anti-Virus ${{ github.event.inputs.tag || github.ref_name }}"
+          releaseBody: |
+            Mythodikal Anti-Virus release. See `CHANGELOG.md` for details.
+
+            - Linux: `.deb`, `.rpm`, `.AppImage`
+            - Windows: `.msi`, `.exe` (NSIS) — unsigned per § 1.5.3
+            - macOS: `.dmg`, `.app` — unsigned per § 1.5.3
+
+            Engine signature: ed25519, verified by the Tauri Updater plugin
+            against the public key compiled into the app. Verify locally:
+            `minisign -V -p <pubkey> -m <bundle>`.
+          releaseDraft: false
+          prerelease: false
+          includeUpdaterJson: true
+          updaterJsonPreferUniversal: true
+          args: ${{ matrix.target.args }}
+
+  publish-latest-json:
+    name: Publish latest.json (Updater endpoint)
+    needs: build
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+
+      - name: Download release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          mkdir -p _release
+          # tauri-action writes `latest.json` per-platform; gather them
+          # and merge into one universal manifest the Updater plugin can
+          # consume from a single endpoint.
+          gh release download "$TAG" --pattern 'latest*.json' --dir _release || true
+          ls -la _release || true
+
+      - name: Merge per-platform latest.json files
+        env:
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PYEOF'
+          import glob, json, os, pathlib, sys
+
+          # Sec-review L4: hard allowlist of platform keys the Tauri
+          # Updater plugin recognizes. Per-target latest.json files come
+          # from tauri-action build outputs; an attacker who controls a
+          # release-asset filename could inject an arbitrary
+          # `platforms[<key>]` entry. Restrict to the platforms this
+          # repo actually publishes.
+          ALLOWED_PLATFORMS = {
+              "linux-x86_64", "linux-aarch64",
+              "windows-x86_64",
+              "darwin-aarch64", "darwin-x86_64",
+              # Tauri also accepts `macos-` aliases; accept both spellings.
+              "macos-aarch64", "macos-x86_64",
+          }
+
+          tag = os.environ["TAG"]
+          version = tag.lstrip("v")
+          out = {
+              "version": version,
+              "notes": f"Mythodikal Anti-Virus {tag}. See CHANGELOG.md for details.",
+              "pub_date": "",
+              "platforms": {},
+          }
+          sources = sorted(glob.glob("_release/latest*.json"))
+          if not sources:
+              # Sec-review/code-review I4: fail-loud rather than publish
+              # an empty manifest that would brick every installed
+              # client's updater (it would treat the release as "no
+              # platforms available" and silently skip).
+              print("FATAL: no `latest*.json` artifacts found in _release/", file=sys.stderr)
+              sys.exit(1)
+          for src in sources:
+              try:
+                  data = json.loads(pathlib.Path(src).read_text())
+              except Exception as e:
+                  print(f"skip {src}: {e}", file=sys.stderr)
+                  continue
+              if not out["pub_date"]:
+                  out["pub_date"] = data.get("pub_date", "")
+              for platform_key, payload in data.get("platforms", {}).items():
+                  if platform_key not in ALLOWED_PLATFORMS:
+                      print(f"skip platform key not in allowlist: {platform_key!r}", file=sys.stderr)
+                      continue
+                  # Last-write-wins is fine here; tauri-action emits a
+                  # full per-target manifest, so we simply union them.
+                  out["platforms"][platform_key] = payload
+          if not out["platforms"]:
+              print("FATAL: no allowed platforms after merge", file=sys.stderr)
+              sys.exit(1)
+          pathlib.Path("_release/latest.json").write_text(json.dumps(out, indent=2))
+          print(json.dumps(out, indent=2))
+          PYEOF
+
+      - name: Upload merged latest.json to the GH Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          gh release upload "$TAG" _release/latest.json --clobber
