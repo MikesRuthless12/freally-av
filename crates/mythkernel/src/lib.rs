@@ -10,6 +10,7 @@ pub mod db;
 pub mod engine;
 pub mod error;
 pub mod eta;
+pub mod exclusions;
 pub mod findings;
 pub mod hasher;
 pub mod history;

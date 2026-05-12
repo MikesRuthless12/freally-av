@@ -27,6 +27,7 @@ use mythkernel::{
         hash_blacklist::HashBlacklistDetector,
     },
     engine::ScanEngine,
+    exclusions::{self, ExclusionKind, ExclusionScope},
     findings::{self, FindingAction as KernelAction},
     quarantine::{BatchProgress, ProgressCallback, QuarantineVault},
     realtime::shields::{ShieldsActor, ShieldsBroker, ShieldsState},
@@ -885,6 +886,65 @@ pub async fn engine_version(state: State<'_, AppState>) -> Result<EngineVersionI
 }
 
 // ============================================================================
+// Exclusions (FR-060/061/062/134, TASK-042)
+// ============================================================================
+
+#[tauri::command]
+pub async fn exclusion_list(state: State<'_, AppState>) -> Result<Vec<ExclusionView>, String> {
+    let conn = state
+        .db
+        .lock()
+        .map_err(|_| "db lock poisoned".to_string())?;
+    let rows = exclusions::list(&conn).map_err(stringify)?;
+    Ok(rows.into_iter().map(to_exclusion_view).collect())
+}
+
+#[tauri::command]
+pub async fn exclusion_add(
+    state: State<'_, AppState>,
+    request: ExclusionRequest,
+) -> Result<ExclusionView, String> {
+    let kind: ExclusionKind = request.kind.parse().map_err(stringify)?;
+    let scope: ExclusionScope = request.scope.parse().map_err(stringify)?;
+    let conn = state
+        .db
+        .lock()
+        .map_err(|_| "db lock poisoned".to_string())?;
+    let id = exclusions::add(
+        &conn,
+        kind,
+        &request.value,
+        scope,
+        request.expires_at_utc,
+        request.reason.as_deref(),
+    )
+    .map_err(stringify)?;
+    let row = exclusions::get(&conn, id).map_err(stringify)?;
+    Ok(to_exclusion_view(row))
+}
+
+#[tauri::command]
+pub async fn exclusion_remove(state: State<'_, AppState>, id: i64) -> Result<(), String> {
+    let conn = state
+        .db
+        .lock()
+        .map_err(|_| "db lock poisoned".to_string())?;
+    exclusions::remove(&conn, id).map_err(stringify)
+}
+
+fn to_exclusion_view(e: exclusions::Exclusion) -> ExclusionView {
+    ExclusionView {
+        id: e.id,
+        kind: e.kind.as_str().to_string(),
+        value: e.value,
+        scope: e.scope.as_str().to_string(),
+        expires_at_utc: e.expires_at_utc,
+        created_at_utc: e.created_at_utc,
+        reason: e.reason,
+    }
+}
+
+// ============================================================================
 // Shields (FR-160 / TASK-156)
 // ============================================================================
 
@@ -1078,6 +1138,9 @@ macro_rules! invoke_handler {
             $crate::commands::engine_version,
             $crate::commands::shields_get,
             $crate::commands::shields_set,
+            $crate::commands::exclusion_list,
+            $crate::commands::exclusion_add,
+            $crate::commands::exclusion_remove,
         ]
     };
 }

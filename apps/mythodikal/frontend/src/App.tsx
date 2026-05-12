@@ -12,6 +12,7 @@ import { AppFrame } from "@/components/AppFrame";
 import Scan from "@/pages/Scan";
 import History from "@/pages/History";
 import Quarantine from "@/pages/Quarantine";
+import Exclusions from "@/pages/Exclusions";
 import Settings from "@/pages/Settings";
 import { attachScanEvents } from "@/stores/scan";
 import { attachQuarantineEvents } from "@/stores/quarantine";
@@ -29,6 +30,7 @@ const App: Component = () => {
       <Route path="/scan" component={Scan} />
       <Route path="/history" component={History} />
       <Route path="/quarantine" component={Quarantine} />
+      <Route path="/exclusions" component={Exclusions} />
       <Route path="/settings" component={Settings} />
     </Router>
   );

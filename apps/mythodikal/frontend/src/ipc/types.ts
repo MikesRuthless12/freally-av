@@ -149,6 +149,28 @@ export interface EngineVersionInfo {
   version: string;
 }
 
+// Exclusions (TASK-042 / FR-060/061/062/134)
+export type ExclusionKind = "path" | "glob" | "hash_blake3" | "hash_sha256";
+export type ExclusionScope = "scan_only" | "realtime_only" | "both";
+
+export interface ExclusionView {
+  id: number;
+  kind: ExclusionKind | string;
+  value: string;
+  scope: ExclusionScope | string;
+  expires_at_utc: number | null;
+  created_at_utc: number;
+  reason: string | null;
+}
+
+export interface ExclusionRequest {
+  kind: ExclusionKind;
+  value: string;
+  scope: ExclusionScope;
+  expires_at_utc?: number | null;
+  reason?: string | null;
+}
+
 // ScanProgress mirrors the tagged enum from
 // mythkernel::scan::ScanProgress (also re-exported through
 // ui-bridge::types). The Tauri Emitter serializes the enum with the

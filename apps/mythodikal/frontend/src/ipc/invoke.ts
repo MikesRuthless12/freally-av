@@ -12,6 +12,8 @@ import type {
   BatchProgressEvent,
   DefinitionCount,
   EngineVersionInfo,
+  ExclusionRequest,
+  ExclusionView,
   FeedState,
   FeedUpdateResult,
   FindingAction,
@@ -149,6 +151,21 @@ export function settingsUpdate(patch: SettingsPatch): Promise<void> {
 
 export function engineVersion(): Promise<EngineVersionInfo> {
   return invoke<EngineVersionInfo>("engine_version");
+}
+
+// Exclusions
+export function exclusionList(): Promise<ExclusionView[]> {
+  return invoke<ExclusionView[]>("exclusion_list");
+}
+
+export function exclusionAdd(
+  request: ExclusionRequest,
+): Promise<ExclusionView> {
+  return invoke<ExclusionView>("exclusion_add", { request });
+}
+
+export function exclusionRemove(id: number): Promise<void> {
+  return invoke<void>("exclusion_remove", { id });
 }
 
 // ============================================================================

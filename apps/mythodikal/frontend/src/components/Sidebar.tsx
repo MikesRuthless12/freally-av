@@ -13,6 +13,7 @@ const NAV: { path: string; label: string }[] = [
   { path: "/scan", label: "Scan" },
   { path: "/history", label: "History" },
   { path: "/quarantine", label: "Quarantine" },
+  { path: "/exclusions", label: "Exclusions" },
   { path: "/settings", label: "Settings" },
 ];
 
