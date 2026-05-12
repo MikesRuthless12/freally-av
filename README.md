@@ -68,7 +68,7 @@ This license posture is unusual for an AV product. The reasoning is in [`docs/pr
 
 The roadmap targets stable **v0.19.84**, sequenced across 16 phases. Current phase status is tracked live in [`docs/product-roadmap.md`](docs/product-roadmap.md).
 
-**Current state:** Phases 0, 1, 2, 3 are shipped. Phase 4 waves 1, 2, 3, 4, 5 are committed pre-tag — ETA, adaptive throttle, pause/resume, Shields kill-switch, Exclusions CRUD (incl. publisher kind), throughput chart, first-run flow, feed auto-updater, release pipeline + GH-Releases-signed Tauri Updater, dual-channel (engine vs database) update architecture, About page per-source definition counts, Settings → Updates dual pane, operator-mode live BLAKE3 partial-hash display, per-exclusion 24-hour quick-action, cross-platform publisher whitelist (Authenticode / codesign / GPG), and Tauri-plugin-autostart wiring all in the tree. Final wave 6 (system tray icon + menu — TASK-158) plus the v0.4.0 launch checklist (TASK-049 sign-off, screenshots, benchmark rerun) gate the promotion from `[Unreleased]` to `v0.4.0`.
+**Current state:** Phases 0, 1, 2, 3 are shipped. **Phase 4 is code-complete (waves 1–6 committed 2026-05-12)** — ETA, adaptive throttle, pause/resume, Shields kill-switch, Exclusions CRUD (incl. publisher kind), throughput chart, first-run flow, feed auto-updater, release pipeline + GH-Releases-signed Tauri Updater, dual-channel (engine vs database) update architecture, About page per-source definition counts, Settings → Updates dual pane, operator-mode live BLAKE3 partial-hash display, per-exclusion 24-hour quick-action, cross-platform publisher whitelist (Authenticode / codesign / GPG), Tauri-plugin-autostart wiring with live Settings toggle (TASK-157), and the FR-162.5 system tray with state-machine icon (TASK-158) all in the tree. Only TASK-049 (launch-checklist sign-off — benchmarks rerun + screenshots + tag procedure) gates the `[Unreleased]` → `v0.4.0` promotion. **Phase 5 (Windows MFT Superpowers) is the active phase.**
 
 | Phase | Goal | Version | Status |
 |---|---|---|---|
@@ -76,8 +76,8 @@ The roadmap targets stable **v0.19.84**, sequenced across 16 phases. Current pha
 | 1 | Engine Core | v0.1.x | ✅ Shipped |
 | 2 | Detection Pipeline | v0.2.x | ✅ Shipped |
 | 3 | UI Alpha | v0.3.x | ✅ Shipped |
-| 4 | Linux MVP & Magic Moment | v0.4.x | 🟡 Wave 1 in-flight |
-| 5 | Windows MFT Superpowers | v0.5.x | Pending |
+| 4 | Linux MVP & Magic Moment | v0.4.x | 🟢 Code-complete (tag gated on TASK-049) |
+| 5 | Windows MFT Superpowers | v0.5.x | 🟡 Active (wave 1 in-flight) |
 | 6 | macOS Port (unsigned, see `docs/prd.md` § 1.5.3) | v0.6.x | Pending |
 | 7 | YARA & Rule Manager | v0.7.x | Pending |
 | 8 | Linux Real-time (fanotify daemon) | v0.8.x | Pending |
