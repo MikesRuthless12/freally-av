@@ -1,12 +1,13 @@
-// Sidebar (TASK-036).
+// Sidebar (TASK-036; Shields wiring TASK-156).
 //
-// Left rail with the four main routes + a placeholder Shields badge.
-// Real Shields wiring (FR-160) lands in Phase 4 / TASK-156 — for now
-// the badge always reads "Shields: ON" so the UI shape matches the
-// final design.
+// Left rail with the four main routes + the live Shields badge. The
+// badge subscribes to the `shields:changed` Tauri event via the
+// shields store (mounted in App.tsx) and offers Pause 15 min / Pause
+// 1 h / Turn OFF / Turn ON as a small menu.
 
 import type { Component } from "solid-js";
 import { A } from "@solidjs/router";
+import { ShieldsBadge } from "./ShieldsBadge";
 
 const NAV: { path: string; label: string }[] = [
   { path: "/scan", label: "Scan" },
@@ -38,15 +39,7 @@ export const Sidebar: Component = () => {
         ))}
       </nav>
       <div class="border-t border-myth-line px-4 py-3">
-        <div class="flex items-center gap-2">
-          <span class="h-2 w-2 rounded-full bg-myth-ok" />
-          <span class="font-mono text-xs uppercase tracking-wide text-myth-text-md">
-            Shields: ON
-          </span>
-        </div>
-        <div class="mt-1 font-mono text-[10px] text-myth-text-lo">
-          Real toggle lands in Phase 4 (FR-160).
-        </div>
+        <ShieldsBadge />
       </div>
     </aside>
   );

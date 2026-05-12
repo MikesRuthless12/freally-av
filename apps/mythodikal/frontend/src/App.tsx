@@ -15,12 +15,14 @@ import Quarantine from "@/pages/Quarantine";
 import Settings from "@/pages/Settings";
 import { attachScanEvents } from "@/stores/scan";
 import { attachQuarantineEvents } from "@/stores/quarantine";
+import { attachShieldsEvents } from "@/stores/shields";
 
 const App: Component = () => {
   // Attach during the top-level render so the listeners' onCleanup
   // only fires on full app teardown.
   attachScanEvents();
   attachQuarantineEvents();
+  attachShieldsEvents();
   return (
     <Router root={(props) => <AppFrame>{props.children}</AppFrame>}>
       <Route path="/" component={() => <Navigate href="/scan" />} />

@@ -1,6 +1,8 @@
 use std::sync::{Arc, Mutex};
 
-use mythkernel::{db, engine::ScanEngine, quarantine::QuarantineVault};
+use mythkernel::{
+    db, engine::ScanEngine, quarantine::QuarantineVault, realtime::shields::ShieldsBroker,
+};
 use ui_bridge::commands::{AppState, build_pipeline_from_feeds};
 use ui_bridge::invoke_handler;
 
@@ -66,9 +68,18 @@ fn init_state() -> Result<AppState, Box<dyn std::error::Error>> {
         QuarantineVault::new(&data_dir).map_err(|e| format!("open quarantine vault: {e}"))?,
     );
 
+    // FR-160 / TASK-156 — master Shields kill-switch. Default ON;
+    // persists across restart at `<data_dir>/shields.json`. Phase 4
+    // ships the architecture only; daemons in Phases 8/9/12 will
+    // subscribe to ShieldsBroker::subscribe() and translate the state
+    // into their platform's ALLOW-everything mode when OFF.
+    let shields =
+        ShieldsBroker::open(&data_dir).map_err(|e| format!("open shields broker: {e}"))?;
+
     tracing::info!(
         data_dir = %data_dir.display(),
         detectors = pipeline_count,
+        shields_enabled = shields.get().enabled,
         "engine initialized"
     );
 
@@ -76,6 +87,7 @@ fn init_state() -> Result<AppState, Box<dyn std::error::Error>> {
         engine,
         db,
         vault,
+        shields,
         data_dir,
         engine_version: env!("CARGO_PKG_VERSION").to_string(),
     })

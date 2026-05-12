@@ -29,6 +29,7 @@ use mythkernel::{
     engine::ScanEngine,
     findings::{self, FindingAction as KernelAction},
     quarantine::{BatchProgress, ProgressCallback, QuarantineVault},
+    realtime::shields::{ShieldsActor, ShieldsBroker, ShieldsState},
     scan::{ScanOptions, ScanProgress, ScanTarget},
     updater::{abusech::AbuseChUpdater, nsrl::NsrlSource, nsrl::NsrlUpdater},
 };
@@ -202,6 +203,10 @@ pub struct AppState {
     /// the tokio multi-thread runtime.
     pub db: Arc<Mutex<Connection>>,
     pub vault: Arc<QuarantineVault>,
+    /// Shields master kill-switch (FR-160, TASK-156). Broker is cheap
+    /// to clone; the frontend store subscribes via shields_get +
+    /// shields:changed events.
+    pub shields: ShieldsBroker,
     pub data_dir: PathBuf,
     pub engine_version: String,
 }
@@ -880,6 +885,35 @@ pub async fn engine_version(state: State<'_, AppState>) -> Result<EngineVersionI
 }
 
 // ============================================================================
+// Shields (FR-160 / TASK-156)
+// ============================================================================
+
+#[tauri::command]
+pub async fn shields_get(state: State<'_, AppState>) -> Result<ShieldsState, String> {
+    Ok(state.shields.get())
+}
+
+/// `enabled = true` clears any pause. `enabled = false` + pause_minutes
+/// = None is the "until I turn it back on" form; Some(n) schedules an
+/// auto-resume at now + n minutes. Emits `shields:changed` event.
+#[tauri::command]
+pub async fn shields_set(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    enabled: bool,
+    pause_minutes: Option<u32>,
+) -> Result<ShieldsState, String> {
+    let next = state
+        .shields
+        .set(enabled, pause_minutes, ShieldsActor::Ui)
+        .map_err(stringify)?;
+    if let Err(err) = app.emit("shields:changed", &next) {
+        tracing::warn!(error = %err, "tauri emit (shields:changed) failed");
+    }
+    Ok(next)
+}
+
+// ============================================================================
 // Helpers
 // ============================================================================
 
@@ -1042,6 +1076,8 @@ macro_rules! invoke_handler {
             $crate::commands::settings_get,
             $crate::commands::settings_update,
             $crate::commands::engine_version,
+            $crate::commands::shields_get,
+            $crate::commands::shields_set,
         ]
     };
 }

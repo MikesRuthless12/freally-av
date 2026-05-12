@@ -23,6 +23,7 @@ pub mod throttle;
 
 pub mod detect;
 pub mod ipc;
+pub mod realtime;
 pub mod updater;
 pub mod walker;
 
