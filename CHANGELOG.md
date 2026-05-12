@@ -31,6 +31,24 @@ Each release section lists which `TASK-NNN` items from `docs/product-roadmap.md`
   - TASK-016: TOML config loader (`<config_dir>/config.toml`) with FR-110 (telemetry off) and shields-default-on
   - TASK-017: `mythctl scan <path> [--format text|json] [--sha256] [--follow-symlinks]`
   - TASK-018: criterion benches for walker + hasher; `scripts/bench-1m-files.sh` end-to-end harness asserting NFR-001 budget
+- **Phase 3 — UI Alpha (v0.3.0..v0.3.5)** _(shipped 2026-05-11)_
+  - Engine pipeline integration: `ScanEngine::with_detection_pipeline` lets the engine evaluate a `DetectionPipeline` inline for every hashed file; `ScanProgress::Finding` event variant added; `findings_count` propagated through `Completed` event and `scans` row.
+  - TASK-028: 20 typed `#[tauri::command]` async wrappers in `crates/ui-bridge/src/commands.rs` covering scan (start / status / cancel), history (list / get), findings (list / action), quarantine (list / restore / delete / restore-all / delete-all / restore-many / delete-many), feed (status / update_now / definition_count), settings (get / update stub), system (engine_version).
+  - TASK-028: per-scan event forwarder (`run_scan_event_forwarder`) drains the engine's `tokio::broadcast` receiver into Tauri events with a 100 ms throttle on `scan:progress` per FR-085, and reconciles a terminal event from the DB if the channel dropped Completed/Failed on lag.
+  - TASK-028: `AppState { engine, db, vault, data_dir, engine_version }` initialized in `apps/mythodikal/src-tauri/src/lib.rs`; pipeline built from `<data_dir>/feeds/` at startup via `build_pipeline_from_feeds`; missing feed files skipped silently for first-run users.
+  - TASK-029: Rust IPC payloads in `crates/ui-bridge/src/types.rs` (ScanRequest / ScanSummary / ScanDetail / FindingView / FindingAction / QuarantineItem / BatchOpReport / BatchKindWire / BatchProgressEvent / FeedState / FeedUpdateResult / DefinitionCount / SettingsSnapshot + sub-types / EngineVersionInfo); hand-written TS mirror at `apps/mythodikal/frontend/src/ipc/types.ts` kept in lockstep manually.
+  - TASK-029: typed `invoke()` wrapper at `apps/mythodikal/frontend/src/ipc/invoke.ts` — one function per command, one `onScan*` / `onQuarantine*` helper per event topic.
+  - TASK-030: Solid signal stores (`stores/scan.ts`, `stores/history.ts`, `stores/quarantine.ts`) attached at app-mount time (not per-page) so a scan kicked off from `/scan` keeps streaming events into the singleton stores while the user is on `/history` or `/quarantine`.
+  - TASK-031: components — `ProgressBar`, `FindingRow`, `PathDisplay` (FR-085a subset; full middle-out truncation is Phase 10 TASK-085b), `StatusPill` (token-driven variants for scan status + severity; `detected` / `none` cases map to `warn` not `neutral`), `ThroughputPill` with SI-suffix bytes/sec.
+  - TASK-032: Scan dashboard — single primary action, live counters, current path, findings list with action menu. Pause / cancel UI returns a clear "Phase 4 (TASK-040)" error.
+  - TASK-033: History page — table per PRD § 8.2; click-through detail view showing the scan's findings.
+  - TASK-034: Quarantine page — list with multi-select checkboxes; bulk Restore-All / Delete-All / Restore-Selected / Delete-Selected. Delete-All requires typing `DELETE` in a confirm input per FR-046 (mirrors the CLI's `--confirm`). Live progress bar binds to `quarantine:batch_progress`.
+  - TASK-035: Settings page skeleton — General / Scanning / Privacy / About sub-tabs read-only (full editing Phase 4 / TASK-041). About tab embeds an "Update feeds now" form so users can trigger `feed_update_now` from the UI (FR-094).
+  - TASK-036: Sidebar nav + AppFrame + `@solidjs/router` wiring; routes `/scan`, `/history`, `/quarantine`, `/settings`; `/` redirects to `/scan`. Sidebar surfaces a placeholder Shields-ON badge (live wiring lands in Phase 4 / FR-160 / TASK-156).
+  - TASK-037: Tauri smoke verified via `cargo check --workspace` + `pnpm --filter mythodikal-frontend run build` (no `cargo tauri build` in CI yet — Phase 4).
+  - **Security-review fixes (`/security-review` Phase 3):** Strict CSP (`default-src 'self' tauri:`) in `tauri.conf.json`; explicit Tauri capabilities manifest at `apps/mythodikal/src-tauri/capabilities/main.json`; `validate_scan_target` / `validate_restore_target` canonicalize and refuse a denylist of system directories on Windows (`C:\Windows`, `C:\Program Files`, `C:\Program Files (x86)`, `\\?\GLOBALROOT`) and Unix (`/etc /bin /sbin /usr /var /boot /sys /proc /lib /lib64 /System /private`); `scan_start` / `quarantine_restore` / `finding_action` apply the gate before any FS op; `feed_update_now` rejects non-HTTPS `nsrl_url`.
+  - **Code-review fixes (`/review` Phase 3):** scan event forwarder throttles `scan:progress` to ≤ 10 Hz and reconciles terminal events on lag; event subscriptions moved to App-level lifetime; `StatusPill` `detected` / `none` cases mapped to `warn`; `BatchOpReport.kind` / `BatchProgressEvent.kind` narrowed to a `BatchKindWire` enum closing field drift with TS; misleading "shares Connection" comment in `lib.rs` corrected (engine + commands hold separate connections to the same WAL DB file).
+  - Workspace deps: `ui-bridge` gains `tokio`, `tracing`, `hex`, `rusqlite`, `thiserror`, `tempfile (dev)`. Frontend gains `@solidjs/router` 0.15.x.
 - **Phase 2 — Detection Pipeline (v0.2.0..v0.2.5)** _(shipped 2026-05-11)_
   - TASK-019: Detection pipeline core (`Detector` trait, `FileCtx`, `DetectorVerdict` { Clean | SkipFile | Malicious }, `PipelineOutcome`, `Severity` enum, `DetectionPipeline` with priority-ordered short-circuit evaluation)
   - TASK-020: Hash blacklist detector (mmap-loaded sorted-32-byte-key file with O(log N) binary-search lookup; SHA-256 by default with optional BLAKE3 override; emits `Malicious` verdicts with `abusech:hash:<prefix>` rule IDs)
@@ -109,18 +127,21 @@ The following entries are placeholders aligned with the Version → Phase Map in
 - `mythctl quarantine` and `mythctl feed` subcommands (TASK-026).
 - End-to-end drop → detect → quarantine → restore smoke test (TASK-027).
 
-### [0.3.x] — Phase 3 — UI Alpha _(scheduled)_
+### [0.3.x] — Phase 3 — UI Alpha _(shipped 2026-05-11; see `[Unreleased]` above for the full entry)_
 
-- Tauri commands: Scan, History, Findings, Quarantine, Settings skeleton (TASK-028).
-- Generated TS IPC types from Rust source-of-truth (TASK-029).
-- Solid stores: scan + history with throttled event consumption (TASK-030).
-- Components: ProgressBar, FindingRow, ThroughputPill, StatusPill (TASK-031).
-- Page: Scan dashboard with idle/running/paused/completed/failed states (TASK-032).
-- Page: History (TASK-033).
-- Page: Quarantine (TASK-034).
-- Page: Settings skeleton — General + Privacy + About (TASK-035).
-- Sidebar nav + app frame (TASK-036).
-- Cross-platform Tauri dev/build smoke (TASK-037).
+- Engine + DetectionPipeline integration: scan emits `ScanProgress::Finding` inline; findings_count propagated.
+- Tauri commands: Scan, History, Findings, Quarantine, Settings stub, Feed, Engine version (TASK-028).
+- Hand-written TS mirror of Rust IPC types (TASK-029).
+- Solid stores: scan + history + quarantine attached at App-mount (TASK-030).
+- Components: ProgressBar, FindingRow, ThroughputPill, StatusPill, PathDisplay (TASK-031).
+- Page: Scan dashboard with live counters + findings list (TASK-032).
+- Page: History table with detail drill-in (TASK-033).
+- Page: Quarantine with bulk Restore/Delete + typed-DELETE gate (TASK-034).
+- Page: Settings skeleton + "Update feeds now" form (TASK-035).
+- Sidebar nav + AppFrame + `@solidjs/router` (TASK-036).
+- Tauri smoke via `cargo check` + `pnpm build` (TASK-037).
+- Security-review fixes: strict CSP, capabilities allowlist, path-policy gate (deny-list of system paths), HTTPS-only `nsrl_url`.
+- Code-review fixes: ≤ 10 Hz `scan:progress` throttle, terminal-event reconciliation from DB on broadcast lag, app-level event subscription lifetime, BatchKind wire type narrowed.
 
 ### [0.4.x] — Phase 4 — Linux MVP & Magic Moment _(scheduled)_
 

@@ -68,15 +68,15 @@ This license posture is unusual for an AV product. The reasoning is in [`docs/pr
 
 The roadmap targets stable **v0.19.84**, sequenced across 16 phases. Current phase status is tracked live in [`docs/product-roadmap.md`](docs/product-roadmap.md).
 
-**Current state:** Phases 0, 1, and 2 are committed and pushed on `main` / the corresponding feature branches. Active work is moving into Phase 3 (UI Alpha) next.
+**Current state:** Phases 0, 1, 2, and 3 are committed and pushed on the corresponding feature branches. Active work is moving into Phase 4 (Linux MVP & Magic Moment) next.
 
 | Phase | Goal | Version | Status |
 |---|---|---|---|
 | 0 | Foundation & Setup | v0.0.x | ✅ Shipped |
 | 1 | Engine Core | v0.1.x | ✅ Shipped |
 | 2 | Detection Pipeline | v0.2.x | ✅ Shipped |
-| 3 | UI Alpha | v0.3.x | Next |
-| 4 | Linux MVP & Magic Moment | v0.4.x | Pending |
+| 3 | UI Alpha | v0.3.x | ✅ Shipped |
+| 4 | Linux MVP & Magic Moment | v0.4.x | Next |
 | 5 | Windows MFT Superpowers | v0.5.x | Pending |
 | 6 | macOS Port (unsigned, see `docs/prd.md` § 1.5.3) | v0.6.x | Pending |
 | 7 | YARA & Rule Manager | v0.7.x | Pending |
@@ -90,7 +90,7 @@ The roadmap targets stable **v0.19.84**, sequenced across 16 phases. Current pha
 | 15 | Stable Run-up | v0.19.x | Pending |
 | 16 | **Stable Release** | **v0.19.84** | Pending |
 
-**What works today (after Phase 2):** the `mythctl` CLI can scan a directory, ingest abuse.ch and NSRL feeds into local `.bin` files, detect known-bad files by SHA-256, quarantine them (XOR'd, with the key in your OS keychain), and restore them byte-for-byte. The Tauri GUI shell exists but isn't wired to the engine yet — that's Phase 3.
+**What works today (after Phase 3):** Both the `mythctl` CLI **and** the Tauri GUI can scan a directory, ingest abuse.ch and NSRL feeds into local `.bin` files, detect known-bad files by SHA-256, quarantine them (XOR'd, with the key in your OS keychain), and restore them byte-for-byte. The GUI ships four pages — Scan, History, Quarantine, Settings — wired through 20 typed Tauri commands. Scan progress streams to the UI as live events at ≤ 10 Hz per `docs/prd.md` § 4.2. Path-policy gate + strict CSP + Tauri capabilities allowlist are in place per the Phase-3 security review.
 
 ---
 
