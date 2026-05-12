@@ -35,6 +35,8 @@ rusqlite = { workspace = true }
 toml = { workspace = true }
 memmap2 = { workspace = true }
 reqwest = { workspace = true }
+keyring = { workspace = true }
+rand = { workspace = true }
 
 [features]
 default = []

@@ -52,6 +52,15 @@ memmap2 = "0.9"
 # we use rustls-only — no openssl / native-tls dep tree.
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "gzip", "deflate", "json"] }
 
+# OS keychain access for the quarantine vault XOR key (TASK-024). Pure-Rust
+# bindings to libsecret / macOS Keychain / Windows Credential Manager. Falls
+# back to a file-based key store on platforms where the OS keychain is not
+# reachable (CI / headless Linux without dbus).
+keyring = "3"
+
+# Per-install RNG for the quarantine XOR key (TASK-024).
+rand = "0.8"
+
 [profile.release]
 opt-level = 3
 lto = "thin"
