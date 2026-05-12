@@ -49,6 +49,13 @@ walkdir = "2"
 rayon = "1"
 crossbeam-channel = "0.5"
 
+# TASK-050 / TASK-051 — futures::Stream + futures::channel::mpsc back the
+# Windows USN journal subscriber pattern vendored from sister project
+# Sourcerer. The NtfsWalker adapter drains the bootstrap stream into the
+# existing crossbeam_channel<WalkEvent> shape so the rest of the engine
+# is unaffected.
+futures = "0.3"
+
 # TASK-130 — ed25519 signature verification for engine update bundles
 # (Tauri Updater format is minisign / ed25519). We use the `minisign-verify`
 # crate to get correct key-id binding, magic-byte checks, and both legacy

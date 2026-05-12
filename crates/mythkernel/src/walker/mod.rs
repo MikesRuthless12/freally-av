@@ -15,6 +15,8 @@ pub mod incremental;
 pub mod ntfs;
 pub mod posix;
 
+pub use incremental::IncrementalWalker;
+pub use ntfs::NtfsWalker;
 pub use posix::PosixWalker;
 
 /// Options that govern a single walk.
