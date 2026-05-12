@@ -68,25 +68,29 @@ This license posture is unusual for an AV product. The reasoning is in [`docs/pr
 
 The roadmap targets stable **v0.19.84**, sequenced across 16 phases. Current phase status is tracked live in [`docs/product-roadmap.md`](docs/product-roadmap.md).
 
-| Phase | Goal | Version |
-|---|---|---|
-| 0 | Foundation & Setup | v0.0.x |
-| 1 | Engine Core | v0.1.x |
-| 2 | Detection Pipeline | v0.2.x |
-| 3 | UI Alpha | v0.3.x |
-| 4 | Linux MVP & Magic Moment | v0.4.x |
-| 5 | Windows MFT Superpowers | v0.5.x |
-| 6 | macOS Port | v0.6.x |
-| 7 | YARA & Rule Manager | v0.7.x |
-| 8 | Linux Real-time | v0.8.x |
-| 9 | macOS Real-time (NOTIFY) | v0.9.x |
-| 10 | Polish & Public Launch | v0.10.x |
-| 11 | macOS Real-time Enhancement (NOTIFY + XProtect-Style Cleanup) | v0.11.x – v0.12.x |
-| 12 | Windows Real-time Enforcement Stack (ETW + AMSI + WDAC) | v0.13.x – v0.15.x |
-| 13 | Donor / Pro Tier (optional, deferred) | v0.16.x – v0.17.x |
-| 14 | Hardening | v0.18.x |
-| 15 | Stable Run-up | v0.19.x |
-| 16 | **Stable Release** | **v0.19.84** |
+**Current state:** Phases 0, 1, and 2 are committed and pushed on `main` / the corresponding feature branches. Active work is moving into Phase 3 (UI Alpha) next.
+
+| Phase | Goal | Version | Status |
+|---|---|---|---|
+| 0 | Foundation & Setup | v0.0.x | ✅ Shipped |
+| 1 | Engine Core | v0.1.x | ✅ Shipped |
+| 2 | Detection Pipeline | v0.2.x | ✅ Shipped |
+| 3 | UI Alpha | v0.3.x | Next |
+| 4 | Linux MVP & Magic Moment | v0.4.x | Pending |
+| 5 | Windows MFT Superpowers | v0.5.x | Pending |
+| 6 | macOS Port (unsigned, see `docs/prd.md` § 1.5.3) | v0.6.x | Pending |
+| 7 | YARA & Rule Manager | v0.7.x | Pending |
+| 8 | Linux Real-time (fanotify daemon) | v0.8.x | Pending |
+| 9 | macOS Real-time (FSEvents + opportunistic ESF NOTIFY) | v0.9.x | Pending |
+| 10 | Polish & Public Launch | v0.10.x | Pending |
+| 11 | macOS Real-time Enhancement (NOTIFY + XProtect-Style Cleanup) | v0.11.x – v0.12.x | Pending |
+| 12 | Windows Real-time Enforcement Stack (ETW + AMSI + WDAC) | v0.13.x – v0.15.x | Pending |
+| 13 | Donor / Pro Tier (optional, deferred) | v0.16.x – v0.17.x | Pending |
+| 14 | Hardening | v0.18.x | Pending |
+| 15 | Stable Run-up | v0.19.x | Pending |
+| 16 | **Stable Release** | **v0.19.84** | Pending |
+
+**What works today (after Phase 2):** the `mythctl` CLI can scan a directory, ingest abuse.ch and NSRL feeds into local `.bin` files, detect known-bad files by SHA-256, quarantine them (XOR'd, with the key in your OS keychain), and restore them byte-for-byte. The Tauri GUI shell exists but isn't wired to the engine yet — that's Phase 3.
 
 ---
 
@@ -97,7 +101,7 @@ Mythodikal is built with Rust + Tauri v2 + pnpm + Solid.js. You will need:
 - Rust ≥ 1.85 (`rustup default stable`)
 - Node 20 + `pnpm` (`corepack enable && corepack prepare pnpm@latest --activate`)
 - Tauri v2 prerequisites for your OS — see [tauri.app/v2/start/prerequisites](https://v2.tauri.app/start/prerequisites/).
-- On Windows: WDK 11 once you reach Phase 12 work.
+- **No** Windows WDK, **no** Apple Developer Program — per [`docs/prd.md`](docs/prd.md) § 1.5 the project ships with zero paid OS code-signing infrastructure. Windows real-time uses ETW + AMSI + WDAC (Phase 12); macOS real-time uses ESF NOTIFY-only (Phase 11). Neither requires paid tooling.
 
 Once you've cloned the repo:
 

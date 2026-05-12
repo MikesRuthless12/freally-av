@@ -24,7 +24,32 @@ no-default-features = false
 db-path = "~/.cargo/advisory-db"
 db-urls = ["https://github.com/rustsec/advisory-db"]
 yanked = "warn"
-ignore = []
+# Transitive advisories with no actionable fix (all inside the tauri 2.x
+# dep tree as of 2026-05-11). Re-audit each release; remove from this
+# list as upstream tauri rolls forward.
+#   - RUSTSEC-2024-0370: proc-macro-error unmaintained (via tauri-macros)
+#   - RUSTSEC-2024-0411..0420 + 2025-0075/0080/0081/0098/0100: gtk-rs
+#     GTK3 bindings unmaintained (via tauri-runtime-wry on Linux)
+#   - RUSTSEC-2024-0413/0416: unic-* unmaintained (via urlpattern →
+#     tauri-utils)
+ignore = [
+    "RUSTSEC-2024-0370",
+    "RUSTSEC-2024-0411",
+    "RUSTSEC-2024-0412",
+    "RUSTSEC-2024-0413",
+    "RUSTSEC-2024-0414",
+    "RUSTSEC-2024-0415",
+    "RUSTSEC-2024-0416",
+    "RUSTSEC-2024-0417",
+    "RUSTSEC-2024-0418",
+    "RUSTSEC-2024-0419",
+    "RUSTSEC-2024-0420",
+    "RUSTSEC-2025-0075",
+    "RUSTSEC-2025-0080",
+    "RUSTSEC-2025-0081",
+    "RUSTSEC-2025-0098",
+    "RUSTSEC-2025-0100",
+]
 
 [licenses]
 # Enumerated allow-list. New licenses require human review.
@@ -47,6 +72,14 @@ allow = [
 ]
 confidence-threshold = 0.93
 exceptions = []
+# Our own workspace crates inherit license-file = "LICENSE.md" from the
+# workspace manifest, but the LICENSE.md text scores below the 0.93
+# confidence threshold (it's a custom source-visible license, not an
+# SPDX-canonical one). Treating workspace crates as unlicensed is wrong
+# in that direction — they're licensed by us, by definition. Skip them
+# under `private = { ignore = true }` so the license gate applies only
+# to third-party deps.
+private = { ignore = true }
 
 # Strong copyleft denied (incompatible with closed binary redistribution).
 [[licenses.clarify]]
@@ -58,7 +91,11 @@ license-files = [
 
 [bans]
 multiple-versions = "warn"
+# Wildcard deny applies to third-party deps only; workspace path-based
+# deps (mythkernel → mythctl / ui-bridge) intentionally have no version
+# pin because they're internal.
 wildcards = "deny"
+allow-wildcard-paths = true
 highlight = "all"
 allow = []
 deny = []

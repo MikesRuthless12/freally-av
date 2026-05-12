@@ -11,7 +11,7 @@ Each release section lists which `TASK-NNN` items from `docs/product-roadmap.md`
 ## [Unreleased]
 
 ### Added
-- **Phase 0 — Foundation & Setup (v0.0.x)**
+- **Phase 0 — Foundation & Setup (v0.0.x)** _(shipped 2026-05-09)_
   - TASK-001: Cargo workspace + Tauri v2 shell with single-instance plugin
   - TASK-002: Solid + TypeScript + Vite + Tailwind v3 frontend on port 1420
   - TASK-003: Design tokens (CSS variables + Tailwind extension) per PRD § 9, with restricted spacing scale (`4 / 8 / 12 / 16 / 20 / 24 / 32 / 40 / 56 / 80`)
@@ -20,7 +20,7 @@ Each release section lists which `TASK-NNN` items from `docs/product-roadmap.md`
   - TASK-006: `cargo-deny` config (license allow-list, advisory check, source registry pinning)
   - TASK-007: `SECURITY.md` (90-day coordinated disclosure inbox `mythodikalone@gmail.com`) and `THIRD-PARTY-DATA.md` (abuse.ch, NSRL, YARA-Forge, loldrivers, LOLBAS, OSV.dev license posture)
   - TASK-008: Baby-blue 3D `M` glyph + wordmark, cross-platform app icon set (PNG ladder, `.ico`, `.icns`), and 16 tray icon variants per FR-162 (`tray-{idle,scanning,shields_off,update_available}-{16,22,32}.png` + 4 macOS template variants)
-- **Phase 1 — Engine Core (v0.1.0..v0.1.5)**
+- **Phase 1 — Engine Core (v0.1.0..v0.1.5)** _(shipped 2026-05-10)_
   - TASK-009: `FileWalker` trait + `PosixWalker` (`walkdir` + `rayon` `par_bridge`, channel-based event stream)
   - TASK-010: BLAKE3 always / SHA-256 lazy streaming hasher (1 MiB chunks, mid-flight `partial()` snapshot for FR-136, in-memory skip-if-unchanged cache)
   - TASK-011: SQLite migration runner + initial schema (`scans`, `findings`, `quarantine`, `exclusions`, `schema_migrations`) + typed CRUD on scans/findings
@@ -31,13 +31,29 @@ Each release section lists which `TASK-NNN` items from `docs/product-roadmap.md`
   - TASK-016: TOML config loader (`<config_dir>/config.toml`) with FR-110 (telemetry off) and shields-default-on
   - TASK-017: `mythctl scan <path> [--format text|json] [--sha256] [--follow-symlinks]`
   - TASK-018: criterion benches for walker + hasher; `scripts/bench-1m-files.sh` end-to-end harness asserting NFR-001 budget
-- **Spec changes that landed alongside the build**
-  - PRD: FR-033 promoted to P0; **FR-160** (Shields kill-switch), **FR-161** (Start-with-OS auto-launch), **FR-162** (System tray + menu) added
-  - Roadmap: TASK-156, TASK-157, TASK-158 inserted into Phase 4; shields-respect contract appended to TASK-073/074/075/076/080/081/082/092/097/102; TASK-008 expanded for tray variants
-  - Build-Prompts Guide: full `BEGIN PROMPT … END PROMPT` blocks for TASK-156/157/158; phase smoke tests extended
+- **Phase 2 — Detection Pipeline (v0.2.0..v0.2.5)** _(shipped 2026-05-11)_
+  - TASK-019: Detection pipeline core (`Detector` trait, `FileCtx`, `DetectorVerdict` { Clean | SkipFile | Malicious }, `PipelineOutcome`, `Severity` enum, `DetectionPipeline` with priority-ordered short-circuit evaluation)
+  - TASK-020: Hash blacklist detector (mmap-loaded sorted-32-byte-key file with O(log N) binary-search lookup; SHA-256 by default with optional BLAKE3 override; emits `Malicious` verdicts with `abusech:hash:<prefix>` rule IDs)
+  - TASK-021: NSRL goodware allowlist detector (same on-disk format as TASK-020; emits `SkipFile` at priority 10 so allowlist hits short-circuit before any blacklist runs)
+  - TASK-022: abuse.ch feed updater pulling MalwareBazaar + ThreatFox concurrently via `reqwest` (rustls-only, no openssl), Auth-Key header (free key from `https://auth.abuse.ch/`), atomic tmp+rename write of `<feeds_dir>/abusech_sha256.bin`
+  - TASK-023: NSRL feed updater (`NsrlSource::Local(path)` or `NsrlSource::Url(url)`) with a generous TSV/CSV/plain-text parser (first 64-char hex run per line); no ZIP/ISO inline dep
+  - TASK-024: Quarantine vault — per-install 32-byte random XOR key stored in OS keychain via `keyring` (libsecret / Keychain / Credential Manager) with a 0600 file fallback for CI/headless Linux; atomic move-into-vault with DB-transaction rollback on write failure; refuses to overwrite on restore
+  - TASK-025: Findings CRUD + state machine (`FindingState` Detected→Quarantined→{Restored|Deleted|Ignored}); `apply_action`, `current_state`, `list_by_scan / list_by_state / list_by_state_and_min_severity`, `set_notes / set_evidence`
+  - TASK-127: Bulk quarantine ops (`restore_many / delete_many / restore_all / delete_all`) with `quarantine_batches` migration (`0002_quarantine_batches.sql`); per-item atomic semantics, `BatchReport.errors`, `ProgressCallback` invoked once per item
+  - TASK-026: `mythctl quarantine {list, restore, delete, restore-all, delete-all --confirm, restore-many <ids...>, delete-many <ids...>}` + `mythctl feed update [--abusech-auth-key|env] [--nsrl-local|--nsrl-url]`; global `--db <path>` override
+  - TASK-027: End-to-end smoke test — drop synthetic payload → hash → build feed → detect → record finding → apply Quarantine action → vault move (XOR'd) → restore (byte-for-byte recovery)
+- **Phase 2 spec changes that landed alongside the build**
+  - PRD: **new § 1.5 Cost & Distribution Constraints (HARD)** — 100% free for end users (commercial use included) and 100% free for the maintainer; GitHub-only hosting; no paid OS code-signing; no kernel drivers; no Lemon Squeezy.
+  - PRD: **FR-031** macOS real-time is NOTIFY-only permanently (no AUTH); **FR-032** Windows real-time is user-mode ETW + AMSI + WDAC + Defender bridge (no kernel minifilter); **FR-133** block-on-detect implemented per-platform via the free stacks; **FR-141** BYOVD via WDAC; **FR-160** Shields broadcasts to user-mode daemons only.
+  - PRD: **FR-135** revised — enumeration and scanning run **concurrently** (producer-consumer worklist); scanning begins on the first enumerated file; `files_total` is unlocked during enumeration, locks at `enumeration:complete`; UI shows three-piece `X scanned · Y enumerated · counting…` then transitions to `X/Y`. The earlier serial "enumerate-then-scan" model is retired.
+  - PRD § 10/§ 11: payment-integration deferred indefinitely; if launched, **Gumroad** replaces Lemon Squeezy; the free product must remain fully functional regardless.
+  - Roadmap: Phase 11 renamed to "macOS Real-time Enhancement (NOTIFY + XProtect-Style Cleanup)"; Phase 12 renamed to "Windows Real-time Enforcement Stack (ETW + AMSI + WDAC)"; Phase 13 renamed to "Donor / Pro Tier (optional, deferred)". TASK-159 (Defender bridge) and TASK-160 (Sysmon ingest) added to Phase 12.
+  - Build-Prompts Guide: every Phase 11/12/13 prompt rewritten to match the new architecture; FR-135 / TASK-137 prompt rewritten to the concurrent producer-consumer model; preface paragraph pins the zero-cost / GitHub-only contract.
 
 ### Changed
 - License/attribution scrub across project docs to canonical `Mike Weaver <mythodikalone@gmail.com>` and GitHub URLs to `MikesRuthless12/mythodikal-av`.
+- **deny.toml** — added `[advisories] ignore = […]` for 16 transitive RUSTSEC advisories all rooted in the tauri 2.x dep tree (proc-macro-error / gtk-rs GTK3 bindings / unic-* via urlpattern); enabled `[bans] allow-wildcard-paths = true` so internal path deps don't trip the wildcard ban; enabled `[licenses] private = { ignore = true }` so workspace crates aren't flagged as unlicensed.
+- **Workspace deps added in Phase 2:** `memmap2` 0.9, `reqwest` 0.12 (rustls-only), `keyring` 3, `rand` 0.8. Clap gains the `env` feature so feed-update can fall back to `MYTHODIKAL_ABUSECH_AUTH_KEY`.
 
 ### Fixed
 -
@@ -47,6 +63,8 @@ Each release section lists which `TASK-NNN` items from `docs/product-roadmap.md`
 
 ### Security
 - Telemetry off by default per FR-110.
+- Quarantine vault XOR key never leaves the OS keychain (primary) or 0600-permissioned `<data_dir>/quarantine.key` (fallback); fallback warns to tracing log.
+- All feed fetches go through rustls (`reqwest` built without default features); no openssl / native-tls in the dep tree.
 
 ---
 
@@ -78,17 +96,18 @@ The following entries are placeholders aligned with the Version → Phase Map in
 - `mythctl scan` command with text/json output (TASK-017).
 - Canonical 1M-file benchmark scaffolding (TASK-018).
 
-### [0.2.x] — Phase 2 — Detection Pipeline _(scheduled)_
+### [0.2.x] — Phase 2 — Detection Pipeline _(shipped 2026-05-11; see `[Unreleased]` above for the full entry)_
 
-- Detection pipeline core trait + sequential evaluation (TASK-019).
-- Hash blacklist detector backed by mmap'd perfect-hash file (TASK-020).
-- NSRL allowlist detector (skip-verdict) (TASK-021).
-- abuse.ch feed updater (manual `mythctl feed update`) (TASK-022).
-- NIST NSRL feed updater (TASK-023).
-- Quarantine vault (XOR-keyed via OS keychain) with restore (TASK-024).
+- Detection pipeline core trait + priority-ordered short-circuit evaluation (TASK-019).
+- Hash blacklist detector backed by mmap'd sorted-32-byte-key binary file (TASK-020).
+- NSRL allowlist detector (skip-verdict, priority 10) (TASK-021).
+- abuse.ch feed updater pulling MalwareBazaar + ThreatFox via rustls-only `reqwest` (TASK-022).
+- NIST NSRL feed updater accepting local file or HTTPS URL (TASK-023).
+- Quarantine vault (XOR-keyed via `keyring` with 0600 file fallback) with restore + delete (TASK-024).
 - Findings persistence + action state machine (TASK-025).
+- Bulk quarantine ops + `quarantine_batches` migration (TASK-127).
 - `mythctl quarantine` and `mythctl feed` subcommands (TASK-026).
-- End-to-end EICAR smoke test wired into CI (TASK-027).
+- End-to-end drop → detect → quarantine → restore smoke test (TASK-027).
 
 ### [0.3.x] — Phase 3 — UI Alpha _(scheduled)_
 
