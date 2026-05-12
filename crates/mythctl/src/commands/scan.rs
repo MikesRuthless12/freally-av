@@ -76,6 +76,21 @@ pub async fn run(
                         writeln!(stdout, "{}", serde_json::to_string(&event)?)?;
                     }
                 }
+                ScanProgress::Finding {
+                    path,
+                    rule_id,
+                    severity,
+                    ..
+                } => match format {
+                    Format::Text => {
+                        writeln!(
+                            stderr,
+                            "  ! finding {} [{severity}] {rule_id}",
+                            path.display()
+                        )?;
+                    }
+                    Format::Json => writeln!(stdout, "{}", serde_json::to_string(&event)?)?,
+                },
                 ScanProgress::Error { path, message } => {
                     errors += 1;
                     match format {

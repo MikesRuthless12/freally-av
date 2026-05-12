@@ -89,6 +89,17 @@ pub enum ScanProgress {
         blake3: String,
         size: u64,
     },
+    /// A detector matched the file. Carries the persisted `findings.id` so
+    /// the UI can request follow-up actions (quarantine, ignore) without
+    /// a second round-trip.
+    Finding {
+        scan_id: i64,
+        finding_id: i64,
+        path: PathBuf,
+        rule_id: String,
+        rule_source: String,
+        severity: String,
+    },
     Error {
         path: PathBuf,
         message: String,
@@ -98,6 +109,7 @@ pub enum ScanProgress {
         files_visited: i64,
         files_hashed: i64,
         bytes_visited: i64,
+        findings_count: i64,
         duration_ms: u64,
     },
     Failed {

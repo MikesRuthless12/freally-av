@@ -12,6 +12,7 @@ use std::time::Instant;
 use rusqlite::Connection;
 use tokio::sync::broadcast;
 
+use crate::detect::{DetectionPipeline, FileCtx, PipelineOutcome, blake3_hex_to_bytes};
 use crate::error::EngineError;
 use crate::hasher::Hasher;
 use crate::history::{self, ScanStatus};
@@ -28,6 +29,7 @@ const PROGRESS_CHANNEL_CAPACITY: usize = 4096;
 #[derive(Clone)]
 pub struct ScanEngine {
     db: Arc<Mutex<Connection>>,
+    pipeline: Arc<DetectionPipeline>,
     engine_version: &'static str,
 }
 
@@ -35,8 +37,22 @@ impl ScanEngine {
     pub fn new(db: Connection) -> Self {
         Self {
             db: Arc::new(Mutex::new(db)),
+            pipeline: Arc::new(DetectionPipeline::new(Vec::new())),
             engine_version: env!("CARGO_PKG_VERSION"),
         }
+    }
+
+    /// Install a detection pipeline. The engine evaluates it against every
+    /// successfully-hashed file and records `findings` rows + emits
+    /// `ScanProgress::Finding` events on Detected outcomes. Allowlist
+    /// (`SkipFile`) outcomes are silently honored — no event, no row.
+    ///
+    /// The default engine ships with an empty pipeline (no detectors); the
+    /// Tauri bridge in TASK-028 builds a populated one from `<feeds_dir>`
+    /// at startup.
+    pub fn with_detection_pipeline(mut self, pipeline: DetectionPipeline) -> Self {
+        self.pipeline = Arc::new(pipeline);
+        self
     }
 
     /// Begin a scan. Inserts the row in `scans` synchronously (so the caller
@@ -74,6 +90,7 @@ impl ScanEngine {
         });
 
         let db = self.db.clone();
+        let pipeline = self.pipeline.clone();
         let tx_for_worker = tx.clone();
         let hasher = Hasher::new().with_sha256(opts.compute_sha256);
         let walk_opts = WalkOpts {
@@ -91,6 +108,7 @@ impl ScanEngine {
             let mut files_visited: i64 = 0;
             let mut files_hashed: i64 = 0;
             let mut bytes_visited: i64 = 0;
+            let mut findings_count: i64 = 0;
 
             for root in target_for_worker.paths() {
                 let event_rx = walker.walk(root, walk_opts.clone());
@@ -104,9 +122,26 @@ impl ScanEngine {
                                     files_hashed += 1;
                                     let _ = tx_for_worker.send(ScanProgress::File {
                                         path: path.clone(),
-                                        blake3: result.blake3,
+                                        blake3: result.blake3.clone(),
                                         size: result.size,
                                     });
+
+                                    // Run the detection pipeline. Empty pipeline
+                                    // short-circuits without touching FileCtx,
+                                    // so the zero-detector default case has no
+                                    // per-file overhead.
+                                    if !pipeline.is_empty() {
+                                        evaluate_pipeline(
+                                            &pipeline,
+                                            &db,
+                                            &tx_for_worker,
+                                            scan_id,
+                                            &path,
+                                            size,
+                                            &result,
+                                            &mut findings_count,
+                                        );
+                                    }
                                 }
                                 Err(err) => {
                                     let _ = tx_for_worker.send(ScanProgress::Error {
@@ -138,7 +173,7 @@ impl ScanEngine {
                     0,
                     0,
                     bytes_visited,
-                    0,
+                    findings_count,
                 ),
                 Err(_) => Err(crate::db::DbError::Poisoned),
             };
@@ -150,6 +185,7 @@ impl ScanEngine {
                         files_visited,
                         files_hashed,
                         bytes_visited,
+                        findings_count,
                         duration_ms,
                     });
                 }
@@ -184,6 +220,89 @@ fn now_utc() -> i64 {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0)
+}
+
+/// Build a [`FileCtx`] from the hasher's hex output and evaluate the
+/// pipeline. On `Detected` we record a `findings` row and emit a
+/// `ScanProgress::Finding` event; on `SkippedByAllowlist` we silently
+/// honor the verdict; on `Clean` we do nothing. Hash-decode failures are
+/// surfaced as `ScanProgress::Error` (engine programmer error, not a
+/// user-facing issue, but worth logging).
+#[allow(clippy::too_many_arguments)]
+fn evaluate_pipeline(
+    pipeline: &DetectionPipeline,
+    db: &Arc<Mutex<Connection>>,
+    tx: &broadcast::Sender<ScanProgress>,
+    scan_id: i64,
+    path: &std::path::Path,
+    size: u64,
+    hash: &crate::hasher::HashResult,
+    findings_count: &mut i64,
+) {
+    let Some(blake3_bytes) = blake3_hex_to_bytes(&hash.blake3) else {
+        let _ = tx.send(ScanProgress::Error {
+            path: path.to_path_buf(),
+            message: "blake3 hex decode failed".to_string(),
+        });
+        return;
+    };
+    let sha256_bytes: Option<[u8; 32]> = hash.sha256.as_deref().and_then(decode_sha256);
+
+    let ctx = FileCtx {
+        path,
+        size_bytes: size,
+        blake3: &blake3_bytes,
+        sha256: sha256_bytes.as_ref(),
+    };
+    let outcome = pipeline.evaluate(&ctx);
+    match outcome {
+        PipelineOutcome::Clean | PipelineOutcome::SkippedByAllowlist { .. } => {}
+        PipelineOutcome::Detected {
+            rule_id,
+            rule_source,
+            severity,
+            evidence: _,
+            detector_id: _,
+        } => {
+            let detected_at_utc = now_utc();
+            let finding_id = match db.lock() {
+                Ok(conn) => history::record_finding(
+                    &conn,
+                    scan_id,
+                    path.to_string_lossy().as_ref(),
+                    Some(size as i64),
+                    Some(&blake3_bytes),
+                    sha256_bytes.as_ref().map(|s| s.as_slice()),
+                    &rule_id,
+                    &rule_source,
+                    severity.as_str(),
+                    detected_at_utc,
+                )
+                .ok(),
+                Err(_) => None,
+            };
+            if let Some(id) = finding_id {
+                *findings_count += 1;
+                let _ = tx.send(ScanProgress::Finding {
+                    scan_id,
+                    finding_id: id,
+                    path: path.to_path_buf(),
+                    rule_id,
+                    rule_source,
+                    severity: severity.as_str().to_string(),
+                });
+            }
+        }
+    }
+}
+
+fn decode_sha256(s: &str) -> Option<[u8; 32]> {
+    if s.len() != 64 {
+        return None;
+    }
+    let mut out = [0u8; 32];
+    hex::decode_to_slice(s, &mut out).ok()?;
+    Some(out)
 }
 
 #[cfg(test)]
