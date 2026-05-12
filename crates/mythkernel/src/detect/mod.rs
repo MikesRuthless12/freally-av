@@ -20,6 +20,7 @@ use serde::{Deserialize, Serialize};
 
 pub mod goodware_allowlist;
 pub mod hash_blacklist;
+pub mod hash_set_file;
 pub mod heuristics;
 pub mod yara_engine;
 

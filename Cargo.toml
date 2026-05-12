@@ -46,6 +46,8 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 
 toml = "0.8"
 
+memmap2 = "0.9"
+
 [profile.release]
 opt-level = 3
 lto = "thin"
