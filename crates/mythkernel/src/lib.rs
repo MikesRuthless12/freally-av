@@ -9,6 +9,7 @@ pub mod config;
 pub mod db;
 pub mod engine;
 pub mod error;
+pub mod findings;
 pub mod hasher;
 pub mod history;
 pub mod logging;
