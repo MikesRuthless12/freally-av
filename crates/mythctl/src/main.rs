@@ -75,6 +75,20 @@ pub enum Format {
 }
 
 fn main() -> anyhow::Result<()> {
+    // Stream engine tracing to stderr so operators can diagnose walker
+    // fallback paths (NTFS MFT vs PosixWalker), USN journal rotation,
+    // and feed-update progress directly from the CLI. Honors `MYTH_LOG`
+    // (e.g. `MYTH_LOG=info,mythkernel::walker=debug`) and falls back to
+    // INFO when unset. `try_init()` is a no-op if a subscriber is
+    // already installed (some integration tests pre-install one).
+    let _ = tracing_subscriber::fmt()
+        .with_writer(std::io::stderr)
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_env("MYTH_LOG")
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+        )
+        .try_init();
+
     let cli = Cli::parse();
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()

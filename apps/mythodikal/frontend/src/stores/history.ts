@@ -18,16 +18,36 @@ const [list] = createResource<ScanSummary[], number>(
   },
 );
 
-const [detail] = createResource<ScanDetail | null, ScanId | null>(
-  selectedId,
-  async (id) => {
-    if (id === null) return null;
-    return await historyGet(id);
-  },
-);
+const [detail, { mutate: mutateDetail }] = createResource<
+  ScanDetail | null,
+  ScanId | null
+>(selectedId, async (id) => {
+  if (id === null) return null;
+  return await historyGet(id);
+});
 
 export const historyListResource = list;
 export const historyDetailResource = detail;
+
+/** Optimistically update one finding's `action_taken` in the
+ *  currently-loaded detail without re-fetching from SQLite. Used by
+ *  the History page after a per-row action so the panel doesn't
+ *  flicker / reset scroll position. */
+export function updateDetailFindingAction(
+  findingId: number,
+  newState: string,
+): void {
+  mutateDetail((prev) => {
+    if (prev === null || prev === undefined) return prev;
+    const next = {
+      ...prev,
+      findings: prev.findings.map((f) =>
+        f.id === findingId ? { ...f, action_taken: newState } : f,
+      ),
+    };
+    return next;
+  });
+}
 
 export function refreshHistory(): void {
   setRefreshTick((n) => n + 1);
@@ -35,6 +55,14 @@ export function refreshHistory(): void {
 
 export function selectScan(id: ScanId | null): void {
   setSelectedId(id);
+  // Solid's `createResource` skips the fetcher when the source
+  // signal returns a falsy value and *keeps* the previously fetched
+  // data visible — which is why the History "Close" button looked
+  // dead. Force-clear the cached detail on deselect so `<Show
+  // when={historyDetailResource()}>` collapses.
+  if (id === null) {
+    mutateDetail(null);
+  }
 }
 
 export const selectedScanId = selectedId;

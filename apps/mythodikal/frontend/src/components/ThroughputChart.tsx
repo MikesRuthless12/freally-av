@@ -45,6 +45,20 @@ export const ThroughputChart = () => {
       .join(" ");
   };
 
+  /** Closed polygon for the area-under-curve shade: the same points
+   *  plus the bottom-right and bottom-left corners so the polygon
+   *  fills everything beneath the line. */
+  const areaPoints = (): string => {
+    const arr = samples();
+    if (arr.length < 2) return "";
+    const usableW = WIDTH - PAD * 2;
+    const dx = usableW / (arr.length - 1);
+    const baselineY = (HEIGHT - PAD).toFixed(1);
+    const firstX = PAD.toFixed(1);
+    const lastX = (PAD + (arr.length - 1) * dx).toFixed(1);
+    return `${firstX},${baselineY} ${points()} ${lastX},${baselineY}`;
+  };
+
   const latest = () => {
     const arr = samples();
     const last = arr[arr.length - 1];
@@ -92,6 +106,11 @@ export const ThroughputChart = () => {
             stroke="currentColor"
             stroke-width="0.5"
             class="text-myth-line"
+          />
+          <polygon
+            points={areaPoints()}
+            class="fill-myth-accent"
+            stroke="none"
           />
           <polyline
             points={points()}

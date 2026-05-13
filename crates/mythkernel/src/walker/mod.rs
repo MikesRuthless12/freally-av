@@ -12,9 +12,13 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 
 pub mod incremental;
+pub mod multi_volume;
 pub mod ntfs;
 pub mod posix;
 
+pub use incremental::IncrementalWalker;
+pub use multi_volume::MultiVolumeWalker;
+pub use ntfs::NtfsWalker;
 pub use posix::PosixWalker;
 
 /// Options that govern a single walk.

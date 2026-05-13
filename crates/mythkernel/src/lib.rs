@@ -5,6 +5,7 @@
 
 #![allow(dead_code)]
 
+pub mod archive_scan;
 pub mod config;
 pub mod db;
 pub mod engine;
@@ -13,9 +14,12 @@ pub mod eta;
 pub mod exclusions;
 pub mod findings;
 pub mod hasher;
+pub mod heuristics_scan;
 pub mod history;
 pub mod logging;
+pub mod process_scan;
 pub mod quarantine;
+pub mod registry_scan;
 pub mod scan;
 pub mod scheduler;
 pub mod sysload;

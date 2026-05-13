@@ -114,14 +114,24 @@ const FirstRun: Component = () => {
         </Show>
 
         <footer class="mt-8 flex items-center justify-between">
-          <button
-            type="button"
-            class="rounded-sm px-3 py-1 font-mono text-xs uppercase tracking-wide text-myth-text-lo hover:text-myth-text-md disabled:cursor-not-allowed disabled:opacity-30"
-            disabled={step() === 1}
-            onClick={() => setStep((s) => (s > 1 ? ((s - 1) as Step) : s))}
-          >
-            ← Back
-          </button>
+          <div class="flex items-center gap-3">
+            <button
+              type="button"
+              class="rounded-sm px-3 py-1 font-mono text-xs uppercase tracking-wide text-myth-text-lo hover:text-myth-text-md disabled:cursor-not-allowed disabled:opacity-30"
+              disabled={step() === 1}
+              onClick={() => setStep((s) => (s > 1 ? ((s - 1) as Step) : s))}
+            >
+              ← Back
+            </button>
+            <button
+              type="button"
+              class="rounded-sm px-3 py-1 font-mono text-xs uppercase tracking-wide text-myth-text-lo hover:text-myth-text-md"
+              onClick={finish}
+              title="Skip the welcome flow. The persisted flag stops this from showing again on subsequent launches."
+            >
+              Skip
+            </button>
+          </div>
           <Show
             when={step() < 3}
             fallback={

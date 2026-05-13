@@ -1,7 +1,9 @@
 // ProgressBar (TASK-031).
 //
 // Minimal token-styled bar. Tabular-nums on the numeric label so the
-// "X / Y" form doesn't dance as the values change (FR-085).
+// "X / Y" form doesn't dance as the values change (FR-085). The
+// percent is shown to two decimals (`48.85%`) per UX feedback — a
+// rounded integer hides too much progress on a long scan.
 
 import type { Component } from "solid-js";
 
@@ -18,7 +20,7 @@ export const ProgressBar: Component<Props> = (props) => {
     if (props.total === null || props.total === 0) return 0;
     return Math.min(1, props.done / props.total);
   };
-  const percent = () => Math.round(ratio() * 100);
+  const percentText = () => (ratio() * 100).toFixed(2);
   return (
     <div class={`w-full ${props.class ?? ""}`}>
       <div class="flex items-baseline justify-between">
@@ -29,14 +31,14 @@ export const ProgressBar: Component<Props> = (props) => {
               : `${formatNumber(props.done)} scanned · counting…`)}
         </span>
         {props.total !== null && (
-          <span class="font-mono text-xs tabular-nums text-myth-text-lo">
-            {percent()}%
+          <span class="font-mono text-base font-semibold tabular-nums text-myth-accent">
+            {percentText()}%
           </span>
         )}
       </div>
-      <div class="mt-1 h-1.5 w-full rounded-sm bg-myth-bg-2">
+      <div class="mt-2 h-3 w-full overflow-hidden rounded-sm bg-myth-bg-2">
         <div
-          class="h-full rounded-sm bg-myth-accent transition-[width] duration-200 ease-out"
+          class="h-full bg-myth-accent transition-[width] duration-200 ease-out"
           style={{ width: `${ratio() * 100}%` }}
         />
       </div>

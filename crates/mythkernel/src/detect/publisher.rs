@@ -230,6 +230,94 @@ pub fn prune_cache(
 pub const DEFAULT_CACHE_PURGE_AGE_SECS: i64 = 90 * 24 * 3600;
 pub const DEFAULT_CACHE_PURGE_MAX_ROWS: i64 = 250_000;
 
+/// Recognize an Authenticode signer string as a Microsoft Windows /
+/// Microsoft Corporation system-signed binary. Phase 5 wave 3 perf
+/// push — the engine uses this to skip hash + pipeline for the ~30%
+/// of `C:\` files that ship as part of Windows (kernel32, ntdll,
+/// every Windows component DLL, drivers in `\Windows\System32\`).
+/// Signer-extraction itself is fast and cached per (path, mtime,
+/// size); the saved work is the BLAKE3+detector evaluation.
+///
+/// **Trust boundary** (security-review M2): the `publisher_cache`
+/// table is part of the TCB. The function below recognizes an
+/// Authenticode subject — which on Windows is only populated from
+/// `Get-AuthenticodeSignature` output (a valid Authenticode chain
+/// anchored at a Windows-trusted root). An attacker can't get a
+/// `Microsoft Corporation` subject without a Microsoft-issued
+/// code-signing cert; an attacker who can write the cache table
+/// directly is past every other gate. To narrow the substring
+/// matcher's attack surface, we **only** accept token-anchored
+/// matches (`O=Microsoft Windows`, `CN=Microsoft Corporation`, or
+/// the raw form `Microsoft Windows` / `Microsoft Corporation` as
+/// the entire string) — a crafted subject like
+/// "Microsoft Corporation Phishing Inc." (containing the canonical
+/// org name as a non-org-name substring) is correctly rejected.
+pub fn is_microsoft_signer(identity: &str) -> bool {
+    let s = identity.trim().to_ascii_lowercase();
+    // Raw-string fast path: the platform extractor returned just the
+    // org name without DN tokens. Matches both `Get-AuthenticodeSignature`
+    // PowerShell output forms across Win 10/11.
+    if matches!(
+        s.as_str(),
+        "microsoft windows" | "microsoft corporation"
+    ) {
+        return true;
+    }
+    // Token-anchored substring: the canonical org name must follow
+    // a `CN=` / `O=` boundary (with optional whitespace). Splitting
+    // on the standard DN separator `,` lets us inspect each
+    // attribute independently.
+    for raw in s.split(',') {
+        let token = raw.trim();
+        let value = if let Some(v) = token.strip_prefix("cn=") {
+            v.trim()
+        } else if let Some(v) = token.strip_prefix("o=") {
+            v.trim()
+        } else {
+            continue;
+        };
+        if value == "microsoft windows" || value == "microsoft corporation" {
+            return true;
+        }
+    }
+    false
+}
+
+#[cfg(test)]
+mod is_microsoft_signer_tests {
+    use super::is_microsoft_signer;
+
+    #[test]
+    fn accepts_canonical_org_names() {
+        assert!(is_microsoft_signer("Microsoft Windows"));
+        assert!(is_microsoft_signer("Microsoft Corporation"));
+        assert!(is_microsoft_signer("CN=Microsoft Windows"));
+        assert!(is_microsoft_signer("O=Microsoft Corporation"));
+        assert!(is_microsoft_signer(
+            "CN=Microsoft Windows, O=Microsoft Corporation, L=Redmond, ST=Washington, C=US"
+        ));
+    }
+
+    #[test]
+    fn rejects_attacker_substrings() {
+        // The pre-fix substring matcher would have returned true for
+        // any of these. Token-anchored matching rejects them.
+        assert!(!is_microsoft_signer("Microsoft Corporation Phishing Inc."));
+        assert!(!is_microsoft_signer(
+            "CN=Not Microsoft Windows, O=Attacker LLC"
+        ));
+        assert!(!is_microsoft_signer("CN=Definitely Microsoft Corporation"));
+        assert!(!is_microsoft_signer("O=microsoft-windows-lookalike"));
+    }
+
+    #[test]
+    fn rejects_unsigned_and_third_party() {
+        assert!(!is_microsoft_signer(""));
+        assert!(!is_microsoft_signer("Apple Inc."));
+        assert!(!is_microsoft_signer("CN=Google LLC, O=Google LLC"));
+    }
+}
+
 fn lookup_cache(
     conn: &Connection,
     path: &str,

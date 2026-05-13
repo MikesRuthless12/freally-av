@@ -28,7 +28,11 @@ chrono = { version = "0.4", features = ["serde"] }
 walkdir = { workspace = true }
 rayon = { workspace = true }
 crossbeam-channel = { workspace = true }
+zip = { workspace = true }
+yara-x = { workspace = true }
+futures = { workspace = true }
 blake3 = { workspace = true }
+crc32fast = { workspace = true }
 sha2 = { workspace = true }
 hex = { workspace = true }
 rusqlite = { workspace = true }
@@ -44,6 +48,37 @@ minisign-verify = { workspace = true }
 base64 = { workspace = true }
 # TASK-131 — `If-Modified-Since` / `ETag` handling for the database channel.
 httpdate = { workspace = true }
+
+# TASK-050 — direct FSCTL wrappers (FSCTL_ENUM_USN_DATA + OpenFileById +
+# GetFinalPathNameByHandleW). Pattern lifted from sister project Sourcerer
+# (`crates/sourcerer-journal-win`). MIT/Apache-2.0 — license-clean per
+# deny.toml allow-list.
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Storage_FileSystem",
+    "Win32_System_IO",
+    "Win32_System_Ioctl",
+    "Win32_System_Registry",
+] }
+
+# TASK-050 — FSEvents subscriber for the macOS bootstrap walker.
+# Vendored from Sourcerer's sourcerer-journal-mac crate.
+#
+# Sec-review L3 (deferred): `fsevent-sys` is on 4.x; the current crate is
+# 5.x. No known RUSTSEC advisories on 4.x as of 2026-05; bump in a
+# follow-up Phase 5 wave alongside other dep-current passes.
+[target.'cfg(target_os = "macos")'.dependencies]
+core-foundation = "0.10"
+core-foundation-sys = "0.8"
+fsevent-sys = "4"
+libc = "0.2"
+
+# TASK-050 — inotify+fanotify subscriber for the Linux bootstrap walker.
+# Vendored from Sourcerer's sourcerer-journal-lin crate.
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"
 
 [features]
 default = []
@@ -61,4 +96,10 @@ harness = false
 
 [[bench]]
 name = "hash"
+harness = false
+
+# TASK-057 — Windows MFT vs PosixWalker compare. Runs on every host
+# (the bench is OS-portable; the interesting curve appears on Windows).
+[[bench]]
+name = "win_mft"
 harness = false

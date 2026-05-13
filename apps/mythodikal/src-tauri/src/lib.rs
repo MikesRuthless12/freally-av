@@ -55,6 +55,15 @@ pub fn run() {
     // state so the `feed_update_now` command can kick it. When no
     // feeds are configured (e.g. missing abuse.ch auth key) the
     // scheduler idles without making network calls.
+    //
+    // Phase 5 wave 3 smoke-test fix: `scheduler::spawn` is now
+    // runtime-agnostic — it detects `tokio::runtime::Handle::try_current()`
+    // and uses the ambient runtime when available, otherwise builds
+    // its own `mythkernel-scheduler` thread + current-thread runtime.
+    // Prior to that fix, calling it here (before
+    // `tauri::Builder::run` starts the runtime) panicked with
+    // "no reactor running" and the MSI / NSIS launch produced an
+    // invisible crash because the panic had no console output.
     let scheduler_handle = state.as_ref().map(spawn_feed_scheduler);
 
     // TASK-157 / sec-review L6: `tauri.conf.json :: window.visible = false`
@@ -80,6 +89,8 @@ pub fn run() {
         // TASK-158 — required by the tray menu's "Quit" item to trigger
         // a clean app exit + restart-after-update flow.
         .plugin(tauri_plugin_process::init())
+        // Phase 6 — folder/file picker for the Scan target chooser.
+        .plugin(tauri_plugin_dialog::init())
         .setup(move |app| {
             // TASK-158 — build the system tray icon + menu. Errors are
             // logged but non-fatal: an app without a tray icon is
@@ -517,6 +528,7 @@ fn init_state() -> Result<AppState, Box<dyn std::error::Error>> {
         config: config_state,
         config_path,
         active_pause_flags: Arc::new(Mutex::new(std::collections::HashMap::new())),
+        active_cancel_flags: Arc::new(Mutex::new(std::collections::HashMap::new())),
         data_dir,
         engine_version: env!("CARGO_PKG_VERSION").to_string(),
         updater_engine,

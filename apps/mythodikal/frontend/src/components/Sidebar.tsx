@@ -28,12 +28,12 @@ export const Sidebar: Component = () => {
           anti-virus
         </div>
       </div>
-      <nav class="flex-1 px-2 py-3">
+      <nav class="flex flex-1 flex-col justify-evenly px-2 py-4">
         {NAV.map((entry) => (
           <A
             href={entry.path}
-            class="block rounded-sm px-3 py-1.5 font-mono text-xs uppercase tracking-wide text-myth-text-md hover:bg-myth-bg-2 hover:text-myth-text-hi"
-            activeClass="bg-myth-bg-2 text-myth-text-hi"
+            class="block rounded-sm px-3 py-2.5 font-mono text-xs uppercase tracking-wide text-myth-text-md transition-colors hover:bg-myth-bg-2 hover:text-myth-text-hi"
+            activeClass="!bg-myth-accent !text-white hover:!bg-myth-accent"
           >
             {entry.label}
           </A>

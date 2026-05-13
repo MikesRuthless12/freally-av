@@ -10,6 +10,10 @@ pub mod abusech;
 pub mod channels;
 pub mod database;
 pub mod engine;
+/// BYOVD blocklist via loldrivers.io (TASK-139). Daily JSON pull,
+/// SHA-256 extraction, sorted-set binary write. Detector lives in
+/// [`crate::detect::byovd`].
+pub mod loldrivers;
 pub mod nsrl;
 pub mod scheduler;
 pub mod yara_forge;

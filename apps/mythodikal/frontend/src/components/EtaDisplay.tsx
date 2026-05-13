@@ -20,28 +20,68 @@ export const EtaDisplay = () => {
     onCleanup(() => clearInterval(id));
   });
 
-  /** Effective ETA after subtracting the time elapsed since the engine
-   *  reported `etaSecs`. Floors at 0 so the UI never shows negative
-   *  numbers. */
+  /** Frontend-computed ETA — `elapsed × total / visited - elapsed`.
+   *
+   *  We ignore the engine's `etaSecs` entirely. The engine uses a
+   *  bytes-based EMA with a monotone-non-increasing clamp post-3%
+   *  baseline. That clamp locks low whenever the early scan happens
+   *  to be cache-replay or small-file heavy — and from then on it
+   *  refuses to climb back to reality, so the UI shows "0s" forever
+   *  on a long scan. A simple "average rate so far" projection is
+   *  cruder but always honest: it converges to the right value as
+   *  progress increases, and it gracefully refines downward if the
+   *  rate accelerates. */
   const liveEta = (): number | null => {
+    const s = scanState();
+    if (s.kind !== "running" && s.kind !== "paused") return null;
     const c = scanCounters();
-    if (c.etaSecs === null || c.etaReceivedAt === null) return null;
-    const elapsed = Math.max(0, (now() - c.etaReceivedAt) / 1000);
-    return Math.max(0, c.etaSecs - elapsed);
+    const total = c.filesTotalLocked;
+    if (total === null || total === 0) return null;
+    if (c.filesVisited <= 0) return null;
+    if (c.filesVisited >= total) return 0;
+    // Use the scan's own start timestamp as the elapsed baseline.
+    // Multi-phase scans count the registry + process time toward
+    // this elapsed; those phases are fast enough that the projection
+    // converges quickly once the files phase ramps up.
+    const startedAt =
+      (s as { startedAt?: number }).startedAt ?? c.etaReceivedAt;
+    if (startedAt === null || startedAt === undefined) return null;
+    const elapsedSec = (now() - startedAt) / 1000;
+    if (elapsedSec < 1) return null;
+    const rate = c.filesVisited / elapsedSec;
+    if (rate <= 0) return null;
+    const remaining = (total - c.filesVisited) / rate;
+    return Math.max(0, remaining);
   };
 
-  const running = () => scanState().kind === "running";
+  // Phase 6 — ETA is meaningful only during the file phase. During
+  // registry / process sweeps we don't bother calibrating (those
+  // phases have their own deterministic X/Y counters). Treat the
+  // ETA as inactive whenever the engine has moved off the files
+  // phase or hasn't entered it yet.
+  const running = () =>
+    scanState().kind === "running" && scanCounters().activePhase === "files";
   // The estimator returns null for the first ~3% of a scan (the
   // baseline-monotone clamp warm-up). Show "calibrating…" only while
   // we have at least one File event so a brand-new scan doesn't flash
   // the calibrating string before any progress is reported.
   const seenProgress = () => scanCounters().filesHashed > 0;
+  // TASK-137 / wave-3 follow-up: until the producer locks Y, the ETA
+  // estimator's denominator is a moving target — every File event
+  // sees a larger total and the "X seconds remaining" number jumps
+  // around as enumeration continues. Suppress the number entirely in
+  // that window and show "calculating…" so the user understands the
+  // engine is still discovering files.
+  const enumerationLocked = () => scanCounters().enumerationLocked;
 
   const placeholder = () => {
     if (!running()) return "—";
     if (!seenProgress()) return "starting…";
+    if (!enumerationLocked()) return "calculating…";
     return "calibrating…";
   };
+
+  const showLiveEta = () => running() && enumerationLocked() && liveEta() !== null;
 
   return (
     <div>
@@ -49,7 +89,7 @@ export const EtaDisplay = () => {
         Time remaining
       </div>
       <Show
-        when={running() && liveEta() !== null}
+        when={showLiveEta()}
         fallback={
           <div class="font-mono text-lg tabular-nums text-myth-text-lo">
             {placeholder()}

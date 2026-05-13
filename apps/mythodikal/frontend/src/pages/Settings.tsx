@@ -47,7 +47,12 @@ const Settings: Component = () => {
   const [snap, { refetch }] = createResource<SettingsSnapshot>(settingsGet);
   const [updater, { refetch: refetchUpdater }] =
     createResource<UpdaterStatusView | null>(updaterStatus);
-  const [authKey, setAuthKey] = createSignal("");
+  // `setAuthKey` is currently unused on this page because the
+  // abuse.ch input is hidden (commercial-license stance). The signal
+  // + setter stay so the future open-source build can wire a textbox
+  // back in without re-plumbing the IPC payload.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const [authKey, _setAuthKey] = createSignal("");
   const [nsrlPath, setNsrlPath] = createSignal("");
   const [feedReports, setFeedReports] = createSignal<FeedUpdateResult[]>([]);
   const [feedBusy, setFeedBusy] = createSignal(false);
@@ -457,13 +462,14 @@ const Settings: Component = () => {
               <div class="text-xs uppercase tracking-wide text-myth-text-lo">
                 Update feeds now (FR-094 / FR-156)
               </div>
-              <input
-                type="text"
-                placeholder="abuse.ch Auth-Key (free key at auth.abuse.ch)"
-                class="w-full rounded-sm border border-myth-line bg-myth-bg-1 px-2 py-1 font-mono text-xs"
-                value={authKey()}
-                onInput={(e) => setAuthKey(e.currentTarget.value)}
-              />
+              {/* abuse.ch Auth-Key input intentionally hidden — the
+                  feed requires a non-commercial-use license. Backend
+                  wiring (config.updater.abusech_auth_key,
+                  AbuseChUpdater, scheduler.rs) is kept intact for
+                  the day Mythodikal is released open-source / non-
+                  commercial. The signal still drives the
+                  feed_update_now IPC payload below; just no UI to
+                  set it from this page. */}
               <input
                 type="text"
                 placeholder="Local NSRL hash list path (optional)"

@@ -19,7 +19,7 @@ import { attachScanEvents } from "@/stores/scan";
 import { attachQuarantineEvents } from "@/stores/quarantine";
 import { attachShieldsEvents } from "@/stores/shields";
 import { attachTrayEvents } from "@/stores/tray";
-import { firstRunCompleted } from "@/stores/firstRun";
+import { firstRunCompleted, reconcileFirstRunFlag } from "@/stores/firstRun";
 
 const App: Component = () => {
   // Attach during the top-level render so the listeners' onCleanup
@@ -31,6 +31,11 @@ const App: Component = () => {
   attachQuarantineEvents();
   attachShieldsEvents();
   attachTrayEvents();
+  // Reconcile the first-run flag with the backend-persisted file —
+  // covers the dev-mode WebView2 profile reset (where localStorage
+  // doesn't survive across rebuilds) so users don't re-see the
+  // welcome flow on every launch.
+  void reconcileFirstRunFlag();
   return (
     <Show
       when={firstRunCompleted()}

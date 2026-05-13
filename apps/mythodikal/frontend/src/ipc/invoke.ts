@@ -36,6 +36,7 @@ import type {
   SettingsSnapshot,
   UpdateChannelStateView,
   UpdaterStatusView,
+  VolumeView,
 } from "./types";
 
 // ============================================================================
@@ -75,6 +76,14 @@ export function historyList(
 
 export function historyGet(scanId: ScanId): Promise<ScanDetail> {
   return invoke<ScanDetail>("history_get", { scanId });
+}
+
+/** Wipe every row from `findings` + `scans` + `verdict_cache`. The
+ *  quarantine vault is left intact. Returns the count of scan rows
+ *  that were deleted. Used by the History page's "Clear history"
+ *  button after a confirm dialog. */
+export function historyClear(): Promise<number> {
+  return invoke<number>("history_clear");
 }
 
 export function findingList(scanId: ScanId): Promise<FindingView[]> {
@@ -244,6 +253,90 @@ export function onScanPaused(
   return on("scan:paused", handler);
 }
 
+export function onScanCancelled(
+  handler: Handler<Extract<ScanProgress, { kind: "cancelled" }>>,
+): Promise<UnlistenFn> {
+  return on("scan:cancelled", handler);
+}
+
+/**
+ * TASK-137 — Producer locked Y. UI switches from three-piece
+ * `X scanned · Y enumerated · counting…` to `X/Y`.
+ */
+export function onScanEnumerationComplete(
+  handler: Handler<Extract<ScanProgress, { kind: "enumeration_complete" }>>,
+): Promise<UnlistenFn> {
+  return on("scan:enumeration_complete", handler);
+}
+
+// ---------- Phase 6: registry + process phase events ----------
+
+export function onRegistryPhaseStarted(
+  handler: Handler<Extract<ScanProgress, { kind: "registry_phase_started" }>>,
+): Promise<UnlistenFn> {
+  return on("scan:registry_phase_started", handler);
+}
+
+export function onRegistryProgress(
+  handler: Handler<Extract<ScanProgress, { kind: "registry_progress" }>>,
+): Promise<UnlistenFn> {
+  return on("scan:registry_progress", handler);
+}
+
+export function onRegistryPhaseComplete(
+  handler: Handler<Extract<ScanProgress, { kind: "registry_phase_complete" }>>,
+): Promise<UnlistenFn> {
+  return on("scan:registry_phase_complete", handler);
+}
+
+export function onProcessPhaseStarted(
+  handler: Handler<Extract<ScanProgress, { kind: "process_phase_started" }>>,
+): Promise<UnlistenFn> {
+  return on("scan:process_phase_started", handler);
+}
+
+export function onProcessProgress(
+  handler: Handler<Extract<ScanProgress, { kind: "process_progress" }>>,
+): Promise<UnlistenFn> {
+  return on("scan:process_progress", handler);
+}
+
+export function onProcessPhaseComplete(
+  handler: Handler<Extract<ScanProgress, { kind: "process_phase_complete" }>>,
+): Promise<UnlistenFn> {
+  return on("scan:process_phase_complete", handler);
+}
+
+export function onArchiveEntry(
+  handler: Handler<Extract<ScanProgress, { kind: "archive_entry" }>>,
+): Promise<UnlistenFn> {
+  return on("scan:archive_entry", handler);
+}
+
+export function onHeuristicPhaseStarted(
+  handler: Handler<Extract<ScanProgress, { kind: "heuristic_phase_started" }>>,
+): Promise<UnlistenFn> {
+  return on("scan:heuristic_phase_started", handler);
+}
+
+export function onHeuristicProgress(
+  handler: Handler<Extract<ScanProgress, { kind: "heuristic_progress" }>>,
+): Promise<UnlistenFn> {
+  return on("scan:heuristic_progress", handler);
+}
+
+export function onHeuristicPhaseComplete(
+  handler: Handler<Extract<ScanProgress, { kind: "heuristic_phase_complete" }>>,
+): Promise<UnlistenFn> {
+  return on("scan:heuristic_phase_complete", handler);
+}
+
+/// Phase 6 — return the canonical malware-hotspot directory list (TEMP,
+/// APPDATA, Downloads, Startup, …). Used by the Quick Scan button.
+export function quickScanPaths(): Promise<string[]> {
+  return invoke<string[]>("quick_scan_paths");
+}
+
 export function onQuarantineBatchProgress(
   handler: Handler<BatchProgressEvent>,
 ): Promise<UnlistenFn> {
@@ -331,4 +424,32 @@ export function autostartGet(): Promise<AutostartState> {
 
 export function autostartSet(enabled: boolean): Promise<AutostartState> {
   return invoke<AutostartState>("autostart_set", { enabled });
+}
+
+// ============================================================================
+// Volumes (TASK-052 / TASK-056) — Windows per-volume scan-target chooser
+// ============================================================================
+
+/**
+ * List every mounted volume on the host. Returns an empty array on
+ * non-Windows platforms so the UI degrades cleanly to its path-only
+ * chooser.
+ */
+export function enumerateVolumes(): Promise<VolumeView[]> {
+  return invoke<VolumeView[]>("enumerate_volumes");
+}
+
+// ============================================================================
+// First-run flag (TASK-046)
+// ============================================================================
+
+/** Read the first-run-completed flag from `<data_dir>/first_run.json`.
+ *  Survives WebView2 profile resets in dev rebuilds. */
+export function firstRunGet(): Promise<boolean> {
+  return invoke<boolean>("first_run_get");
+}
+
+/** Persist the first-run-completed flag. */
+export function firstRunSet(completed: boolean): Promise<void> {
+  return invoke<void>("first_run_set", { completed });
 }

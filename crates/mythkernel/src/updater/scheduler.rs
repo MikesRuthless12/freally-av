@@ -108,7 +108,20 @@ pub struct SchedulerHandle {
     kick: Arc<Notify>,
     /// Notifier that asks the task to exit cleanly. Set on `Drop`.
     shutdown: Arc<Notify>,
-    join: Option<tokio::task::JoinHandle<()>>,
+    join: Option<SchedulerJoin>,
+}
+
+/// The scheduler can run on either an ambient tokio runtime (when the
+/// caller already has one — tests, daemon shells, any future async
+/// host) or on a dedicated thread it owns. The dedicated-thread mode
+/// is what unblocks the Tauri shell startup, where `spawn()` is called
+/// from outside the runtime context (Tauri's runtime hasn't started
+/// yet when `setup` fires — calling raw `tokio::spawn` panics with
+/// "no reactor running" and the MSI launch produces an invisible
+/// crash because the panic has no console).
+enum SchedulerJoin {
+    Async(tokio::task::JoinHandle<()>),
+    Owned(std::thread::JoinHandle<()>),
 }
 
 impl SchedulerHandle {
@@ -121,8 +134,18 @@ impl SchedulerHandle {
 impl Drop for SchedulerHandle {
     fn drop(&mut self) {
         self.shutdown.notify_one();
-        if let Some(h) = self.join.take() {
-            h.abort();
+        if let Some(j) = self.join.take() {
+            match j {
+                SchedulerJoin::Async(h) => h.abort(),
+                // Owned-runtime mode: the thread's `block_on` returns
+                // when `shutdown_for_task.notified().await` resolves
+                // (which happens via `self.shutdown.notify_one()` two
+                // lines up). We deliberately don't `.join()` here so
+                // app shutdown isn't gated on the scheduler finishing
+                // a long-running feed download; the thread exits on
+                // its own at the next iteration boundary.
+                SchedulerJoin::Owned(_thread) => {}
+            }
         }
     }
 }
@@ -133,6 +156,12 @@ impl Drop for SchedulerHandle {
 /// When `feeds` is empty this returns a handle that does nothing —
 /// useful in a first-run app that hasn't yet been configured with an
 /// auth key.
+///
+/// Runtime-agnostic: detects an ambient tokio runtime via
+/// `Handle::try_current()` and uses it; falls back to a dedicated
+/// `mythkernel-scheduler` thread with its own current-thread runtime
+/// when called from outside any runtime (the Tauri shell's startup
+/// path).
 pub fn spawn(
     feeds: Vec<Box<dyn ScheduledFeed>>,
     feeds_dir: PathBuf,
@@ -148,7 +177,7 @@ pub fn spawn(
         interval
     };
 
-    let join = tokio::spawn(async move {
+    let work = async move {
         if feeds.is_empty() {
             tracing::info!("feed scheduler: no feeds configured, idling");
             shutdown_for_task.notified().await;
@@ -177,7 +206,32 @@ pub fn spawn(
                 interval
             };
         }
-    });
+    };
+
+    let join = if let Ok(handle) = tokio::runtime::Handle::try_current() {
+        SchedulerJoin::Async(handle.spawn(work))
+    } else {
+        let thread = std::thread::Builder::new()
+            .name("mythkernel-scheduler".into())
+            .spawn(move || {
+                let rt = match tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                {
+                    Ok(rt) => rt,
+                    Err(err) => {
+                        tracing::error!(
+                            error = %err,
+                            "feed scheduler: failed to build dedicated runtime"
+                        );
+                        return;
+                    }
+                };
+                rt.block_on(work);
+            })
+            .expect("spawn mythkernel-scheduler thread");
+        SchedulerJoin::Owned(thread)
+    };
 
     SchedulerHandle {
         kick,

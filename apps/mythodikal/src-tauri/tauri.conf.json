@@ -56,7 +56,19 @@
         "bundleMediaFramework": false
       }
     },
-    "createUpdaterArtifacts": true
+    "windows": {
+      "wix": {
+        "language": ["en-US"]
+      },
+      "nsis": {
+        "installMode": "perMachine",
+        "languages": ["English"],
+        "displayLanguageSelector": false,
+        "installerHooks": "installer-hooks.nsh"
+      },
+      "allowDowngrades": false
+    },
+    "createUpdaterArtifacts": false
   },
   "plugins": {
     "updater": {

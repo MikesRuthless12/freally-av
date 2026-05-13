@@ -72,6 +72,53 @@ pub struct ScanOptions {
     /// each file (TASK-134, FR-136). Off by default; the Scan dashboard's
     /// operator-mode toggle flips this on per-scan.
     pub emit_partial_hash: bool,
+    /// TASK-053 / TASK-056 — when set, ignore the target path and fan
+    /// out across every detected volume on the host. Windows-only
+    /// (`MultiVolumeWalker` discovery returns the requested root on
+    /// other platforms). Off by default.
+    pub all_volumes: bool,
+    /// Phase 5 wave 3 follow-up — when `true`, the adaptive throttle's
+    /// per-file `std::thread::sleep` is skipped so the scan runs at
+    /// the consumer pool's natural rate. The throttle was designed
+    /// for background daemon scans (Phase 8+) that need to yield to
+    /// interactive work; for user-initiated foreground scans the user
+    /// is actively staring at the progress bar and wants flat-out
+    /// throughput. Default `true` since the GUI + CLI are both
+    /// foreground entry points.
+    pub foreground: bool,
+    /// Phase 6 — run the Windows registry persistence-key sweep before
+    /// the file walk. Quick Scan turns this on. Custom Scan defaults
+    /// off so the file workflow stays unchanged.
+    pub include_registry: bool,
+    /// Phase 6 — enumerate running processes and hash each main exe
+    /// before the file walk. Quick Scan turns this on.
+    pub include_processes: bool,
+    /// Phase 6 — run the per-file walker + worker pool. Defaults on
+    /// (every existing scan path expects it). Quick Scan can leave it
+    /// on (with a `target` of the canonical hotspot paths) or, for a
+    /// "registry + processes only" sweep, turn it off.
+    pub include_files: bool,
+    /// Phase 6 — recurse into archive containers (.zip / .zipx) and
+    /// hash each entry through the same detection pipeline. The
+    /// archive itself counts as one file in `files_visited`; entries
+    /// scanned inside accumulate into a separate `archive_entries`
+    /// counter. Off by default (per-archive open + per-entry hash
+    /// costs add real latency on big backup folders).
+    pub include_archives: bool,
+    /// Phase 6 — run heuristic pattern matchers after the file/
+    /// registry/process phases complete. Flags `.exe` / `.dll` /
+    /// `.scr` / etc. in known dropper-staging dirs (`%TEMP%`,
+    /// `%APPDATA%`, Downloads, ProgramData/Temp). Off by default.
+    pub run_heuristics: bool,
+    /// Optional path to a `crc32_blacklist.bin` (the fast-screen
+    /// artifact emitted by `tools/feed-builder`). When provided,
+    /// the hasher computes CRC32 first; files whose CRC32 isn't in
+    /// the set skip BLAKE3 + SHA-256 + the entire detection pipeline.
+    /// ~1 in 4,300 false-positive rate at the gate stage; those
+    /// fall through to the normal hashing path and BLAKE3 confirms.
+    /// `None` (the default) preserves the legacy "hash every file"
+    /// behavior — existing callers are unaffected.
+    pub crc32_gate_path: Option<std::path::PathBuf>,
 }
 
 impl Default for ScanOptions {
@@ -83,6 +130,14 @@ impl Default for ScanOptions {
             max_depth: None,
             compute_sha256: false,
             emit_partial_hash: false,
+            all_volumes: false,
+            foreground: true,
+            include_registry: false,
+            include_processes: false,
+            include_files: true,
+            include_archives: false,
+            run_heuristics: false,
+            crc32_gate_path: None,
         }
     }
 }
@@ -109,6 +164,11 @@ pub struct ResumeToken {
     /// v1) tokens loading cleanly.
     #[serde(default)]
     pub emit_partial_hash: bool,
+    /// TASK-053 / TASK-056 — persist the multi-volume fan-out toggle so
+    /// a resumed scan continues across the same volume set. `#[serde(default)]`
+    /// keeps older tokens loading cleanly (defaults to `false` = single root).
+    #[serde(default)]
+    pub all_volumes: bool,
     /// Files we've already hashed + processed. On resume we skip these.
     /// Capped at [`RESUME_TOKEN_PATH_CAP`]; if the original scan exceeded
     /// the cap the engine just re-scans the overage (cheap correctness
@@ -138,6 +198,19 @@ pub enum ScanProgress {
     Started {
         scan_id: i64,
         started_at_utc: i64,
+        /// TASK-040 / wave-3 follow-up — when this start is actually
+        /// a resume from a paused scan, these fields carry the prior
+        /// run's counters so the UI's running totals don't visually
+        /// reset to zero before the worker's first `File` event lands
+        /// with the real numbers. `0` for fresh starts.
+        #[serde(default)]
+        resumed_files_visited: i64,
+        #[serde(default)]
+        resumed_files_hashed: i64,
+        #[serde(default)]
+        resumed_bytes_visited: i64,
+        #[serde(default)]
+        resumed_findings_count: i64,
     },
     File {
         path: PathBuf,
@@ -149,6 +222,43 @@ pub enum ScanProgress {
         /// `Hh Mm Ss` counting down (see frontend `formatEta`).
         #[serde(default)]
         eta_secs: Option<f64>,
+        /// FR-135 / TASK-137 — running enumeration count, **unlocked**.
+        /// Tracks the moving denominator while the producer is still
+        /// discovering files. `None` after `EnumerationComplete` fires
+        /// (UI switches to `files_total_locked`).
+        #[serde(default)]
+        files_total_running: Option<u64>,
+        /// FR-135 / TASK-137 — locked total after the producer finished
+        /// enumeration. `None` until the producer emits
+        /// `EnumerationComplete`; from that event onward this carries
+        /// the canonical Y in the "X/Y" UI presentation.
+        #[serde(default)]
+        files_total_locked: Option<u64>,
+        /// Cumulative counters at the moment this event was emitted.
+        /// The Tauri forwarder throttles File events to ≤ 10 Hz, so a
+        /// per-event `+1` on the UI side underflows on fast scans.
+        /// The frontend SETs to these values instead, which stays
+        /// correct under arbitrary event drop / coalesce.
+        #[serde(default)]
+        files_visited_total: u64,
+        #[serde(default)]
+        files_hashed_total: u64,
+        #[serde(default)]
+        bytes_visited_total: u64,
+        #[serde(default)]
+        findings_count_total: u64,
+    },
+    /// FR-135 / TASK-137 — fires exactly once per scan, when the
+    /// producer finishes walking every requested root. After this event
+    /// the UI swaps from `X scanned · Y enumerated · counting…` to
+    /// `X/Y`. Files surfaced after this point (e.g. mid-scan tree
+    /// mutations) accrue against the `+N discovered after lock` /
+    /// `Y − D not found` scan-summary footnotes; the locked Y here does
+    /// not change.
+    EnumerationComplete {
+        scan_id: i64,
+        files_total_locked: u64,
+        bytes_total_locked: u64,
     },
     /// Live mid-flight BLAKE3 partial of the file currently being hashed.
     /// Throttled at ≤ 10 Hz by the engine (TASK-134 / FR-136). Optional —
@@ -193,9 +303,98 @@ pub enum ScanProgress {
         bytes_visited: i64,
         findings_count: i64,
     },
+    /// Worker observed a cancel request, marked the scan row as
+    /// `cancelled`, and exited. **No resume token is written** — the
+    /// scan cannot be resumed. Counters reflect work done before the
+    /// cancellation point.
+    Cancelled {
+        scan_id: i64,
+        files_visited: i64,
+        files_hashed: i64,
+        bytes_visited: i64,
+        findings_count: i64,
+    },
     Failed {
         scan_id: i64,
         message: String,
+    },
+    /// Phase 6 — Registry phase started. UI switches the active counter
+    /// tile to "Registry items scanned". `expected_items` is the
+    /// total value count across every persistence key, pre-counted so
+    /// the UI's progress bar has a denominator from tick one (rather
+    /// than re-walking "counting…").
+    RegistryPhaseStarted {
+        scan_id: i64,
+        #[serde(default)]
+        expected_items: u64,
+    },
+    /// Registry phase progress. `items_total` is the running cumulative
+    /// count of value entries inspected so far across all persistence
+    /// keys. `current_key` is the key the engine is currently iterating.
+    RegistryProgress {
+        scan_id: i64,
+        items_scanned_total: u64,
+        current_key: String,
+    },
+    /// Registry phase finished. `items_total` is the final count.
+    RegistryPhaseComplete {
+        scan_id: i64,
+        items_total: u64,
+    },
+    /// Phase 6 — Process phase started. `expected_processes` is the
+    /// total PID count from the initial `sysinfo::System::refresh` so
+    /// the UI shows X/Y from tick one.
+    ProcessPhaseStarted {
+        scan_id: i64,
+        #[serde(default)]
+        expected_processes: u64,
+    },
+    /// One process inspected. `processes_total` is the running cumulative
+    /// count of PIDs visited; `name` is the process name; `exe_path` is
+    /// the resolved exe path (None if unresolvable / kernel pseudo).
+    ProcessProgress {
+        scan_id: i64,
+        processes_scanned_total: u64,
+        pid: u32,
+        name: String,
+        #[serde(default)]
+        exe_path: Option<PathBuf>,
+    },
+    /// Process phase finished.
+    ProcessPhaseComplete {
+        scan_id: i64,
+        processes_total: u64,
+    },
+    /// Phase 6 — Engine processed one entry inside an archive
+    /// container. UI shows "Inside <archive>: <entry>" in the
+    /// current-path line and increments the archive-entries counter.
+    ArchiveEntry {
+        scan_id: i64,
+        archive_path: PathBuf,
+        entry_name: String,
+        archive_entries_scanned_total: u64,
+    },
+    /// Phase 6 — Heuristic post-pass started. UI swaps the active
+    /// tile to "Heuristics" and shows the items scanned counter.
+    HeuristicPhaseStarted {
+        scan_id: i64,
+        #[serde(default)]
+        expected_items: u64,
+    },
+    /// One heuristic item examined. `current_path` is the file/
+    /// registry value currently being checked.
+    HeuristicProgress {
+        scan_id: i64,
+        items_scanned_total: u64,
+        current_path: String,
+    },
+    /// Heuristic post-pass finished. `items_total` is the count of
+    /// items examined; `flagged_total` is the count of items that
+    /// matched a heuristic rule and were recorded as findings.
+    HeuristicPhaseComplete {
+        scan_id: i64,
+        items_total: u64,
+        flagged_total: u64,
     },
 }
 
@@ -206,10 +405,16 @@ pub struct ScanHandle {
     pub scan_id: i64,
     pub progress: broadcast::Receiver<ScanProgress>,
     pub worker: tokio::task::JoinHandle<()>,
-    /// Pause flag (TASK-040). The worker checks this between each file;
-    /// when `true` it persists a resume token, emits `ScanProgress::Paused`,
-    /// and exits. Cloning is cheap (`Arc::clone`).
+    /// Pause flag (TASK-040). The worker checks this between each file
+    /// AND between hash chunks (mid-hash cooperative cancellation via
+    /// [`crate::hasher::Hasher::with_abort_flag`]); when `true` it
+    /// persists a resume token, emits `ScanProgress::Paused`, and
+    /// exits. Cloning is cheap (`Arc::clone`).
     pub pause_flag: Arc<AtomicBool>,
+    /// Cancel flag — sibling to `pause_flag`. Set by `scan_cancel`;
+    /// the worker exits without writing a resume token and marks the
+    /// scan row as `cancelled`. Cancellation is **not** resumable.
+    pub cancel_flag: Arc<AtomicBool>,
 }
 
 impl ScanHandle {

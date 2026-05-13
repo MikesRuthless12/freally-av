@@ -12,6 +12,7 @@
 //! page lets them whitelist by identity — they're trusting the certificate
 //! chain themselves, not the engine.
 
+use std::os::windows::process::CommandExt;
 use std::path::Path;
 use std::process::{Command, Stdio};
 use std::time::Duration;
@@ -23,6 +24,13 @@ const SHELL_TIMEOUT: Duration = Duration::from_secs(8);
 /// 25 ms × N files added measurable overhead; 100 ms is still well below
 /// the user-visible threshold for the operator-mode scan.
 const POLL_INTERVAL: Duration = Duration::from_millis(100);
+/// Windows `CREATE_NO_WINDOW` process-creation flag. Without it, every
+/// per-file `powershell.exe` invocation flashes a console window on
+/// the user's desktop — at 32 worker threads × thousands of executable
+/// files, this is unusable. The flag is value 0x08000000 from
+/// `winbase.h`; we hard-code it rather than pulling in the `windows`
+/// crate just for one constant.
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 pub fn extract_signer(path: &Path) -> SignerIdentity {
     let script = format!(
@@ -44,6 +52,7 @@ pub fn extract_signer(path: &Path) -> SignerIdentity {
         .arg(&script)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
+        .creation_flags(CREATE_NO_WINDOW)
         .spawn()
     {
         Ok(c) => c,
