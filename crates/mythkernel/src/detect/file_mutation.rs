@@ -57,9 +57,28 @@ pub struct MutationFinding {
     pub evidence: String,
 }
 
+/// One pending baseline row queued for batch flush at scan end.
+/// Phase 5 wave 3 perf push: instead of one IMMEDIATE transaction per
+/// file (~5-15 ms each, multiply by hundreds of `$PATH` binaries),
+/// we accumulate rows in memory and flush them all in a single
+/// transaction at the end of the scan.
+#[derive(Debug, Clone)]
+struct PendingBaselineRow {
+    scan_id: i64,
+    path: PathBuf,
+    blake3_hex: String,
+    sha256_hex: Option<String>,
+    size_bytes: u64,
+    signer: SignerIdentity,
+    nsrl_known: bool,
+    source: BaselineSource,
+    recorded_at_utc: i64,
+}
+
 /// Per-scan baseline state. Construct once at scan start with
-/// [`FileBaseline::from_platform`]; call [`Self::record_and_check`]
-/// every time the engine successfully hashes a file.
+/// [`FileBaseline::from_platform`]; call [`Self::check_and_enqueue`]
+/// every time the engine successfully hashes a file. Drain the
+/// accumulated rows via [`Self::flush_pending`] at scan end.
 #[derive(Default)]
 pub struct FileBaseline {
     /// Lower-cased path strings (Windows) or as-is (Unix) — interpreted
@@ -73,6 +92,10 @@ pub struct FileBaseline {
     autostart: BTreeSet<PathBuf>,
     path_bins: BTreeSet<PathBuf>,
     enabled: bool,
+    /// In-memory queue for the deferred batch flush. Behind a Mutex
+    /// so the multi-threaded worker pool can append from any worker
+    /// (Phase 5 wave 3 perf phase 1).
+    pending: Mutex<Vec<PendingBaselineRow>>,
 }
 
 impl FileBaseline {
@@ -94,6 +117,7 @@ impl FileBaseline {
             autostart,
             path_bins,
             enabled,
+            pending: Mutex::new(Vec::new()),
         }
     }
 
@@ -136,16 +160,18 @@ impl FileBaseline {
         None
     }
 
-    /// Record a baseline row for `path` and, when the prior snapshot
-    /// matches the alert criteria, return a [`MutationFinding`] the
-    /// engine should surface.
+    /// Perf phase 5 — check for drift against the most recent prior
+    /// baseline (read-only DB op), then **enqueue** the new row for a
+    /// batched flush at scan end. Replaces the prior
+    /// `record_and_check` which did one IMMEDIATE transaction per
+    /// file; per-file DB write overhead vanishes from the hot path.
     ///
-    /// `signer.is_signed()` is the truth for the "signed" half of the
-    /// alert criteria; the caller passes `nsrl_known` for the
-    /// allowlist half (the engine knows this from the pipeline's
-    /// allowlist verdict for the prior scan run).
+    /// Returns `Some(MutationFinding)` when the hash drifted from a
+    /// prior signed-or-NSRL-known snapshot, mirroring the previous
+    /// contract. Returns `None` for first-snapshot files, unchanged
+    /// files, and drift from unsigned/unknown priors.
     #[allow(clippy::too_many_arguments)]
-    pub fn record_and_check(
+    pub fn check_and_enqueue(
         &self,
         db: &Mutex<Connection>,
         scan_id: i64,
@@ -157,56 +183,37 @@ impl FileBaseline {
         nsrl_known: bool,
     ) -> Option<MutationFinding> {
         let source = self.source_for(path)?;
-        // Acquire the DB lock once and wrap diff-read + INSERT in a
-        // single IMMEDIATE transaction (code-review M3 / sec-review
-        // M4). Two concurrent scans against the same path would
-        // otherwise both observe the *same* prior row and both insert
-        // a new one, producing duplicate findings; serializing here
-        // closes that window before the Phase 12 daemon ever runs
-        // alongside a UI-initiated scan.
-        let mut conn_guard = match db.lock() {
-            Ok(c) => c,
-            Err(_) => return None,
+        // Read the prior snapshot — single-statement SELECT, no
+        // transaction needed. The previous IMMEDIATE-txn guard was
+        // there to serialize the read+insert pair; with the insert
+        // now deferred to a batched flush, the read can race
+        // harmlessly with concurrent writers (the worst case is two
+        // workers both observe the same prior + both enqueue a new
+        // row, which the batch flush handles by appending both —
+        // file_baseline is append-only).
+        let prior = match db.lock() {
+            Ok(conn) => read_latest_prior(&conn, path).ok().flatten(),
+            Err(_) => None,
         };
-        let tx =
-            match conn_guard.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate) {
-                Ok(t) => t,
-                Err(_) => return None,
-            };
-        let prior = read_latest_prior_tx(&tx, path).ok().flatten();
         let recorded_at_utc = now_utc();
-        let path_str = path.to_string_lossy();
-        // Sec-review M1 (defense-in-depth): `signer.identity` flows in
-        // from the engine which already pulls a truncated identity
-        // from the publisher cache, but truncating here too means a
-        // future direct caller can't bypass the 512-byte cap and
-        // stuff a multi-KB row into the cache.
+        // Sec-review M1 (defense-in-depth): truncate signer identity
+        // before storage so direct callers can't bypass the 512-byte
+        // cap. Also keeps the pending queue size predictable.
         let signer_truncated = signer.clone().truncated();
-        // INSERT the new row regardless of finding emission so a future
-        // scan can diff against this snapshot. The table is
-        // append-only; the inner `?` propagates the rusqlite error
-        // into the surrounding `let _ = tx.commit()` no-op below if
-        // the row write fails, preserving the soft-failure contract
-        // (detection still runs even if persistence trips).
-        let _ = tx.execute(
-            "INSERT INTO file_baseline \
-             (scan_id, path, blake3_hex, sha256_hex, size_bytes, \
-              signer_identity, signer_kind, nsrl_known, source, recorded_at_utc) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
-            params![
-                scan_id,
-                path_str,
-                blake3_hex,
-                sha256_hex,
-                size_bytes as i64,
-                signer_truncated.identity.as_str(),
-                signer_truncated.kind.as_str(),
-                nsrl_known as i64,
-                source.as_str(),
-                recorded_at_utc,
-            ],
-        );
-        let _ = tx.commit();
+        let row = PendingBaselineRow {
+            scan_id,
+            path: path.to_path_buf(),
+            blake3_hex: blake3_hex.to_string(),
+            sha256_hex: sha256_hex.map(|s| s.to_string()),
+            size_bytes,
+            signer: signer_truncated,
+            nsrl_known,
+            source,
+            recorded_at_utc,
+        };
+        if let Ok(mut q) = self.pending.lock() {
+            q.push(row);
+        }
         let prior = prior?;
         if prior.blake3_hex == blake3_hex {
             return None;
@@ -235,6 +242,81 @@ impl FileBaseline {
             evidence,
         })
     }
+
+    /// Batch-flush every pending baseline row in a single transaction.
+    /// Call once at scan end (or pause, where the resume token's
+    /// `processed_paths` keeps the baseline intent correct across
+    /// resume). Returns the number of rows persisted.
+    ///
+    /// Soft-failure: a DB lock error or transaction failure logs at
+    /// WARN and returns 0 — the cache miss on next scan re-discovers
+    /// every file the same way. The append-only `file_baseline`
+    /// table tolerates the loss cleanly.
+    pub fn flush_pending(&self, db: &Mutex<Connection>) -> usize {
+        let rows = match self.pending.lock() {
+            Ok(mut q) => std::mem::take(&mut *q),
+            Err(_) => return 0,
+        };
+        if rows.is_empty() {
+            return 0;
+        }
+        let mut conn = match db.lock() {
+            Ok(c) => c,
+            Err(_) => return 0,
+        };
+        let tx = match conn.transaction() {
+            Ok(t) => t,
+            Err(err) => {
+                tracing::warn!(
+                    error = %err,
+                    rows_dropped = rows.len(),
+                    "file_mutation: failed to open flush transaction; baseline rows lost"
+                );
+                return 0;
+            }
+        };
+        let written = {
+            let mut stmt = match tx.prepare(
+                "INSERT INTO file_baseline \
+                 (scan_id, path, blake3_hex, sha256_hex, size_bytes, \
+                  signer_identity, signer_kind, nsrl_known, source, recorded_at_utc) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            ) {
+                Ok(s) => s,
+                Err(err) => {
+                    tracing::warn!(error = %err, "file_mutation: prepare failed");
+                    return 0;
+                }
+            };
+            let mut count = 0usize;
+            for r in &rows {
+                let path_str = r.path.to_string_lossy();
+                if stmt
+                    .execute(params![
+                        r.scan_id,
+                        path_str,
+                        r.blake3_hex,
+                        r.sha256_hex,
+                        r.size_bytes as i64,
+                        r.signer.identity.as_str(),
+                        r.signer.kind.as_str(),
+                        r.nsrl_known as i64,
+                        r.source.as_str(),
+                        r.recorded_at_utc,
+                    ])
+                    .is_ok()
+                {
+                    count += 1;
+                }
+            }
+            count
+        };
+        if let Err(err) = tx.commit() {
+            tracing::warn!(error = %err, "file_mutation: commit failed");
+            return 0;
+        }
+        written
+    }
 }
 
 /// One prior baseline row, projected down to the fields the detector
@@ -246,10 +328,12 @@ struct PriorBaseline {
 }
 
 /// Read the most recent baseline row for `path`. `None` when this is
-/// the first time we've snapshotted this path. Caller supplies the
-/// SQLite handle — either a `Connection` (legacy) or a `Transaction`
-/// (the `record_and_check` hot path).
-fn read_latest_prior_tx(
+/// the first time we've snapshotted this path. The deferred-batch
+/// design (perf phase 5) means this runs without a wrapping
+/// transaction; concurrent baseline appends from sibling workers
+/// race harmlessly because every (scan_id, path, mtime) tuple is
+/// unique within a single scan.
+fn read_latest_prior(
     conn: &rusqlite::Connection,
     path: &Path,
 ) -> rusqlite::Result<Option<PriorBaseline>> {
@@ -415,12 +499,14 @@ mod tests {
 
         // First record — no prior, no finding (and the prior wouldn't
         // have been "signed-or-known" anyway).
-        let f1 = baseline.record_and_check(&db, 1, &target, "aa", None, 5, &signer, false);
+        let f1 = baseline.check_and_enqueue(&db, 1, &target, "aa", None, 5, &signer, false);
         assert!(f1.is_none());
+        assert_eq!(baseline.flush_pending(&db), 1);
 
         // Second record, same hash — no diff.
-        let f2 = baseline.record_and_check(&db, 2, &target, "aa", None, 5, &signer, false);
+        let f2 = baseline.check_and_enqueue(&db, 2, &target, "aa", None, 5, &signer, false);
         assert!(f2.is_none());
+        baseline.flush_pending(&db);
     }
 
     #[test]
@@ -441,10 +527,11 @@ mod tests {
         };
 
         // Prior snapshot: signed.
-        baseline.record_and_check(&db, 1, &target, "aa", None, 5, &signed, false);
+        baseline.check_and_enqueue(&db, 1, &target, "aa", None, 5, &signed, false);
+        assert_eq!(baseline.flush_pending(&db), 1);
         // Now the hash drifts.
         let f2 = baseline
-            .record_and_check(
+            .check_and_enqueue(
                 &db,
                 2,
                 &target,
@@ -457,6 +544,7 @@ mod tests {
             .expect("expected mutation finding");
         assert_eq!(f2.severity, crate::detect::Severity::Medium);
         assert!(f2.rule_id.starts_with("mythodikal:file_mutation:"));
+        baseline.flush_pending(&db);
     }
 
     #[test]
@@ -473,12 +561,14 @@ mod tests {
         let baseline = baseline_with_paths(&[&target]);
         let unsigned = SignerIdentity::unsigned();
 
-        baseline.record_and_check(&db, 1, &target, "aa", None, 5, &unsigned, false);
-        let f = baseline.record_and_check(&db, 2, &target, "bb", None, 5, &unsigned, false);
+        baseline.check_and_enqueue(&db, 1, &target, "aa", None, 5, &unsigned, false);
+        baseline.flush_pending(&db);
+        let f = baseline.check_and_enqueue(&db, 2, &target, "bb", None, 5, &unsigned, false);
         assert!(
             f.is_none(),
             "no finding expected for mutated previously-unsigned file"
         );
+        baseline.flush_pending(&db);
     }
 
     #[test]
@@ -495,11 +585,13 @@ mod tests {
         let baseline = baseline_with_paths(&[&target]);
         let unsigned = SignerIdentity::unsigned();
 
-        baseline.record_and_check(&db, 1, &target, "aa", None, 5, &unsigned, true);
+        baseline.check_and_enqueue(&db, 1, &target, "aa", None, 5, &unsigned, true);
+        assert_eq!(baseline.flush_pending(&db), 1);
         let f = baseline
-            .record_and_check(&db, 2, &target, "bb", None, 5, &unsigned, false)
+            .check_and_enqueue(&db, 2, &target, "bb", None, 5, &unsigned, false)
             .expect("expected mutation finding for previously NSRL-known file");
         assert_eq!(f.severity, crate::detect::Severity::Medium);
+        baseline.flush_pending(&db);
     }
 
     #[test]

@@ -225,8 +225,13 @@ pub struct AppState {
     /// Active scan pause flags (TASK-040). `scan_start` registers a
     /// flag; the forwarder removes it on the terminal event. `scan_pause`
     /// looks up by id and flips the flag — the worker observes it at
-    /// the next iteration boundary, persists the resume token, and exits.
+    /// the next iteration boundary (and mid-hash via the shared abort
+    /// flag), persists the resume token, and exits.
     pub active_pause_flags: Arc<Mutex<HashMap<i64, Arc<AtomicBool>>>>,
+    /// Active scan cancel flags. Sibling to `active_pause_flags`; set
+    /// by `scan_cancel`. The worker exits without writing a resume
+    /// token and marks the scans row as `cancelled`.
+    pub active_cancel_flags: Arc<Mutex<HashMap<i64, Arc<AtomicBool>>>>,
     pub data_dir: PathBuf,
     pub engine_version: String,
     /// Engine self-update channel (TASK-130). Owns the persisted state
@@ -241,6 +246,49 @@ pub struct AppState {
 /// Resolve the canonical feeds directory under `<data_dir>/feeds/`.
 pub fn feeds_dir(data_dir: &std::path::Path) -> PathBuf {
     data_dir.join("feeds")
+}
+
+// ============================================================================
+// First-run flag (TASK-046 wave-3 follow-up)
+// ============================================================================
+
+/// On-disk path for the first-run-completed flag. Stored next to the
+/// engine DB so it survives dev rebuilds (WebView2's profile dir is
+/// ephemeral in dev mode, so localStorage alone resets every launch).
+fn first_run_flag_path(data_dir: &std::path::Path) -> PathBuf {
+    data_dir.join("first_run.json")
+}
+
+/// Read the first-run-completed flag. Returns `false` when the file
+/// doesn't exist (fresh profile) or can't be parsed.
+#[tauri::command]
+pub async fn first_run_get(state: State<'_, AppState>) -> Result<bool, String> {
+    let path = first_run_flag_path(&state.data_dir);
+    if !path.exists() {
+        return Ok(false);
+    }
+    let bytes = std::fs::read(&path).map_err(stringify)?;
+    let v: serde_json::Value = serde_json::from_slice(&bytes).map_err(stringify)?;
+    Ok(v.get("completed")
+        .and_then(|x| x.as_bool())
+        .unwrap_or(false))
+}
+
+/// Persist the first-run-completed flag. Idempotent. Sec-review L1:
+/// atomic write via tmp+rename so a crash mid-write doesn't leave a
+/// zero-byte `first_run.json` that would re-trigger the welcome
+/// wizard on next launch.
+#[tauri::command]
+pub async fn first_run_set(state: State<'_, AppState>, completed: bool) -> Result<(), String> {
+    let path = first_run_flag_path(&state.data_dir);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(stringify)?;
+    }
+    let body = serde_json::json!({ "completed": completed }).to_string();
+    let tmp = path.with_extension("json.tmp");
+    std::fs::write(&tmp, body).map_err(stringify)?;
+    std::fs::rename(&tmp, &path).map_err(stringify)?;
+    Ok(())
 }
 
 // ============================================================================
@@ -278,6 +326,89 @@ pub async fn enumerate_volumes() -> Result<Vec<VolumeView>, String> {
     }
 }
 
+/// Canonical Quick Scan hotspot list — the directories where malware
+/// most often first lands (drive-by downloads, droppers, persistence
+/// installers, startup-shortcut payloads). Expanded from environment
+/// variables at runtime so we follow the user's actual profile, not
+/// hard-coded `C:\Users\<name>` paths.
+///
+/// Quick Scan also turns on registry + process phases via
+/// `ScanOptions { include_registry: true, include_processes: true }`,
+/// so this list covers only the *file* portion of the sweep.
+#[tauri::command]
+pub async fn quick_scan_paths() -> Result<Vec<String>, String> {
+    let mut paths: Vec<String> = Vec::new();
+    let mut push_env = |var: &str, suffix: Option<&str>| {
+        if let Some(raw) = std::env::var_os(var) {
+            let mut p = std::path::PathBuf::from(raw);
+            if let Some(s) = suffix {
+                p.push(s);
+            }
+            if p.exists() {
+                paths.push(p.to_string_lossy().into_owned());
+            }
+        }
+    };
+    // Per-user transient + ephemeral install areas — the #1 dropper
+    // target on modern Windows.
+    push_env("TEMP", None);
+    push_env("TMP", None);
+    push_env("APPDATA", None);
+    push_env("LOCALAPPDATA", None);
+    push_env("USERPROFILE", Some("Downloads"));
+    push_env("USERPROFILE", Some("Desktop"));
+    // Persistence: startup folders.
+    push_env(
+        "APPDATA",
+        Some("Microsoft\\Windows\\Start Menu\\Programs\\Startup"),
+    );
+    // System-wide drop zones.
+    push_env("ProgramData", None);
+    push_env("PUBLIC", Some("Downloads"));
+    push_env("SystemRoot", Some("Temp"));
+    // De-dupe exact matches (TEMP and TMP commonly resolve to the
+    // same folder).
+    paths.sort();
+    paths.dedup();
+
+    // Descendant de-dupe — the user reported Quick Scan visited more
+    // files than a full `C:\` scan because the producer walks every
+    // root and many of the hotspots overlap:
+    //   * `%TEMP%` often lives inside `%LOCALAPPDATA%\Temp`
+    //   * `%APPDATA%\…\Startup` lives inside `%APPDATA%`
+    //   * `%TMP%` is typically identical to `%TEMP%`
+    // Each overlap got enumerated twice and `files_total_running`
+    // doubled. Sort by length so the *shortest* path wins, then drop
+    // any later path that has a kept path as a prefix (case-folded on
+    // Windows because the FS is case-insensitive).
+    paths.sort_by_key(|p| p.len());
+    let mut kept: Vec<String> = Vec::with_capacity(paths.len());
+    let case_fold = |s: &str| -> String {
+        if cfg!(windows) {
+            s.to_ascii_lowercase()
+        } else {
+            s.to_string()
+        }
+    };
+    let sep = std::path::MAIN_SEPARATOR;
+    'outer: for candidate in paths.into_iter() {
+        let folded = case_fold(&candidate);
+        for parent in &kept {
+            let parent_folded = case_fold(parent);
+            let parent_with_sep = if parent_folded.ends_with(sep) {
+                parent_folded.clone()
+            } else {
+                format!("{parent_folded}{sep}")
+            };
+            if folded == parent_folded || folded.starts_with(&parent_with_sep) {
+                continue 'outer;
+            }
+        }
+        kept.push(candidate);
+    }
+    Ok(kept)
+}
+
 // ============================================================================
 // Scan commands
 // ============================================================================
@@ -303,11 +434,68 @@ pub async fn scan_start(
     // because `MultiVolumeWalker::all_volumes(true)` resolves roots
     // through `enumerate_volumes()` before reading the requested
     // path.
-    let target = if request.all_volumes {
+    // Registry/Process-only sweep: no file target needed. We feed
+    // the engine a sentinel target and rely on `files_disabled` to
+    // skip the walker entirely.
+    let target = if request.files_disabled {
+        // Review M4 — surface a human-readable target string in
+        // History instead of the raw sentinel. The engine still
+        // skips the walker via `include_files=false`; the path
+        // itself is never opened.
+        let label = match (request.include_registry, request.include_processes) {
+            (true, true) => "<registry + process sweep>",
+            (true, false) => "<registry sweep>",
+            (false, true) => "<process sweep>",
+            (false, false) => "<system sweep>",
+        };
+        ScanTarget::Path(PathBuf::from(label))
+    } else if request.all_volumes {
         ScanTarget::Path(PathBuf::from("<all-volumes>"))
+    } else if !request.extra_paths.is_empty() {
+        // Phase 6 Quick Scan path — every hotspot is validated, then
+        // bundled into a multi-path target. We also include the
+        // primary `target_path` if it was supplied (defensive against
+        // a future caller that passes both).
+        //
+        // Sec-review SEC-H1: cap the number of extra paths the
+        // renderer can submit in one scan_start call. Quick Scan
+        // generates ~10 paths in practice; anything past 64 is either
+        // a misconfiguration or a malicious renderer trying to stall
+        // the canonicalize loop. Reject loudly instead of silently
+        // truncating so a future legitimate use case (e.g. user
+        // multi-select) surfaces a clear error to add a UI cap.
+        const MAX_EXTRA_PATHS: usize = 64;
+        if request.extra_paths.len() > MAX_EXTRA_PATHS {
+            return Err(format!(
+                "scan_start: extra_paths length {} exceeds cap {}",
+                request.extra_paths.len(),
+                MAX_EXTRA_PATHS
+            ));
+        }
+        let mut paths: Vec<PathBuf> = Vec::with_capacity(request.extra_paths.len() + 1);
+        if request.target_path.as_os_str().len() > 0 {
+            let canonical = validate_scan_target(&request.target_path).map_err(stringify)?;
+            paths.push(canonical);
+        }
+        for p in &request.extra_paths {
+            let canonical = validate_scan_target(p).map_err(stringify)?;
+            paths.push(canonical);
+        }
+        ScanTarget::Paths(paths)
     } else {
         let canonical_target = validate_scan_target(&request.target_path).map_err(stringify)?;
         ScanTarget::Path(canonical_target)
+    };
+    // CRC32 fast-screen gate (TASK / CRC32 pre-screen). When the
+    // Mythodikal-side feed-builder has published a `crc32_blacklist.bin`
+    // to the feeds dir, hand its path to the engine so the scan
+    // worker can skip BLAKE3 + SHA-256 + the detection pipeline on
+    // files whose CRC32 isn't in the malware set (~99.977% miss
+    // rate at 1M-sample gates). Absent file → fall back to the
+    // legacy "hash every file" path (None).
+    let crc32_gate_path = {
+        let p = feeds_dir(&state.data_dir).join("crc32_blacklist.bin");
+        if p.exists() { Some(p) } else { None }
     };
     let opts = ScanOptions {
         compute_sha256: request.compute_sha256,
@@ -319,32 +507,50 @@ pub async fn scan_start(
         // TASK-053 / TASK-056: multi-volume fan-out is opt-in via the
         // Scan dashboard's "scan all volumes" checkbox.
         all_volumes: request.all_volumes,
+        // Phase 6 — Quick Scan / advanced scan flags.
+        include_registry: request.include_registry,
+        include_processes: request.include_processes,
+        include_archives: request.include_archives,
+        include_files: !request.files_disabled,
+        run_heuristics: request.run_heuristics,
+        crc32_gate_path,
         ..ScanOptions::default()
     };
     let handle = state.engine.scan(target, opts).map_err(stringify)?;
     let scan_id = handle.scan_id;
     let pause_flag = handle.pause_flag.clone();
+    let cancel_flag = handle.cancel_flag.clone();
     if let Ok(mut flags) = state.active_pause_flags.lock() {
         flags.insert(scan_id, pause_flag);
+    }
+    if let Ok(mut flags) = state.active_cancel_flags.lock() {
+        flags.insert(scan_id, cancel_flag);
     }
     let mut rx = handle.progress;
     let app_for_task = app.clone();
     let db_for_task = state.db.clone();
-    let flags_for_task = state.active_pause_flags.clone();
+    let pause_flags_for_task = state.active_pause_flags.clone();
+    let cancel_flags_for_task = state.active_cancel_flags.clone();
     tauri::async_runtime::spawn(async move {
         run_scan_event_forwarder(app_for_task, db_for_task, scan_id, &mut rx).await;
-        // Forwarder exited — the scan is in a terminal state. Drop the
-        // pause flag so the map doesn't accrete dead entries.
-        if let Ok(mut flags) = flags_for_task.lock() {
+        // Forwarder exited — the scan is in a terminal state. Drop
+        // both flags so the maps don't accrete dead entries.
+        if let Ok(mut flags) = pause_flags_for_task.lock() {
+            flags.remove(&scan_id);
+        }
+        if let Ok(mut flags) = cancel_flags_for_task.lock() {
             flags.remove(&scan_id);
         }
     });
     Ok(scan_id)
 }
 
-/// Pause a running scan. The engine writes a resume token + flips the
-/// row to `paused` + emits `ScanProgress::Paused`; the caller can later
-/// invoke `scan_resume(scan_id)` to continue from where it stopped.
+/// Pause a running scan. In-place pause — the worker pool and producer
+/// thread spin-wait on the pause flag without writing a resume token
+/// or tearing down state, so `scan_resume` is just a flag-flip away.
+/// The flag is observed within ~50 ms by every worker and within
+/// ~20 ms by the hash-abort watcher (so any in-flight big-file mmap
+/// hash bails fast).
 #[tauri::command]
 pub async fn scan_pause(state: State<'_, AppState>, scan_id: ScanId) -> Result<(), String> {
     let flag = {
@@ -361,30 +567,27 @@ pub async fn scan_pause(state: State<'_, AppState>, scan_id: ScanId) -> Result<(
     Ok(())
 }
 
-/// Resume a previously paused scan from its persisted resume_token.
-/// Returns the same scan_id; the worker re-walks the original target
-/// paths and skips files in the token's `processed_paths` set.
+/// Resume a paused scan. In-place — just clears the pause flag; the
+/// already-running workers wake up from their 50 ms spin-wait and
+/// continue with the next item in the bounded channel. The scan_id
+/// is unchanged.
 #[tauri::command]
 pub async fn scan_resume(
-    app: AppHandle,
+    _app: AppHandle,
     state: State<'_, AppState>,
     scan_id: ScanId,
 ) -> Result<ScanId, String> {
-    let handle = state.engine.resume(scan_id).map_err(stringify)?;
-    let pause_flag = handle.pause_flag.clone();
-    if let Ok(mut flags) = state.active_pause_flags.lock() {
-        flags.insert(scan_id, pause_flag);
-    }
-    let mut rx = handle.progress;
-    let app_for_task = app.clone();
-    let db_for_task = state.db.clone();
-    let flags_for_task = state.active_pause_flags.clone();
-    tauri::async_runtime::spawn(async move {
-        run_scan_event_forwarder(app_for_task, db_for_task, scan_id, &mut rx).await;
-        if let Ok(mut flags) = flags_for_task.lock() {
-            flags.remove(&scan_id);
-        }
-    });
+    let flag = {
+        let flags = state
+            .active_pause_flags
+            .lock()
+            .map_err(|_| "pause flag map poisoned".to_string())?;
+        flags
+            .get(&scan_id)
+            .cloned()
+            .ok_or_else(|| format!("scan {scan_id} has no live pause flag — cannot resume"))?
+    };
+    flag.store(false, std::sync::atomic::Ordering::Relaxed);
     Ok(scan_id)
 }
 
@@ -433,6 +636,7 @@ async fn run_scan_event_forwarder(
                     ScanProgress::Completed { .. }
                         | ScanProgress::Failed { .. }
                         | ScanProgress::Paused { .. }
+                        | ScanProgress::Cancelled { .. }
                 );
 
                 if matches!(&event, ScanProgress::File { .. }) {
@@ -452,11 +656,36 @@ async fn run_scan_event_forwarder(
                         ScanProgress::Completed { .. } => "scan:completed",
                         ScanProgress::Failed { .. } => "scan:failed",
                         ScanProgress::Paused { .. } => "scan:paused",
+                        ScanProgress::Cancelled { .. } => "scan:cancelled",
                         ScanProgress::PartialHash { .. } => "scan:partial_hash",
                         // TASK-137 — fires exactly once per scan when
                         // the producer locks Y; UI swaps from
                         // three-piece to X/Y presentation here.
                         ScanProgress::EnumerationComplete { .. } => "scan:enumeration_complete",
+                        // Phase 6 — registry sweep events.
+                        ScanProgress::RegistryPhaseStarted { .. } => {
+                            "scan:registry_phase_started"
+                        }
+                        ScanProgress::RegistryProgress { .. } => "scan:registry_progress",
+                        ScanProgress::RegistryPhaseComplete { .. } => {
+                            "scan:registry_phase_complete"
+                        }
+                        // Phase 6 — process sweep events.
+                        ScanProgress::ProcessPhaseStarted { .. } => {
+                            "scan:process_phase_started"
+                        }
+                        ScanProgress::ProcessProgress { .. } => "scan:process_progress",
+                        ScanProgress::ProcessPhaseComplete { .. } => {
+                            "scan:process_phase_complete"
+                        }
+                        ScanProgress::ArchiveEntry { .. } => "scan:archive_entry",
+                        ScanProgress::HeuristicPhaseStarted { .. } => {
+                            "scan:heuristic_phase_started"
+                        }
+                        ScanProgress::HeuristicProgress { .. } => "scan:heuristic_progress",
+                        ScanProgress::HeuristicPhaseComplete { .. } => {
+                            "scan:heuristic_phase_complete"
+                        }
                     };
                     if let Err(err) = app.emit(topic, &event) {
                         tracing::warn!(error = %err, "tauri emit failed");
@@ -582,14 +811,15 @@ pub async fn scan_status(
 /// can call `scan_pause` + ignore the resume token to achieve cancel.
 #[tauri::command]
 pub async fn scan_cancel(state: State<'_, AppState>, scan_id: ScanId) -> Result<(), String> {
-    // Re-uses the pause machinery; the caller is responsible for
-    // deciding whether to call `scan_resume` later or to leave the row
-    // in `paused` state.
+    // Real cancel — distinct from pause. The worker observes the
+    // cancel flag (also via the hasher's mid-chunk abort), marks the
+    // scans row `cancelled`, and emits `ScanProgress::Cancelled`. No
+    // resume token is persisted; the scan cannot be resumed.
     let flag = {
         let flags = state
-            .active_pause_flags
+            .active_cancel_flags
             .lock()
-            .map_err(|_| "pause flag map poisoned".to_string())?;
+            .map_err(|_| "cancel flag map poisoned".to_string())?;
         flags
             .get(&scan_id)
             .cloned()
@@ -602,6 +832,34 @@ pub async fn scan_cancel(state: State<'_, AppState>, scan_id: ScanId) -> Result<
 // ============================================================================
 // History
 // ============================================================================
+
+/// Wipe every row from `findings` + `scans`. Used by the History
+/// page's "Clear history" button. Doesn't touch the `quarantine`
+/// vault — quarantined files stay quarantined; only the scan
+/// metadata + finding rows disappear. Returns the number of scan
+/// rows that were deleted so the UI can show a confirmation.
+#[tauri::command]
+pub async fn history_clear(state: State<'_, AppState>) -> Result<usize, String> {
+    let conn = state
+        .db
+        .lock()
+        .map_err(|_| "db lock poisoned".to_string())?;
+    // Order matters: `findings.scan_id` references `scans.id`, so
+    // findings rows must be deleted first to satisfy the FK
+    // constraint. SQLite would otherwise error with FOREIGN KEY
+    // failed.
+    let _ = conn
+        .execute("DELETE FROM findings", [])
+        .map_err(stringify)?;
+    let scans_deleted = conn
+        .execute("DELETE FROM scans", [])
+        .map_err(stringify)?;
+    // Sec-clean: also wipe the verdict_cache so the next scan does a
+    // fresh hash + pipeline pass on every file (the user clearing
+    // history typically wants a fully clean slate).
+    let _ = conn.execute("DELETE FROM verdict_cache", []);
+    Ok(scans_deleted)
+}
 
 #[tauri::command]
 pub async fn history_list(
@@ -1578,6 +1836,28 @@ pub fn build_pipeline_from_feeds(data_dir: &std::path::Path) -> DetectionPipelin
     let feeds_dir = feeds_dir(data_dir);
     let mut detectors: Vec<Box<dyn mythkernel::detect::Detector>> = Vec::new();
 
+    // Built-in: EICAR test signature. Always loaded — no feed
+    // download required. Verifies detection works end-to-end (drop
+    // the canonical EICAR string into a `.txt` and scan).
+    detectors.push(Box::new(mythkernel::detect::eicar::EicarDetector::new()));
+    tracing::info!("loaded built-in EICAR test detector");
+
+    // YARA rule pack (Phase 7 / commercial-friendly detection). Loads
+    // every `.yar` / `.yara` file in `<feeds_dir>/yara_rules/` plus
+    // one level of subdirs. Public packs like
+    // Neo23x0/signature-base land here. Detector is registered only
+    // when at least one rule compiled — skipping the registration
+    // entirely when there are no rules avoids paying a fs::read +
+    // scan cost per file for a no-op.
+    let yara_dir = feeds_dir.join("yara_rules");
+    if let Some(yara) = mythkernel::detect::yara_engine::YaraDetector::from_dir(&yara_dir) {
+        tracing::info!(
+            yara_rules = yara.rule_count(),
+            "loaded YARA rule pack"
+        );
+        detectors.push(Box::new(yara));
+    }
+
     let nsrl_path = feeds_dir.join("nsrl_sha256.bin");
     if nsrl_path.exists() {
         match GoodwareAllowlistDetector::open(&nsrl_path) {
@@ -1631,6 +1911,7 @@ macro_rules! invoke_handler {
             $crate::commands::scan_resume,
             $crate::commands::history_list,
             $crate::commands::history_get,
+            $crate::commands::history_clear,
             $crate::commands::finding_list,
             $crate::commands::finding_action,
             $crate::commands::quarantine_list,
@@ -1661,6 +1942,9 @@ macro_rules! invoke_handler {
             $crate::commands::publisher_signer_for_path,
             $crate::commands::publisher_prune_cache,
             $crate::commands::enumerate_volumes,
+            $crate::commands::quick_scan_paths,
+            $crate::commands::first_run_get,
+            $crate::commands::first_run_set,
         ]
     };
 }

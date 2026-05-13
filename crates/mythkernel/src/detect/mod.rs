@@ -19,12 +19,15 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 
 pub mod byovd;
+pub mod crc32_set_file;
+pub mod eicar;
 pub mod file_mutation;
 pub mod goodware_allowlist;
 pub mod hash_blacklist;
 pub mod hash_set_file;
 pub mod heuristics;
 pub mod publisher;
+pub mod verdict_cache;
 pub mod yara_engine;
 
 /// What a detector is given for one file. The engine fills this in after the
@@ -156,6 +159,18 @@ pub trait Detector: Send + Sync {
 
     /// Inspect one file. Must be fast — this runs in the hash worker pool.
     fn check(&self, ctx: &FileCtx<'_>) -> DetectorVerdict;
+
+    /// Whether this detector needs the SHA-256 digest present in
+    /// [`FileCtx::sha256`]. The engine uses the per-pipeline rollup
+    /// ([`DetectionPipeline::requires_sha256`]) to skip SHA-256
+    /// computation entirely when no loaded detector needs it —
+    /// roughly a 5× hash speedup on big files since SHA-256 is the
+    /// slower of the two. Default `false`; SHA-256-keyed detectors
+    /// (abuse.ch hash blacklist, NSRL allowlist, BYOVD loldrivers)
+    /// override to `true`.
+    fn requires_sha256(&self) -> bool {
+        false
+    }
 }
 
 /// Runs a fixed set of detectors in priority order for each file. Built once
@@ -179,6 +194,16 @@ impl DetectionPipeline {
 
     pub fn is_empty(&self) -> bool {
         self.detectors.is_empty()
+    }
+
+    /// Returns `true` when at least one registered detector needs the
+    /// SHA-256 digest (the abuse.ch hash blacklist, NSRL allowlist,
+    /// and BYOVD loldrivers detector all do). The engine reads this
+    /// once per scan to decide whether to compute SHA-256 at all —
+    /// when no detector needs it, BLAKE3 alone runs and the per-file
+    /// hash work is ~5× faster.
+    pub fn requires_sha256(&self) -> bool {
+        self.detectors.iter().any(|d| d.requires_sha256())
     }
 
     /// Detector ids in execution order. Useful for `scans.feed_versions` and

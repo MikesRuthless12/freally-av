@@ -21,6 +21,13 @@ pub type BatchOpId = i64;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScanRequest {
     pub target_path: PathBuf,
+    /// Phase 6 — Quick Scan supplies the canonical malware-hotspot
+    /// directories here (TEMP / APPDATA / Downloads / etc.). When
+    /// non-empty, the engine walks every path; `target_path` is then
+    /// just the first entry. `all_volumes` and `extra_paths` are
+    /// mutually exclusive on the IPC boundary.
+    #[serde(default)]
+    pub extra_paths: Vec<PathBuf>,
     /// Compute SHA-256 alongside BLAKE3. Forced to `true` when any
     /// SHA-256-keyed detector (abuse.ch / NSRL) is loaded so the
     /// pipeline can query the right digest. The UI's default is
@@ -38,6 +45,30 @@ pub struct ScanRequest {
     /// `target_path`.
     #[serde(default)]
     pub all_volumes: bool,
+    /// Phase 6 — turn on the Windows registry persistence-key sweep
+    /// as the first phase of the scan. Quick Scan defaults this true.
+    #[serde(default)]
+    pub include_registry: bool,
+    /// Phase 6 — turn on the running-process sweep as the second
+    /// phase. Quick Scan defaults this true.
+    #[serde(default)]
+    pub include_processes: bool,
+    /// Phase 6 — recurse into ZIP archive entries (off by default;
+    /// per-archive open + per-entry hash adds real latency).
+    #[serde(default)]
+    pub include_archives: bool,
+    /// Phase 6 — when set, skip the file walker entirely (no
+    /// `target_path` validation required, no producer thread). Used
+    /// for Registry-only / Process-only / Reg+Proc scans, which have
+    /// no file target at all.
+    #[serde(default)]
+    pub files_disabled: bool,
+    /// Phase 6 (preview) — run heuristic pattern matchers after the
+    /// main scan completes. Accepted on the IPC boundary so the
+    /// renderer's toggle round-trips; backend pipeline implementation
+    /// lands in a follow-up wave.
+    #[serde(default)]
+    pub run_heuristics: bool,
 }
 
 /// Lightweight row used by the History page.

@@ -27,7 +27,7 @@ The full strategic foundation is in [`docs/product-vision.md`](docs/product-visi
 
 ## What it does (target features at v0.19.84 stable)
 
-- **Fast.** A 1-million-file cold scan completes in under 4 minutes on a 2024-class consumer NVMe machine. The second scan, via NTFS USN journal delta, completes in under 5 seconds.
+- **Fast.** A 1-million-file cold scan completes in under 4 minutes on a 2024-class consumer NVMe machine. The second scan, via NTFS USN journal delta, completes in under 5 seconds. An optional CRC32 fast-screen pre-pass (`MYTHCRC3` sorted-u32 set) lets the engine skip BLAKE3 + SHA-256 + the full detection pipeline on files whose 32-bit CRC isn't in the malware set — ~99.977% of scanned files at typical corpus sizes — collapsing per-file hashing wall time another 40-80% on CPU-bound NVMe scans.
 - **Honest progress.** Time-remaining estimates are calibrated and monotone-non-increasing after the first 3% of work — no "stuck at 99%."
 - **Cross-platform parity.** Same feature set on Windows, macOS, and Linux unless platform constraints forbid.
 - **Source-visible.** Every line of the engine, the UI, and the build pipeline is here on GitHub. License forbids redistribution; reading and learning is welcome.

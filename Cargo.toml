@@ -9,7 +9,7 @@ members = [
 # `scripts/gen-signing-key` is a one-shot Tauri Updater minisign keypair
 # generator (TASK-044). It's intentionally outside the workspace so its
 # `minisign` dep doesn't pollute the engine's transitive license tree.
-exclude = ["scripts/gen-signing-key"]
+exclude = ["scripts/gen-signing-key", "tools/feed-builder"]
 
 [workspace.package]
 version = "0.0.1"
@@ -32,6 +32,8 @@ tauri-plugin-autostart = "2"
 # TASK-158 / engine_update:restart_pending — graceful restart trigger from
 # the tray menu after a successful self-update install.
 tauri-plugin-process = "2"
+# Native folder/file picker dialog — Phase 6 Scan-target chooser.
+tauri-plugin-dialog = "2"
 
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1", features = ["derive"] }
@@ -48,6 +50,18 @@ clap = { version = "4", features = ["derive", "env"] }
 walkdir = "2"
 rayon = "1"
 crossbeam-channel = "0.5"
+# Phase 6 — archive scanning. zip 4.x is the latest stable line (8.x
+# is a recent breaking-change refactor; pinning to 4 keeps the API
+# surface we wrote against while still getting the security fixes
+# from the 3→4 hardening pass). RAR/7Z would require sevenz_rust +
+# unrar separately; deferred to a follow-up since zip covers the
+# dominant archive format malware ships in.
+zip = { version = "4", default-features = false, features = ["deflate"] }
+# Pure-Rust YARA. MIT-licensed, commercial-OK. No libyara C dep —
+# `yara-x` is the official Rust port (VirusTotal). Powers the
+# pattern-based detector with public rule packs like
+# Neo23x0/signature-base.
+yara-x = "0.10"
 
 # TASK-050 / TASK-051 — futures::Stream + futures::channel::mpsc back the
 # Windows USN journal subscriber pattern vendored from sister project
@@ -68,7 +82,16 @@ base64 = "0.22"
 # TASK-131 — `If-Modified-Since`/`ETag` parsing for unrestricted free pulls.
 httpdate = "1"
 
-blake3 = "1"
+# `rayon` feature unlocks `blake3::Hasher::update_rayon` — multi-core
+# tree-walking hash. For files >= 16 MiB this trees the work across
+# every available core, turning a 1.5 GiB hash from ~1 s single-threaded
+# (~5 GB/s) into ~150-300 ms on an 8-core machine.
+blake3 = { version = "1", features = ["rayon"] }
+# Hardware-accelerated CRC32 for the fast-screen detector (TASK / CRC32
+# pre-screen). On modern x86 / ARMv8 with CRC32 instructions this hits
+# ~5-10 GB/s — 2-4× faster than BLAKE3 — making it a cheap "definitely
+# not in the malware set" filter before paying the BLAKE3 cost.
+crc32fast = "1"
 sha2 = "0.10"
 md-5 = "0.10"
 hex = "0.4"

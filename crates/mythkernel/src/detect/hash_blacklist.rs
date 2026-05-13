@@ -95,6 +95,10 @@ impl Detector for HashBlacklistDetector {
         PRIORITY
     }
 
+    fn requires_sha256(&self) -> bool {
+        matches!(self.hash_kind, HashKind::Sha256)
+    }
+
     fn check(&self, ctx: &FileCtx<'_>) -> DetectorVerdict {
         let Some(digest) = self.hash_kind.select(ctx) else {
             // SHA-256 not computed for this file — engine misconfigured.

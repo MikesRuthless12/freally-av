@@ -28,8 +28,11 @@ chrono = { version = "0.4", features = ["serde"] }
 walkdir = { workspace = true }
 rayon = { workspace = true }
 crossbeam-channel = { workspace = true }
+zip = { workspace = true }
+yara-x = { workspace = true }
 futures = { workspace = true }
 blake3 = { workspace = true }
+crc32fast = { workspace = true }
 sha2 = { workspace = true }
 hex = { workspace = true }
 rusqlite = { workspace = true }
@@ -57,6 +60,7 @@ windows = { version = "0.62", features = [
     "Win32_Storage_FileSystem",
     "Win32_System_IO",
     "Win32_System_Ioctl",
+    "Win32_System_Registry",
 ] }
 
 # TASK-050 — FSEvents subscriber for the macOS bootstrap walker.

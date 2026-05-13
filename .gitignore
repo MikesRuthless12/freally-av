@@ -66,3 +66,21 @@ vision.json
 docs/prd.md
 docs/product-vision.md
 SECURITY.md
+
+# abuse.ch / MalwareBazaar maintainer-only tooling and its byproducts.
+# The feed-builder lives outside the public repo by design:
+# - abuse.ch's free non-commercial Auth-Key terms apply per-maintainer,
+#   not to the project
+# - downloaded sample bytes are never persisted, but the local SQLite
+#   cache + the CSV dump + the derived artifacts are maintainer-private
+# The mythkernel side consumes the published `crc32_blacklist.bin` +
+# `blake3_blacklist.bin` + `blake3_meta.jsonl` artifacts generically —
+# any tool that produces them in the documented format works.
+tools/feed-builder/
+*.csv.zip
+*.csv
+feed-builder.sqlite*
+abusech_*
+**/blake3_blacklist.bin
+**/crc32_blacklist.bin
+**/blake3_meta.jsonl

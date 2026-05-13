@@ -14,12 +14,29 @@ export type BatchOpId = number;
 
 export interface ScanRequest {
   target_path: string;
+  /** Phase 6 — Quick Scan multi-path hotspot list. When non-empty the
+   *  engine walks every path; `target_path` is then just the first
+   *  entry. */
+  extra_paths?: string[];
   compute_sha256: boolean;
   follow_symlinks: boolean;
   /** FR-136 / TASK-134 — emit `scan:partial_hash` events at ≤ 10 Hz. */
   emit_partial_hash?: boolean;
   /** TASK-053 / TASK-056 — fan out across every detected volume (Windows). */
   all_volumes?: boolean;
+  /** Phase 6 — Windows registry persistence-key sweep (off by default). */
+  include_registry?: boolean;
+  /** Phase 6 — running-process sweep (off by default). */
+  include_processes?: boolean;
+  /** Phase 6 — recurse into ZIP archive entries (off by default). */
+  include_archives?: boolean;
+  /** Phase 6 — skip the file walker entirely (Registry-only / Process-only
+   *  / Reg+Proc presets). When true, `target_path` is unused. */
+  files_disabled?: boolean;
+  /** Phase 6 (preview) — run heuristic pattern matchers after the
+   *  main scan finishes. Backend implementation lands in a follow-up
+   *  wave; the toggle ships now so the user's preference persists. */
+  run_heuristics?: boolean;
 }
 
 /**
@@ -212,7 +229,16 @@ export interface ExclusionRequest {
 // `kind` discriminator, so the TS union is keyed on `kind`.
 
 export type ScanProgress =
-  | { kind: "started"; scan_id: ScanId; started_at_utc: number }
+  | {
+      kind: "started";
+      scan_id: ScanId;
+      started_at_utc: number;
+      /** Carry from a resumed scan's prior run; 0 for fresh starts. */
+      resumed_files_visited?: number;
+      resumed_files_hashed?: number;
+      resumed_bytes_visited?: number;
+      resumed_findings_count?: number;
+    }
   | {
       kind: "file";
       path: string;
@@ -228,6 +254,14 @@ export type ScanProgress =
        *  null until the `enumeration_complete` event fires; from then on
        *  this carries the canonical Y in the X/Y UI presentation. */
       files_total_locked?: number | null;
+      /** Cumulative counters snapshot at emit time. The forwarder
+       *  coalesces File events to ≤ 10 Hz, so a per-event +1 on the
+       *  UI side massively undercounts on a fast scan. The frontend
+       *  SETs to these instead. */
+      files_visited_total?: number;
+      files_hashed_total?: number;
+      bytes_visited_total?: number;
+      findings_count_total?: number;
     }
   | {
       /** TASK-134 / FR-136 — live mid-flight BLAKE3 prefix at ≤ 10 Hz. */
@@ -266,6 +300,18 @@ export type ScanProgress =
       findings_count: number;
     }
   | {
+      /** TASK-040 / wave-3 follow-up — cancel is final (no resume token).
+       *  Worker exits at the next iteration boundary OR mid-hash via the
+       *  shared cooperative-abort flag, marks the scan row `cancelled`,
+       *  and emits this event once. */
+      kind: "cancelled";
+      scan_id: ScanId;
+      files_visited: number;
+      files_hashed: number;
+      bytes_visited: number;
+      findings_count: number;
+    }
+  | {
       /** TASK-137 / FR-135 — producer locked Y. Fires exactly once per
        *  scan. After this event the UI switches its denominator from
        *  the running counter to `files_total_locked`. */
@@ -273,6 +319,65 @@ export type ScanProgress =
       scan_id: ScanId;
       files_total_locked: number;
       bytes_total_locked: number;
+    }
+  // ----- Phase 6: registry + process phases -----
+  | {
+      kind: "registry_phase_started";
+      scan_id: ScanId;
+      expected_items: number;
+    }
+  | {
+      kind: "registry_progress";
+      scan_id: ScanId;
+      items_scanned_total: number;
+      current_key: string;
+    }
+  | {
+      kind: "registry_phase_complete";
+      scan_id: ScanId;
+      items_total: number;
+    }
+  | {
+      kind: "process_phase_started";
+      scan_id: ScanId;
+      expected_processes: number;
+    }
+  | {
+      kind: "process_progress";
+      scan_id: ScanId;
+      processes_scanned_total: number;
+      pid: number;
+      name: string;
+      exe_path: string | null;
+    }
+  | {
+      kind: "process_phase_complete";
+      scan_id: ScanId;
+      processes_total: number;
+    }
+  | {
+      kind: "archive_entry";
+      scan_id: ScanId;
+      archive_path: string;
+      entry_name: string;
+      archive_entries_scanned_total: number;
+    }
+  | {
+      kind: "heuristic_phase_started";
+      scan_id: ScanId;
+      expected_items: number;
+    }
+  | {
+      kind: "heuristic_progress";
+      scan_id: ScanId;
+      items_scanned_total: number;
+      current_path: string;
+    }
+  | {
+      kind: "heuristic_phase_complete";
+      scan_id: ScanId;
+      items_total: number;
+      flagged_total: number;
     };
 
 // ---------------------------------------------------------------------------

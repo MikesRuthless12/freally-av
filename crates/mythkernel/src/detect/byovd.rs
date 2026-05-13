@@ -75,6 +75,11 @@ impl Detector for ByovdDetector {
         PRIORITY
     }
 
+    fn requires_sha256(&self) -> bool {
+        // loldrivers.io publishes SHA-256 only.
+        true
+    }
+
     fn check(&self, ctx: &FileCtx<'_>) -> DetectorVerdict {
         // loldrivers publishes SHA-256 only; mirror the engine gate the
         // abuse.ch detector uses — fail clean when SHA-256 isn't on.

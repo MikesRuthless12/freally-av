@@ -18,6 +18,7 @@ const MIGRATIONS: &[(i64, &str)] = &[
         include_str!("../migrations/0003_exclusions_publisher_and_baseline.sql"),
     ),
     (4, include_str!("../migrations/0004_file_baseline.sql")),
+    (5, include_str!("../migrations/0005_verdict_cache.sql")),
 ];
 
 #[derive(Debug, thiserror::Error)]

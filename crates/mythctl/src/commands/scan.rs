@@ -130,7 +130,8 @@ pub async fn run(
                 }
                 ScanProgress::Completed { .. }
                 | ScanProgress::Failed { .. }
-                | ScanProgress::Paused { .. } => {
+                | ScanProgress::Paused { .. }
+                | ScanProgress::Cancelled { .. } => {
                     last_completed = Some(event);
                     break;
                 }

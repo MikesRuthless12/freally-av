@@ -19,6 +19,10 @@
     "autostart:allow-disable",
     "autostart:allow-is-enabled",
     "process:allow-restart",
-    "process:allow-exit"
+    "process:allow-exit",
+    "dialog:allow-open",
+    "dialog:allow-ask",
+    "dialog:allow-confirm",
+    "dialog:allow-message"
   ]
 }

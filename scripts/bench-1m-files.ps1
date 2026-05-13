@@ -1,4 +1,4 @@
-# bench-1m-files.ps1 — TASK-057.
+# bench-1m-files.ps1 - TASK-057.
 #
 # Windows mirror of `scripts/bench-1m-files.sh`. End-to-end Phase 5
 # benchmark: generates a synthetic 1M-file tree under $Target (default
@@ -7,10 +7,10 @@
 # the current release line.
 #
 # Budget (Windows host, NTFS volume, NVMe):
-#   v0.5     cold ≤ 6 minutes (360 s) — Phase 5 lenient gate
-#   v0.10    cold ≤ 8 minutes (480 s) — global baseline
-#   v0.15    cold ≤ 6 minutes (360 s) — tightened
-#   v0.19.84 cold ≤ 4 minutes (240 s) — final NFR-001
+#   v0.5     cold ≤ 6 minutes (360 s) - Phase 5 lenient gate
+#   v0.10    cold ≤ 8 minutes (480 s) - global baseline
+#   v0.15    cold ≤ 6 minutes (360 s) - tightened
+#   v0.19.84 cold ≤ 4 minutes (240 s) - final NFR-001
 #
 # Usage:
 #   pwsh scripts/bench-1m-files.ps1
@@ -99,7 +99,7 @@ if ($LASTEXITCODE -ne 0) {
 $mythctl = (Resolve-Path "target\release\mythctl.exe").Path
 
 # -----------------------------------------------------------------------
-# Cold scan — drop the page cache implicitly by reusing the system's
+# Cold scan - drop the page cache implicitly by reusing the system's
 # 'first-use' fingerprint on the tree we just built. (Windows doesn't
 # expose a `/proc/sys/vm/drop_caches` equivalent; reboot before this
 # script for a true cold run if measuring against a reused tree.)
@@ -117,7 +117,7 @@ if ($coldSecs -gt $BudgetSeconds) {
 }
 
 # -----------------------------------------------------------------------
-# Warm scan — should be substantially faster (file cache hot, no MFT
+# Warm scan - should be substantially faster (file cache hot, no MFT
 # pagination misses). NFR-002 v0.5 interim budget is 30 s.
 # -----------------------------------------------------------------------
 $warmBudget = 30
@@ -129,7 +129,7 @@ $warmSecs = [int]$warm.TotalSeconds
 Write-Stage "warm completed in ${warmSecs}s (budget ${warmBudget}s)"
 
 if ($warmSecs -gt $warmBudget) {
-    Write-Host "[bench] WARN: NFR-002 warm-scan budget exceeded ($warmSecs > $warmBudget) — Phase 5 wave 2 lenient" -ForegroundColor Yellow
+    Write-Host "[bench] WARN: NFR-002 warm-scan budget exceeded ($warmSecs > $warmBudget) - Phase 5 wave 2 lenient" -ForegroundColor Yellow
 }
 
-Write-Host "[bench] PASS — cold ${coldSecs}s | warm ${warmSecs}s" -ForegroundColor Green
+Write-Host "[bench] PASS - cold ${coldSecs}s | warm ${warmSecs}s" -ForegroundColor Green
