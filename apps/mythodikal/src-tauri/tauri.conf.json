@@ -74,6 +74,18 @@
       },
       "allowDowngrades": false
     },
+    "macOS": {
+      "minimumSystemVersion": "11.0",
+      "signingIdentity": null,
+      "providerShortName": null,
+      "entitlements": "entitlements.plist",
+      "frameworks": [],
+      "dmg": {
+        "windowSize": { "width": 660, "height": 400 },
+        "appPosition": { "x": 180, "y": 170 },
+        "applicationFolderPosition": { "x": 480, "y": 170 }
+      }
+    },
     "createUpdaterArtifacts": false
   },
   "plugins": {
