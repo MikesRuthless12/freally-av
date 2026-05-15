@@ -38,6 +38,12 @@
     "copyright": "Copyright (c) 2026 Mike Weaver",
     "publisher": "Mythodikal",
     "homepage": "https://github.com/MikesRuthless12/mythodikal-av",
+    "resources": {
+      "../../../ATTRIBUTIONS.txt":         "ATTRIBUTIONS.txt",
+      "../../../THIRD-PARTY-RUST.txt":     "THIRD-PARTY-RUST.txt",
+      "../../../THIRD-PARTY-NPM.txt":      "THIRD-PARTY-NPM.txt",
+      "../../../YARA-RULE-AUTHORS.txt":    "YARA-RULE-AUTHORS.txt"
+    },
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

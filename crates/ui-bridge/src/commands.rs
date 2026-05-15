@@ -473,7 +473,7 @@ pub async fn scan_start(
             ));
         }
         let mut paths: Vec<PathBuf> = Vec::with_capacity(request.extra_paths.len() + 1);
-        if request.target_path.as_os_str().len() > 0 {
+        if !request.target_path.as_os_str().is_empty() {
             let canonical = validate_scan_target(&request.target_path).map_err(stringify)?;
             paths.push(canonical);
         }

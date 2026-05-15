@@ -1,0 +1,34 @@
+# cargo-about configuration. Used by `cargo about generate about.hbs`
+# at release time to produce THIRD-PARTY-RUST.txt — the per-crate
+# attribution bundle shipped alongside the Mythodikal Anti-Virus binary
+# (see ATTRIBUTIONS.txt § 2 and tauri.conf.json bundle.resources).
+#
+# Allowed licenses mirror what `deny.toml` permits for the workspace.
+# A crate with any other license fails this command, which fails CI.
+
+accepted = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "CDLA-Permissive-2.0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "CC0-1.0",
+    "ISC",
+    "MPL-2.0",
+    "Unicode-3.0",
+    "Unicode-DFS-2016",
+    "Zlib",
+    "Unlicense",
+    "OpenSSL",
+    "BSL-1.0",
+]
+
+ignore-build-dependencies = false
+ignore-dev-dependencies   = true
+ignore-transitive-dependencies = false
+
+# The workspace's own crates are proprietary (LICENSE.md "All Rights Reserved")
+# and have no `license` field. cargo-about emits warnings for these but
+# does NOT fail on them (only third-party crates with non-allowed
+# licenses cause a hard error). The warnings are expected and benign.

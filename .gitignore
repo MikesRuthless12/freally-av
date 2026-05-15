@@ -47,9 +47,28 @@ Mythodikal-Build-Prompts-Guide.md
 RESEARCH-DOSSIER.md
 vision.json
 
+# Maintainer-local scratch notes (resume state for /clear handoffs etc.)
+RESUME.md
+
+# Maintainer credentials — never commit
+# VirusShareEmail.txt holds the maintainer's VirusShare account + API key
+VirusShareEmail.txt
+
 # Temp scratch
 .tmp-*.ps1
 .tmp-*.sh
+.tmp_*.py
+
+# cargo-about local-run stderr capture (workspace crates have no license
+# field by design — cargo-about warns about them; the warnings are
+# expected and benign per about.toml's header comment). The .err file is
+# a local debug artifact, not a build output.
+cargo-about.err
+
+# Downloaded YARA-Forge release pack — scratch directory used by
+# scripts/process-yara-forge-pack.py and the bundle-attributions
+# workflow. The unzipped pack is ~7 MB; never committed.
+_yara_forge_core/
 
 # Tauri Updater signing keys (TASK-044). Generated locally by
 # `cargo run --manifest-path scripts/gen-signing-key/Cargo.toml`; the
