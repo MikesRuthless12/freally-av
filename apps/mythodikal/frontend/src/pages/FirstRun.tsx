@@ -1,28 +1,43 @@
-// FirstRun page (TASK-046).
+// FirstRun page (TASK-046, extended Phase 7B).
 //
-// Three-step welcome flow shown on first launch:
+// Four-step welcome flow shown on first launch:
 //   1. Welcome — what Mythodikal is, what it isn't (no telemetry, no
 //      cloud, no kernel driver).
-//   2. Defaults — Shields ON, abuse.ch + NSRL feeds, quarantine vault
-//      under the user data dir; user confirms (no decisions to make).
-//   3. Ready — "Start your first scan" CTA that flips the persisted
+//   2. Defaults — Shields ON, abuse.ch feed, quarantine vault under
+//      the user data dir; user confirms (no decisions to make).
+//   3. Whitelist (NSRL) — opt-in choice for the NSRL clean-file
+//      database. Defaults to "per-OS slice (~1.7 GB)" but the user
+//      can skip entirely or upgrade to the full union (~3.4 GB).
+//   4. Ready — "Start your first scan" CTA that flips the persisted
 //      flag and routes to /scan.
 //
 // We intentionally do NOT collect a username, email, or any opt-in for
 // telemetry: the project ships with zero telemetry by design, so there
 // is nothing to consent to.
 
-import { Show, createSignal, type Component } from "solid-js";
+import { For, Show, createSignal, type Component } from "solid-js";
 import { useNavigate } from "@solidjs/router";
 import { markFirstRunComplete } from "@/stores/firstRun";
+import { nsrlPreference, setNsrlPreference, type NsrlPreference } from "@/stores/nsrlPreference";
 
-type Step = 1 | 2 | 3;
+type Step = 1 | 2 | 3 | 4;
 
 const FirstRun: Component = () => {
   const [step, setStep] = createSignal<Step>(1);
   const navigate = useNavigate();
 
+  // Seed the local choice from the existing store (handles cases where
+  // the user backtracks through the wizard mid-session). Default the
+  // NSRL choice to "per_os_slice" since that's the recommended balance
+  // of disk-space vs scan-speed payoff for single-OS end users.
+  const initialChoice: NsrlPreference =
+    nsrlPreference() === "unset" ? "per_os_slice" : nsrlPreference();
+  const [nsrlChoice, setNsrlChoice] = createSignal<NsrlPreference>(initialChoice);
+
   const finish = () => {
+    if (nsrlChoice() !== "unset") {
+      setNsrlPreference(nsrlChoice());
+    }
     markFirstRunComplete();
     navigate("/scan", { replace: true });
   };
@@ -35,7 +50,7 @@ const FirstRun: Component = () => {
             Welcome to Mythodikal
           </h1>
           <span class="font-mono text-xs uppercase tracking-wide text-myth-text-lo">
-            Step {step()} of 3
+            Step {step()} of 4
           </span>
         </header>
 
@@ -80,7 +95,7 @@ const FirstRun: Component = () => {
               />
               <DefaultRow
                 label="Threat feeds"
-                value="abuse.ch + NSRL (cached on disk, refreshed daily)"
+                value="abuse.ch (refreshed daily); NSRL whitelist opt-in next step"
               />
               <DefaultRow
                 label="SHA-256 hashing"
@@ -99,6 +114,78 @@ const FirstRun: Component = () => {
         </Show>
 
         <Show when={step() === 3}>
+          <section class="space-y-4 text-sm text-myth-text-md">
+            <p>
+              Optional: download the NSRL clean-file database. NSRL is
+              the US government's reference set of known-good OS and
+              app file hashes — when the scanner sees a file already
+              on this list, it short-circuits the analysis. On a typical
+              full-disk scan that's roughly 5–10× faster.
+            </p>
+            <fieldset class="space-y-2">
+              <legend class="sr-only">NSRL download choice</legend>
+              <For
+                each={
+                  [
+                    {
+                      value: "per_os_slice" as const,
+                      label: "Download per-OS slice",
+                      size: "~1.7 GB",
+                      note: "Recommended. Only the hashes for your current operating system. Halves disk + bandwidth vs the full set.",
+                    },
+                    {
+                      value: "full" as const,
+                      label: "Download full union",
+                      size: "~3.4 GB",
+                      note: "All OSes. Use this for forensics machines or multi-boot systems.",
+                    },
+                    {
+                      value: "skipped" as const,
+                      label: "Skip for now",
+                      size: "0 GB",
+                      note: "Blacklist scanning still works. You can opt in later from Settings → Feeds.",
+                    },
+                  ] satisfies Array<{
+                    value: NsrlPreference;
+                    label: string;
+                    size: string;
+                    note: string;
+                  }>
+                }
+              >
+                {(opt) => (
+                  <label class="flex cursor-pointer items-start gap-3 rounded-sm border border-myth-line bg-myth-bg-0 p-3 hover:border-myth-accent">
+                    <input
+                      type="radio"
+                      name="nsrl-choice"
+                      class="mt-0.5"
+                      checked={nsrlChoice() === opt.value}
+                      onChange={() => setNsrlChoice(opt.value)}
+                    />
+                    <span class="flex-1">
+                      <span class="flex items-baseline justify-between">
+                        <span class="text-myth-text-hi">{opt.label}</span>
+                        <span class="font-mono text-xs text-myth-text-lo">
+                          {opt.size}
+                        </span>
+                      </span>
+                      <span class="block text-xs text-myth-text-md">
+                        {opt.note}
+                      </span>
+                    </span>
+                  </label>
+                )}
+              </For>
+            </fieldset>
+            <p class="text-xs text-myth-text-lo">
+              The download happens in the background after this wizard
+              closes; the first scan can start immediately. NSRL is
+              public-domain data (NIST, 17 U.S.C. § 105).
+            </p>
+          </section>
+        </Show>
+
+        <Show when={step() === 4}>
           <section class="space-y-4 text-sm text-myth-text-md">
             <p>
               You're ready to scan. Pick any folder you'd like to inspect
@@ -133,7 +220,7 @@ const FirstRun: Component = () => {
             </button>
           </div>
           <Show
-            when={step() < 3}
+            when={step() < 4}
             fallback={
               <button
                 type="button"
