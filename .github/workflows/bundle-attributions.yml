@@ -1,0 +1,145 @@
+# Bundle the third-party attribution files (ATTRIBUTIONS.txt,
+# THIRD-PARTY-RUST.txt, THIRD-PARTY-NPM.txt, YARA-RULE-AUTHORS.txt)
+# at release time. The Tauri bundler picks these up via the
+# `bundle.resources` map in apps/mythodikal/src-tauri/tauri.conf.json
+# and ships them next to the installed binary.
+#
+# Trigger: every release tag, plus on-demand via workflow_dispatch.
+# Output: the four .txt files committed to the release artifact.
+
+name: bundle-attributions
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  generate:
+    name: Generate attribution files
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # ----------------------------------------------------------
+      # 1. THIRD-PARTY-RUST.txt  —  cargo-about
+      # ----------------------------------------------------------
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-about
+        run: cargo install cargo-about --features cli --locked
+
+      - name: Generate THIRD-PARTY-RUST.txt
+        run: cargo about generate about.hbs > THIRD-PARTY-RUST.txt
+
+      # ----------------------------------------------------------
+      # 2. THIRD-PARTY-NPM.txt  —  pnpm licenses list
+      # ----------------------------------------------------------
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+          cache-dependency-path: apps/mythodikal/frontend/pnpm-lock.yaml
+
+      - name: Install frontend deps
+        run: pnpm -C apps/mythodikal/frontend install --frozen-lockfile
+
+      - name: Generate THIRD-PARTY-NPM.txt
+        run: pnpm -C apps/mythodikal/frontend licenses list --prod --long > THIRD-PARTY-NPM.txt
+
+      # ----------------------------------------------------------
+      # 3. YARA-RULE-AUTHORS.txt  —  the SHIPPED YARA-Forge core pack
+      # ----------------------------------------------------------
+      # The maintainer's own labeling rules under tools/feed-builder/
+      # yara_rules/ include DRL-1.1 and CC-BY-NC-licensed files; those
+      # are NEVER shipped with the binary. The binary downloads the
+      # YARA-Forge `core` tier at runtime via mythkernel/updater/
+      # yara_forge.rs. The attribution manifest in the bundle must
+      # describe the SCRUBBED form of that pack — only the rule-sets
+      # whose comment-block LICENSE is on the project's permissive
+      # allowlist (MIT / Apache-2.0 / BSD-2-Clause / BSD-3-Clause /
+      # CC0-1.0 / MPL-2.0 / Unicode-3.0 — see ATTRIBUTIONS.txt § 1.3).
+      #
+      # YARA-Forge ships `core` as ONE concatenated .yar file at
+      # `packages/core/yara-rules-core.yar`. License declarations live
+      # at the rule-set comment-block level, not per-rule meta. The
+      # tool below handles that format end-to-end.
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Download YARA-Forge core release
+        run: |
+          mkdir -p _yara_forge_core
+          # See crates/mythkernel/src/updater/yara_forge.rs (TASK-066)
+          # for the eventual release-tag pinning. `latest/download/`
+          # is used here for the attribution-only side; the at-runtime
+          # downloader can pin a specific tag for reproducibility.
+          curl -fsSL \
+            "https://github.com/YARAHQ/yara-forge/releases/latest/download/yara-forge-rules-core.zip" \
+            -o _yara_forge_core/pack.zip
+          unzip -q _yara_forge_core/pack.zip -d _yara_forge_core/
+
+      # process-yara-forge-pack.py does the rule-set-level scrub AND
+      # emits the per-rule attribution manifest in one pass. It fails
+      # the workflow if zero rule-sets pass the scrub (a sign the
+      # upstream release format changed and a human should look).
+      - name: Scrub pack + generate YARA-RULE-AUTHORS.txt
+        run: |
+          python scripts/process-yara-forge-pack.py \
+            _yara_forge_core/packages/core/yara-rules-core.yar \
+            _yara_forge_core/packages/core/yara-rules-core-scrubbed.yar \
+            YARA-RULE-AUTHORS.txt
+
+      # ----------------------------------------------------------
+      # 4. Bundle as release artifact
+      # ----------------------------------------------------------
+      - name: Verify all four files exist and are non-empty
+        run: |
+          for f in ATTRIBUTIONS.txt THIRD-PARTY-RUST.txt THIRD-PARTY-NPM.txt YARA-RULE-AUTHORS.txt; do
+            if [ ! -s "$f" ]; then
+              echo "::error file=$f::missing or empty — refusing to publish a release without complete attributions"
+              exit 1
+            fi
+            echo "  OK  $f  ($(wc -c <"$f") bytes)"
+          done
+
+      - name: Upload attribution bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: attributions
+          path: |
+            ATTRIBUTIONS.txt
+            THIRD-PARTY-RUST.txt
+            THIRD-PARTY-NPM.txt
+            YARA-RULE-AUTHORS.txt
+          if-no-files-found: error
+          retention-days: 90
+
+      # ----------------------------------------------------------
+      # When the trigger is a release tag, attach the four files
+      # to the GitHub Release itself so end users can download them
+      # alongside the installer.
+      # ----------------------------------------------------------
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            ATTRIBUTIONS.txt
+            THIRD-PARTY-RUST.txt
+            THIRD-PARTY-NPM.txt
+            YARA-RULE-AUTHORS.txt
+          fail_on_unmatched_files: true

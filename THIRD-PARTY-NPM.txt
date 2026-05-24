@@ -1,0 +1,28 @@
+┌───────────────────────────┬───────────────────┬────────────────────────────────────────────────────────────────┐
+│ Package                   │ License           │ Details                                                        │
+├───────────────────────────┼───────────────────┼────────────────────────────────────────────────────────────────┤
+│ @tauri-apps/api           │ Apache-2.0 OR MIT │ Tauri API definitions                                          │
+│                           │                   │ https://github.com/tauri-apps/tauri#readme                     │
+├───────────────────────────┼───────────────────┼────────────────────────────────────────────────────────────────┤
+│ @solidjs/router           │ MIT               │ Ryan Carniato                                                  │
+│                           │                   │ Universal router for SolidJS                                   │
+│                           │                   │ https://github.com/solidjs/solid-router#readme                 │
+├───────────────────────────┼───────────────────┼────────────────────────────────────────────────────────────────┤
+│ csstype                   │ MIT               │ Fredrik Nicol                                                  │
+│                           │                   │ Strict TypeScript and Flow types for style based on MDN data   │
+│                           │                   │ https://github.com/frenic/csstype#readme                       │
+├───────────────────────────┼───────────────────┼────────────────────────────────────────────────────────────────┤
+│ seroval                   │ MIT               │ Alexis Munsayac                                                │
+│                           │                   │ Stringify JS values                                            │
+│                           │                   │ https://github.com/lxsmnsyc/seroval/tree/main/packages/seroval │
+├───────────────────────────┼───────────────────┼────────────────────────────────────────────────────────────────┤
+│ seroval-plugins           │ MIT               │ Alexis Munsayac                                                │
+│                           │                   │ Stringify JS values                                            │
+│                           │                   │ https://github.com/lxsmnsyc/seroval/tree/main/packages/plugins │
+├───────────────────────────┼───────────────────┼────────────────────────────────────────────────────────────────┤
+│ solid-js                  │ MIT               │ Ryan Carniato                                                  │
+│                           │                   │ A declarative JavaScript library for building user interfaces. │
+│                           │                   │ https://solidjs.com                                            │
+├───────────────────────────┼───────────────────┼────────────────────────────────────────────────────────────────┤
+│ @tauri-apps/plugin-dialog │ MIT OR Apache-2.0 │ https://github.com/tauri-apps/plugins-workspace#readme         │
+└───────────────────────────┴───────────────────┴────────────────────────────────────────────────────────────────┘

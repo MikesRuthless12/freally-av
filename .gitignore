@@ -44,12 +44,33 @@ docs/product-roadmap.md
 docs/gtm.md
 docs/launch-checklists/
 Mythodikal-Build-Prompts-Guide.md
+Mythodikal-Feature-Ideas-Master-List.md
+Mythodikal-Feature-Integration-Plan.md
 RESEARCH-DOSSIER.md
 vision.json
+
+# Maintainer-local scratch notes (resume state for /clear handoffs etc.)
+RESUME.md
+
+# Maintainer credentials — never commit
+# VirusShareEmail.txt holds the maintainer's VirusShare account + API key
+VirusShareEmail.txt
 
 # Temp scratch
 .tmp-*.ps1
 .tmp-*.sh
+.tmp_*.py
+
+# cargo-about local-run stderr capture (workspace crates have no license
+# field by design — cargo-about warns about them; the warnings are
+# expected and benign per about.toml's header comment). The .err file is
+# a local debug artifact, not a build output.
+cargo-about.err
+
+# Downloaded YARA-Forge release pack — scratch directory used by
+# scripts/process-yara-forge-pack.py and the bundle-attributions
+# workflow. The unzipped pack is ~7 MB; never committed.
+_yara_forge_core/
 
 # Tauri Updater signing keys (TASK-044). Generated locally by
 # `cargo run --manifest-path scripts/gen-signing-key/Cargo.toml`; the
@@ -84,3 +105,35 @@ abusech_*
 **/blake3_blacklist.bin
 **/crc32_blacklist.bin
 **/blake3_meta.jsonl
+
+# Maintainer-local consolidated hash database. The published artifact
+# is built FROM this on the maintainer's rig; the multi-GB source DB
+# itself is never committed (it'd blow GitHub's 100 MB file ceiling
+# and is rebuildable from the feed-builder pipeline anyway).
+hash_database/
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+
+# TASK-172 NSRL whitelist source + derived. The 169 GB extracted
+# RDSv3 SQLite + the much smaller derived `nsrl.sqlite` are both
+# maintainer-local; end users download the sorted .bin slices from
+# GitHub Releases per TASK-174.
+nsrl/
+nsrl.sqlite*
+**/nsrl_md5.bin
+**/nsrl_sha1.bin
+**/nsrl_sha256.bin
+# Per-OS slices from Wave 2 TASK-183.
+**/nsrl_md5_*.bin
+**/nsrl_sha1_*.bin
+**/nsrl_sha256_*.bin
+
+# TASK-168 tier-aware silver + unified hash bins. Same posture as
+# blake3_blacklist.bin above — built locally, shipped via Releases.
+**/silver_md5.bin
+**/silver_sha256.bin
+**/myth_md5.bin
+**/myth_sha256.bin
+**/myth-blacklist*.sqlite
+**/myth-whitelist*.sqlite

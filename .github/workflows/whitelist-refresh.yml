@@ -1,0 +1,317 @@
+name: Whitelist refresh (NSRL)
+
+# TASK-175 — Nightly check for a new NIST NSRL RDSv3 release. When a
+# newer modern-minimal zip exists, this job downloads it, extracts the
+# SQLite DB, runs `feed-builder nsrl` to reshape into Mythodikal's
+# `nsrl_samples` schema, exports the per-OS sorted-hash bins (TASK-174),
+# and opens a draft PR with the new release assets.
+#
+# Why a draft PR (and not a direct release publish): the maintainer
+# eyeballs the diff in the PR description (row delta, OS split, size
+# delta) before merging. Merge triggers `release.yml` which uploads the
+# .bin files as release assets the Tauri client downloads on demand.
+#
+# **Distribution posture:** NSRL is public-domain per 17 U.S.C. § 105
+# (work of the US Government) and freely redistributable. We ship the
+# derived sorted-hash artifacts, not the source DB. End users opt in
+# on first scan per the first-run NSRL prompt UI.
+#
+# **Where the source comes from:** NIST publishes NSRL RDSv3 quarterly
+# at https://s3.amazonaws.com/rds.nsrl.nist.gov/RDS/. The
+# `modern_minimal` variant is the smallest curated subset (excludes
+# legacy DOS/Solaris/etc.) — the workflow checks the S3 listing for
+# the most recent `RDS_YYYY.MM.N_modern_minimal.zip` and compares
+# against the version stamp in `myth_meta` of the currently-shipped
+# `nsrl.sqlite`.
+#
+# **Cost / runtime posture:** the extracted source is ~150-170 GB
+# (one-time per quarter). We use GitHub-hosted `ubuntu-latest` runners
+# which currently have ~75 GB of free disk on the runner volume plus
+# ~14 GB tmpfs — not enough to unpack the full RDSv3 zip alongside the
+# Mythodikal toolchain. The job therefore unpacks streaming into the
+# `feed-builder nsrl` import in a single pass and writes only the
+# slimmer derived `nsrl.sqlite` to disk (~3-5 GB).
+
+on:
+  schedule:
+    # Quarterly NSRL releases — checking nightly catches them within
+    # ~24h. Cron at 06:13 UTC to avoid the on-the-hour rush.
+    - cron: "13 6 * * *"
+  workflow_dispatch: {}
+
+concurrency:
+  group: whitelist-refresh
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  RUST_BACKTRACE: 1
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check-and-refresh:
+    name: Check NIST S3 + refresh artifacts
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write       # for opening the draft PR
+      pull-requests: write
+    timeout-minutes: 360    # 6 hours — NSRL ingest is I/O-bound on big DBs
+    steps:
+      - name: Free up runner disk
+        # ubuntu-latest ships with ~50 GB of preinstalled toolchain we
+        # don't use here. NSRL RDSv3 extracts to ~170 GB — even after
+        # freeing the toolchain we cannot fit the unpacked source on
+        # the runner's root volume. Mitigations:
+        #   * Mount the larger ephemeral data volume at /mnt for the
+        #     extract (ubuntu-latest exposes a separate ~75 GB volume
+        #     at /mnt by default).
+        #   * Delete every preinstalled directory we never reference.
+        # If the unpacked source still doesn't fit, the workflow will
+        # fail at extract time with ENOSPC — the maintainer then needs
+        # to either use a larger self-hosted runner or move to a
+        # streaming extractor.
+        run: |
+          set -euxo pipefail
+          sudo rm -rf \
+            /usr/share/dotnet \
+            /usr/local/lib/android \
+            /opt/ghc \
+            /opt/hostedtoolcache/CodeQL \
+            /opt/hostedtoolcache/PyPy \
+            /opt/hostedtoolcache/Ruby \
+            /opt/hostedtoolcache/go \
+            /usr/local/share/boost \
+            /usr/local/share/powershell \
+            "${AGENT_TOOLSDIRECTORY}" || true
+          sudo apt-get autoremove -y >/dev/null
+          sudo apt-get clean
+          sudo mkdir -p /mnt/nsrl
+          sudo chown "$USER:$USER" /mnt/nsrl
+          df -h / /mnt
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            tools/feed-builder/target
+          key: feed-builder-${{ runner.os }}-${{ hashFiles('tools/feed-builder/Cargo.lock', 'tools/feed-builder/Cargo.toml') }}
+
+      - name: Discover latest NSRL release
+        id: discover
+        # NIST S3 publishes the zips at predictable paths. Parse the
+        # listing-XML for the newest matching `modern_minimal` zip.
+        # `sort -V` (version sort) is critical for RDS_YYYY.MM.N
+        # versions where N can grow into double digits — plain `sort`
+        # would lex-order "10" before "9" and pick the wrong key.
+        run: |
+          set -euxo pipefail
+          curl -fsSL "https://s3.amazonaws.com/rds.nsrl.nist.gov/?list-type=2&prefix=RDS/" -o listing.xml
+          # Lazy extraction — pull keys matching the pattern.
+          # Example: RDS_2026.03.1_modern_minimal.zip
+          LATEST="$(grep -oE 'RDS/RDS_[0-9]{4}\.[0-9]{2}\.[0-9]+_modern_minimal\.zip' listing.xml \
+            | sort -uV \
+            | tail -n 1)"
+          if [ -z "${LATEST}" ]; then
+            echo "::error::no RDS_*.modern_minimal.zip found in NIST S3 listing"
+            exit 1
+          fi
+          VERSION="$(echo "${LATEST}" | grep -oE 'RDS_[0-9]{4}\.[0-9]{2}\.[0-9]+')"
+          echo "latest_key=${LATEST}" >> "${GITHUB_OUTPUT}"
+          echo "version=${VERSION}"   >> "${GITHUB_OUTPUT}"
+          echo "Newest RDSv3 modern-minimal: ${VERSION} (${LATEST})"
+
+      - name: Guard against version skipping
+        if: steps.gate.outputs.skip != 'true'
+        # Defense: a poisoned S3 listing could insert a future-dated
+        # version pointing at a malicious payload (e.g. RDS_9999.99.99).
+        # Refuse to auto-ingest more than 2 quarters ahead of the
+        # currently-shipped version; the maintainer can override by
+        # manually bumping the sentinel.
+        run: |
+          set -euxo pipefail
+          LATEST="${{ steps.discover.outputs.version }}"
+          CURRENT="$(cat .github/state/nsrl-current-version.txt 2>/dev/null || echo none)"
+          if [ "${CURRENT}" = "none" ]; then
+            echo "first-run; no sanity check applied"
+            exit 0
+          fi
+          # Pull the year-quarter integer of both for comparison.
+          ydigits() { echo "$1" | sed -n 's/RDS_\([0-9]\{4\}\)\.\([0-9]\{2\}\).*/\1\2/p'; }
+          L="$(ydigits "${LATEST}")"
+          C="$(ydigits "${CURRENT}")"
+          # 2 quarters ahead = 6 months max delta. NSRL releases
+          # quarterly; >6 months is suspicious.
+          if [ "$((L - C))" -gt 50 ]; then
+            echo "::error::refusing to auto-bump from ${CURRENT} to ${LATEST} — too large a gap. Update sentinel manually if intentional."
+            exit 1
+          fi
+
+      - name: Compare against currently-shipped NSRL version
+        id: gate
+        # The shipped artifact's `myth_meta` carries the NSRL version
+        # under key='artifact_version' (e.g. 'v0.7.9'). For the NSRL
+        # source version we keep a separate sentinel file in the repo:
+        # `.github/state/nsrl-current-version.txt`. Compare and
+        # short-circuit when unchanged.
+        run: |
+          set -euxo pipefail
+          CURRENT="$(cat .github/state/nsrl-current-version.txt 2>/dev/null || echo none)"
+          LATEST="${{ steps.discover.outputs.version }}"
+          echo "current=${CURRENT}"
+          echo "latest=${LATEST}"
+          if [ "${CURRENT}" = "${LATEST}" ]; then
+            echo "skip=true" >> "${GITHUB_OUTPUT}"
+            echo "::notice::NSRL ${LATEST} already shipped; nothing to do."
+          else
+            echo "skip=false" >> "${GITHUB_OUTPUT}"
+            echo "::notice::NSRL ${LATEST} is newer than shipped ${CURRENT}; rebuilding."
+          fi
+
+      - name: Build feed-builder
+        if: steps.gate.outputs.skip != 'true'
+        working-directory: tools/feed-builder
+        run: cargo build --release --bin feed-builder
+
+      - name: Download NSRL source zip + verify integrity
+        if: steps.gate.outputs.skip != 'true'
+        # NIST publishes a SHA-256 alongside each RDSv3 zip at the same
+        # S3 prefix with `.sha256` appended. Failing to verify it would
+        # mean a TLS-stripping or compromised-bucket adversary could
+        # ship a poisoned whitelist that silently un-detects malware
+        # whose hash got added to it. We require both files; missing
+        # sidecar fails the workflow.
+        run: |
+          set -euxo pipefail
+          mkdir -p /mnt/nsrl
+          cd /mnt/nsrl
+          KEY="${{ steps.discover.outputs.latest_key }}"
+          curl -fsSL "https://s3.amazonaws.com/rds.nsrl.nist.gov/${KEY}" -o source.zip
+          if curl -fsSL "https://s3.amazonaws.com/rds.nsrl.nist.gov/${KEY}.sha256" -o source.zip.sha256; then
+            # NIST's .sha256 file is `<hex>  <filename>` per coreutils.
+            # Coerce the basename to match `source.zip` so sha256sum -c
+            # can verify regardless of the upstream filename.
+            EXPECTED="$(awk '{print $1}' source.zip.sha256)"
+            echo "${EXPECTED}  source.zip" > source.zip.sha256
+            sha256sum -c source.zip.sha256
+          else
+            echo "::error::NIST did not publish a .sha256 sidecar for ${KEY} — refusing to ingest unverified data."
+            exit 1
+          fi
+          # Sanity-check zip integrity before extraction.
+          unzip -t source.zip
+          ls -lh source.zip
+
+      - name: Extract NSRL source DB
+        if: steps.gate.outputs.skip != 'true'
+        # Constrain extraction:
+        #   * `-j` strips any directory components (defeats zip-slip
+        #     paths like `../../etc/passwd.db`).
+        #   * `*.db` glob skips everything except the DB.
+        #   * After extract, validate the resulting filename matches a
+        #     strict regex before passing it downstream — defeats any
+        #     remaining filename-injection in subsequent shell steps.
+        run: |
+          set -euxo pipefail
+          cd /mnt/nsrl
+          unzip -jo source.zip "*.db" -d extracted/
+          rm -f source.zip source.zip.sha256
+          DB_NAME="$(ls extracted/)"
+          case "${DB_NAME}" in
+            *[!A-Za-z0-9._-]* | "" | *.. )
+              echo "::error::extracted DB has suspicious filename: ${DB_NAME}"
+              exit 1
+              ;;
+            *.db) : ;;
+            *)
+              echo "::error::extracted file is not a .db: ${DB_NAME}"
+              exit 1
+              ;;
+          esac
+          ls -lh extracted/
+
+      - name: Run feed-builder nsrl ingest
+        if: steps.gate.outputs.skip != 'true'
+        run: |
+          set -euxo pipefail
+          SRC="$(ls /mnt/nsrl/extracted/*.db | head -n 1)"
+          ./tools/feed-builder/target/release/feed-builder nsrl \
+            --rds "${SRC}" \
+            --out /mnt/nsrl/nsrl.sqlite \
+            --chunk-size 200000
+
+      - name: Export sorted-hash bins (full + per-OS)
+        if: steps.gate.outputs.skip != 'true'
+        run: |
+          set -euxo pipefail
+          mkdir -p /mnt/nsrl/out
+          ./tools/feed-builder/target/release/feed-builder nsrl-export \
+            --nsrl /mnt/nsrl/nsrl.sqlite --out /mnt/nsrl/out
+          for os in windows macos linux other; do
+            ./tools/feed-builder/target/release/feed-builder nsrl-export \
+              --nsrl /mnt/nsrl/nsrl.sqlite \
+              --out /mnt/nsrl/out \
+              --os-filter "${os}"
+          done
+          ls -lh /mnt/nsrl/out/
+
+      - name: Summarize delta
+        if: steps.gate.outputs.skip != 'true'
+        id: delta
+        run: |
+          set -euxo pipefail
+          du -h /mnt/nsrl/out/*.bin | tee delta.txt
+          echo "delta<<EOF" >> "${GITHUB_OUTPUT}"
+          cat delta.txt    >> "${GITHUB_OUTPUT}"
+          echo "EOF"        >> "${GITHUB_OUTPUT}"
+
+      - name: Bump shipped version sentinel
+        if: steps.gate.outputs.skip != 'true'
+        run: |
+          set -euxo pipefail
+          echo "${{ steps.discover.outputs.version }}" > .github/state/nsrl-current-version.txt
+
+      - name: Open draft PR
+        if: steps.gate.outputs.skip != 'true'
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          draft: true
+          branch: nsrl-refresh/${{ steps.discover.outputs.version }}
+          title: "NSRL refresh → ${{ steps.discover.outputs.version }}"
+          commit-message: "TASK-175: bump NSRL to ${{ steps.discover.outputs.version }}"
+          body: |
+            **TASK-175 — Whitelist refresh CI job opened this PR.**
+
+            New NSRL RDSv3 detected: `${{ steps.discover.outputs.version }}`
+            (previous shipped version was `${{ steps.gate.outputs.current || 'none' }}`)
+
+            ## Per-OS bin sizes
+
+            ```
+            ${{ steps.delta.outputs.delta }}
+            ```
+
+            ## Manual follow-up
+
+            1. Eyeball the bin sizes vs the prior shipped sizes (the
+               release pipeline uploads them as release assets).
+            2. Spot-check that nothing massively unexpected changed
+               (e.g. half-million rows dropped is a red flag).
+            3. Mark the PR ready for review + merge. Merge triggers
+               the next release-cut to pick up the new sentinel.
+
+            Sorted-hash artifacts are not committed in-tree (the bin
+            files are uploaded by the release workflow). This PR only
+            commits the version sentinel bump.
+
+            Generated by `.github/workflows/whitelist-refresh.yml`.

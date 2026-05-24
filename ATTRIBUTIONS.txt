@@ -1,0 +1,275 @@
+MYTHODIKAL ANTI-VIRUS — THIRD-PARTY ATTRIBUTIONS
+================================================
+
+Mythodikal Anti-Virus ("the Software") includes data, code, and
+artifacts derived from the third-party sources listed below. These
+notices are required (or strongly encouraged) by the respective
+upstream licenses and MUST ship alongside any binary distribution
+of the Software.
+
+Last updated: 2026-05-14
+Maintainer:   Mike Weaver  <mythodikalone@gmail.com>
+
+
+================================================================
+1. Threat-intelligence data feeds
+================================================================
+
+----------------------------------------------------------------
+1.1 abuse.ch  —  MalwareBazaar, ThreatFox, URLhaus
+----------------------------------------------------------------
+
+    Operator:    abuse.ch, Bern University of Applied Sciences
+                 (Switzerland).
+    Used for:    Hash blacklist (MalwareBazaar bulk archives +
+                 ThreatFox JSON), C2 IOC matching (ThreatFox),
+                 URL hashes (URLhaus).
+    License:     Free for commercial use per the abuse.ch FAQ
+                 ( https://bazaar.abuse.ch/faq/ ).
+                 Donations to abuse.ch are encouraged; the
+                 Mythodikal project has donated.
+    URLs:        https://bazaar.abuse.ch/
+                 https://threatfox.abuse.ch/
+                 https://urlhaus.abuse.ch/
+
+    No abuse.ch upstream prose (signatures, tags, commentary) is
+    persisted by the Software; only hashes, sizes, and the
+    abuse.ch-supplied numeric VirusTotal detection percentage.
+
+
+----------------------------------------------------------------
+1.2 NIST National Software Reference Library (NSRL)
+----------------------------------------------------------------
+
+    Operator:    National Institute of Standards and Technology
+                 (NIST), U.S. Department of Commerce.
+    Used for:    Goodware allowlist — known-good system-binary
+                 hashes that are skipped during scans.
+    License:     U.S. Government public domain. No license
+                 restrictions apply. Citation appreciated.
+    URL:         https://www.nist.gov/itl/ssd/software-quality-
+                 group/national-software-reference-library-nsrl
+
+
+----------------------------------------------------------------
+1.3 YARA-Forge  —  "core" tier only
+----------------------------------------------------------------
+
+    Source:      The YARA-Forge community
+                 ( https://yarahq.github.io/ )
+    Used for:    Bundled YARA-rule pack covering common consumer
+                 malware families.
+    License:     The Software ships ONLY rules whose declared
+                 license is one of:
+                     MIT, Apache-2.0, BSD-2-Clause, BSD-3-Clause,
+                     CC0-1.0, MPL-2.0, Unicode-3.0
+                 enforced at build time by
+                 `scripts/license-scrub-yara.ts`. Rules with any
+                 other license (or no declared license) are
+                 rejected by the CI pipeline and are NOT included
+                 in the published binary.
+
+    Per-rule attribution:
+                 Each YARA rule declares its author and license in
+                 its `meta:` block. A complete per-rule attribution
+                 manifest is generated at build time and shipped
+                 as:
+
+                     YARA-RULE-AUTHORS.txt
+
+                 alongside this file. See Section 5 below.
+
+
+----------------------------------------------------------------
+1.4 loldrivers.io
+----------------------------------------------------------------
+
+    Operator:    The LOLDrivers community project
+                 ( https://www.loldrivers.io/ ).
+    Used for:    BYOVD (Bring-Your-Own-Vulnerable-Driver)
+                 blocklist — hashes of known-abused signed drivers.
+    License:     Permissive aggregator. The Software ingests the
+                 JSON as a hash blacklist; underlying rule text is
+                 not redistributed.
+
+
+----------------------------------------------------------------
+1.5 LOLBAS  —  Living Off The Land Binaries And Scripts
+----------------------------------------------------------------
+
+    Operator:    The LOLBAS Project
+                 ( https://lolbas-project.github.io/ ).
+    Used for:    Suspicious parent-child invocation chains (e.g.,
+                 Office spawning certutil, mshta, wmic).
+    License:     MIT.
+
+    -- LOLBAS MIT License Text -------------------------------
+    MIT License
+
+    Copyright (c) the LOLBAS Project contributors.
+
+    Permission is hereby granted, free of charge, to any person
+    obtaining a copy of this software and associated documentation
+    files (the "Software"), to deal in the Software without
+    restriction, including without limitation the rights to use,
+    copy, modify, merge, publish, distribute, sublicense, and/or
+    sell copies of the Software, and to permit persons to whom the
+    Software is furnished to do so, subject to the following
+    conditions:
+
+    The above copyright notice and this permission notice shall be
+    included in all copies or substantial portions of the Software.
+
+    THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+    EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES
+    OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+    NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
+    HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+    WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+    FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+    OTHER DEALINGS IN THE SOFTWARE.
+    ----------------------------------------------------------
+
+
+----------------------------------------------------------------
+1.6 OSV.dev  —  malicious-package feed
+----------------------------------------------------------------
+
+    Operator:    Google LLC / The Open Source Security Foundation
+                 (OpenSSF).
+    Used for:    Supply-chain detection — npm / PyPI / Cargo
+                 malicious-package match.
+    License:     Creative Commons Attribution 4.0 International
+                 (CC-BY-4.0).
+    URL:         https://osv.dev/
+
+    Attribution required by CC-BY-4.0:
+        "OSV.dev data is licensed under CC-BY-4.0 by Google LLC
+         and the Open Source Security Foundation. The full
+         license is at https://creativecommons.org/licenses/by/
+         4.0/legalcode ."
+
+    The Software consumes the JSON feed only and does NOT embed
+    verbatim OSV records into compiled binaries.
+
+
+================================================================
+2. Rust crate dependencies (mythkernel, mythctl, ui-bridge,
+   feed-builder)
+================================================================
+
+Mythodikal Anti-Virus is built in Rust and depends on a number of
+open-source crates. License compliance is enforced in CI via
+`cargo-deny` per `deny.toml`. The allow-list of accepted licenses
+is:
+
+    MIT, Apache-2.0, BSD-2-Clause, BSD-3-Clause, CC0-1.0, ISC,
+    MPL-2.0, Unicode-3.0, Zlib, Unlicense
+
+A generated, exhaustive list of every Rust dependency, its version,
+and its license appears in:
+
+    THIRD-PARTY-RUST.txt
+
+This file is generated at release time by the command:
+
+    cargo about generate about.hbs > THIRD-PARTY-RUST.txt
+
+(or equivalent — `cargo about` is the recommended tool;
+`cargo-license` is a simpler alternative.)
+
+
+================================================================
+3. JavaScript / TypeScript dependencies (Tauri front-end)
+================================================================
+
+The desktop application uses Tauri ( https://tauri.app ) for its
+shell and includes npm packages for the React / TypeScript UI.
+
+Tauri itself is dual-licensed under MIT or Apache-2.0.
+
+A generated, exhaustive list of every npm dependency, its version,
+and its license appears in:
+
+    THIRD-PARTY-NPM.txt
+
+This file is generated at release time by the command:
+
+    pnpm licenses list --prod > THIRD-PARTY-NPM.txt
+
+(or `npx license-checker --production --csv` for an alternative
+machine-readable form.)
+
+
+================================================================
+4. Mythodikal-original components
+================================================================
+
+The following are original work product of the Licensor (Mike
+Weaver) and are NOT covered by any third-party attribution
+obligation:
+
+    - All Rust source code under `crates/` and `apps/`
+    - All TypeScript / React source code under
+      `apps/mythodikal/frontend/src/`
+    - The mapping.toml family-name translation table
+    - The Mythodikal-branded per-sample commentary text generated
+      by `tools/feed-builder/refresh_unique_commentary.py`
+    - The curated strict-bin selection (`family != 'unknown'
+      AND vtpercent >= 30`) and the published feed formats:
+      `myth_sha256.bin`, `blake3_blacklist.bin`,
+      `crc32_blacklist.bin`, `blake3_meta.jsonl`
+    - All brand assets under `assets/` and `apps/mythodikal/
+      frontend/public/`
+
+These are governed by `LICENSE.md` (Proprietary Source-Visible,
+All Rights Reserved).
+
+
+================================================================
+5. How to ship this file
+================================================================
+
+This file MUST be included in any binary distribution of
+Mythodikal Anti-Virus. Conventional placement for the Tauri
+installer (Windows MSI / NSIS, macOS DMG / pkg) is:
+
+  a) Include `ATTRIBUTIONS.txt`, `THIRD-PARTY-RUST.txt`,
+     `THIRD-PARTY-NPM.txt`, and `YARA-RULE-AUTHORS.txt` in the
+     `resources` array of `apps/mythodikal/src-tauri/tauri.conf.json`
+     so the files are bundled inside the app's resource directory
+     and installed alongside the executable.
+
+  b) Expose a link to each file from the in-app "About" dialog
+     (modal or external open).
+
+  c) For headless / CLI distributions (`mythctl.exe`), ship the
+     files in the same directory as the executable, OR add a
+     `mythctl licenses` / `mythctl attributions` subcommand that
+     prints them on demand.
+
+  d) For source-only / git-clone distributions, the files live at
+     the repository root (this file and its siblings).
+
+Plain text format chosen so that any text reader (Notepad, less,
+cat, vim, GitHub's plain-text view, the Tauri webview itself) can
+display the file without a Markdown renderer.
+
+
+================================================================
+6. Reporting attribution concerns
+================================================================
+
+If you believe a third-party source has been omitted from this
+file, has changed its license terms, or is being misrepresented
+here, please email:
+
+    mythodikalone@gmail.com
+
+with the subject `ATTRIBUTIONS:` and a link to the upstream
+notice. Corrections will be issued in the next patch release.
+
+
+================================================================
+End of attributions.
+================================================================

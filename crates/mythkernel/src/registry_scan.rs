@@ -299,7 +299,7 @@ fn sweep_impl(
                 continue;
             }
             total += 1;
-            if total.is_multiple_of(25) {
+            if total % 25 == 0 {
                 let _ = tx.send(ScanProgress::RegistryProgress {
                     scan_id,
                     items_scanned_total: total,
