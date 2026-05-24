@@ -40,13 +40,56 @@ pub struct MirrorHealth {
     pub fallback_count_30d: u32,
 }
 
+/// SR-M2 fix — strict allowlist of permitted URL schemes for a
+/// mirror URL. Currently `https` only (no `http`, no `file://`,
+/// no `ftp://`, no anything else). The maintainer can grow this
+/// in the future via a feature flag, but the safe default is to
+/// refuse anything else at the data-construction boundary.
+#[derive(Debug, thiserror::Error)]
+pub enum MirrorError {
+    #[error("mirror URL must start with https:// (got {0:?})")]
+    UnsafeScheme(String),
+    #[error("mirror URL is empty or whitespace")]
+    Empty,
+}
+
+fn validate_mirror_url(url: &str) -> Result<(), MirrorError> {
+    let trimmed = url.trim();
+    if trimmed.is_empty() {
+        return Err(MirrorError::Empty);
+    }
+    if !trimmed.starts_with("https://") {
+        return Err(MirrorError::UnsafeScheme(trimmed.to_string()));
+    }
+    Ok(())
+}
+
 impl MirrorPool {
-    pub fn new(feed_name: impl Into<String>, urls: Vec<String>) -> Self {
-        Self {
+    /// Construct a pool, validating every URL against the SR-M2
+    /// scheme allowlist. Returns `Err(MirrorError)` on the first
+    /// invalid URL so a typo doesn't silently accept an `http://`
+    /// mirror.
+    pub fn new(
+        feed_name: impl Into<String>,
+        urls: Vec<String>,
+    ) -> Result<Self, MirrorError> {
+        for u in &urls {
+            validate_mirror_url(u)?;
+        }
+        Ok(Self {
             feed_name: feed_name.into(),
             urls,
             health: HashMap::new(),
-        }
+        })
+    }
+
+    /// Append a new mirror URL with validation. Used by the
+    /// Settings → Mirrors UI when the user adds an entry.
+    pub fn add_url(&mut self, url: impl Into<String>) -> Result<(), MirrorError> {
+        let s = url.into();
+        validate_mirror_url(&s)?;
+        self.urls.push(s);
+        Ok(())
     }
 
     /// Pick the first URL whose recent_errors is below `threshold`.
@@ -156,7 +199,8 @@ mod tests {
                 "https://github.com/x".to_string(),
                 "https://mirror.example.com".to_string(),
             ],
-        );
+        )
+        .unwrap();
         pool.record_error("https://github.com/x", 100);
         pool.record_error("https://github.com/x", 101);
         pool.record_error("https://github.com/x", 102);
@@ -167,47 +211,51 @@ mod tests {
     fn pick_next_falls_back_to_last_when_all_unhealthy() {
         let mut pool = MirrorPool::new(
             "abusech",
-            vec!["a".to_string(), "b".to_string()],
-        );
+            vec!["https://a".to_string(), "https://b".to_string()],
+        )
+        .unwrap();
         for _ in 0..5 {
-            pool.record_error("a", 1);
-            pool.record_error("b", 1);
+            pool.record_error("https://a", 1);
+            pool.record_error("https://b", 1);
         }
-        assert_eq!(pool.pick_next(3), Some("b"));
+        assert_eq!(pool.pick_next(3), Some("https://b"));
     }
 
     #[test]
     fn record_success_resets_counter() {
-        let mut pool = MirrorPool::new("x", vec!["u".to_string()]);
-        pool.record_error("u", 1);
-        pool.record_error("u", 2);
-        pool.record_success("u");
-        assert_eq!(pool.health.get("u").unwrap().recent_errors, 0);
+        let url = "https://u.example.com";
+        let mut pool = MirrorPool::new("x", vec![url.to_string()]).unwrap();
+        pool.record_error(url, 1);
+        pool.record_error(url, 2);
+        pool.record_success(url);
+        assert_eq!(pool.health.get(url).unwrap().recent_errors, 0);
         // But the 30-day fallback count is preserved.
-        assert_eq!(pool.health.get("u").unwrap().fallback_count_30d, 2);
+        assert_eq!(pool.health.get(url).unwrap().fallback_count_30d, 2);
     }
 
     #[test]
     fn decay_halves_recent_errors() {
-        let mut pool = MirrorPool::new("x", vec!["u".to_string()]);
+        let url = "https://u.example.com";
+        let mut pool = MirrorPool::new("x", vec![url.to_string()]).unwrap();
         for _ in 0..8 {
-            pool.record_error("u", 1);
+            pool.record_error(url, 1);
         }
         pool.decay();
-        assert_eq!(pool.health.get("u").unwrap().recent_errors, 4);
+        assert_eq!(pool.health.get(url).unwrap().recent_errors, 4);
         pool.decay();
-        assert_eq!(pool.health.get("u").unwrap().recent_errors, 2);
+        assert_eq!(pool.health.get(url).unwrap().recent_errors, 2);
     }
 
     #[test]
     fn fetch_with_failover_walks_pool() {
         let mut pool = MirrorPool::new(
             "x",
-            vec!["bad".to_string(), "good".to_string()],
-        );
+            vec!["https://bad.example.com".to_string(), "https://good.example.com".to_string()],
+        )
+        .unwrap();
         let result: Result<(u32, String), &'static str> =
             fetch_with_failover(&mut pool, 3, 1, 5, |u| {
-                if u == "good" {
+                if u.contains("good") {
                     Ok(42)
                 } else {
                     Err("oh no")
@@ -215,6 +263,29 @@ mod tests {
             });
         let (value, served_by) = result.unwrap();
         assert_eq!(value, 42);
-        assert_eq!(served_by, "good");
+        assert!(served_by.contains("good"));
+    }
+
+    #[test]
+    fn new_rejects_non_https_scheme() {
+        // SR-M2 regression.
+        let err = MirrorPool::new("x", vec!["http://example.com".to_string()]).unwrap_err();
+        assert!(matches!(err, MirrorError::UnsafeScheme(_)));
+        let err = MirrorPool::new("x", vec!["file:///etc/passwd".to_string()]).unwrap_err();
+        assert!(matches!(err, MirrorError::UnsafeScheme(_)));
+        let err = MirrorPool::new("x", vec!["".to_string()]).unwrap_err();
+        assert!(matches!(err, MirrorError::Empty));
+        let err = MirrorPool::new("x", vec!["  ".to_string()]).unwrap_err();
+        assert!(matches!(err, MirrorError::Empty));
+    }
+
+    #[test]
+    fn add_url_enforces_scheme_too() {
+        let mut pool = MirrorPool::new("x", vec!["https://ok.example.com".to_string()]).unwrap();
+        assert!(pool.add_url("https://also-ok.example.com").is_ok());
+        assert!(matches!(
+            pool.add_url("http://insecure.example.com").unwrap_err(),
+            MirrorError::UnsafeScheme(_)
+        ));
     }
 }
