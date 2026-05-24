@@ -1858,20 +1858,27 @@ pub fn build_pipeline_from_feeds(data_dir: &std::path::Path) -> DetectionPipelin
         detectors.push(Box::new(yara));
     }
 
-    let nsrl_path = feeds_dir.join("nsrl_sha256.bin");
-    if nsrl_path.exists() {
+    // TASK-183 — load the per-OS NSRL slice when present; fall back
+    // to the union .bin when the per-OS variants aren't downloaded.
+    // Multiple slices may be loaded as parallel detector instances
+    // (host-OS slice + the cross-platform `_other` slice).
+    for nsrl_path in mythkernel::detect::goodware_allowlist::resolve_nsrl_slice_paths(&feeds_dir) {
         match GoodwareAllowlistDetector::open(&nsrl_path) {
             Ok(d) => {
                 tracing::info!(
                     feed = "nsrl",
                     path = %nsrl_path.display(),
                     count = d.loaded_count(),
-                    "loaded NSRL goodware allowlist"
+                    "loaded NSRL goodware allowlist slice"
                 );
                 detectors.push(Box::new(d.with_hash_kind(HashKind::Sha256)));
             }
             Err(err) => {
-                tracing::warn!(error = %err, path = %nsrl_path.display(), "NSRL load failed")
+                tracing::warn!(
+                    error = %err,
+                    path = %nsrl_path.display(),
+                    "NSRL slice load failed"
+                );
             }
         }
     }
