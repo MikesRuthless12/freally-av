@@ -83,6 +83,7 @@ The roadmap targets stable **v0.19.84**, sequenced across 16 phases. Current pha
 | 6 | macOS Port (unsigned, see `docs/prd.md` § 1.5.3) | v0.6.x | ✅ Shipped 2026-05-22 (v0.6.0 consolidated tag) |
 | 7 | YARA & Rule Manager | v0.7.x | Reclassified to optional / Pro / post-MVP per TASK-177 — no longer release-gating |
 | 7B | Hash-Only Blacklist + NSRL Whitelist (Wave 1) | v0.7.x | 🟢 Wave 1 code-complete 2026-05-23 — tag-cut gated on launch checklist |
+| 7B-W2 | Hash-Path Perf + Allowlist Intelligence + IOC Tools (Wave 2) | v0.7.x | 🟢 22/23 tasks code-complete 2026-05-23/24 (TASK-178/179/180/181/182/183/184/185/186/187/188/189/190/191/192/193/194/195/196/197/198/199); TASK-200 release tag gated on TASK-171 smoke |
 | 8 | Linux Real-time (fanotify daemon) | v0.8.x | Pending |
 | 9 | macOS Real-time (FSEvents + opportunistic ESF NOTIFY) | v0.9.x | Pending |
 | 10 | Polish & Public Launch | v0.10.x | Pending |

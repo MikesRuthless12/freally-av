@@ -11,6 +11,29 @@
 use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, thiserror::Error)]
+pub enum HashLookupError {
+    #[error("sqlite: {0}")]
+    Sqlite(#[from] rusqlite::Error),
+    #[error("hash must be 8-64 hex characters (got {0} chars)")]
+    BadShape(usize),
+}
+
+/// SR-H1 fix — validate the caller-supplied hash *before* it goes
+/// into a `LIKE '%hash%'` clause. Without this, an empty string or
+/// a `%`/`_` wildcard would dump arbitrary findings rows. Minimum
+/// length 8 hex chars (32 bits) collapses the substring-match
+/// false-positive rate to ≪ 0.01%.
+fn validate_hash_hex(hash_hex: &str) -> Result<(), HashLookupError> {
+    if hash_hex.len() < 8 || hash_hex.len() > 64 {
+        return Err(HashLookupError::BadShape(hash_hex.len()));
+    }
+    if !hash_hex.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Err(HashLookupError::BadShape(hash_hex.len()));
+    }
+    Ok(())
+}
+
 /// One row of "this hash was observed in scan N at path P at time T".
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct HashObservation {
@@ -33,7 +56,8 @@ pub struct HashObservation {
 pub fn lateral_hash_search(
     conn: &Connection,
     hash_hex: &str,
-) -> rusqlite::Result<Vec<HashObservation>> {
+) -> Result<Vec<HashObservation>, HashLookupError> {
+    validate_hash_hex(hash_hex)?;
     let needle = format!("%{}%", hash_hex.to_ascii_lowercase());
     let mut stmt = conn.prepare(
         "SELECT f.scan_id, f.path, f.detected_at_utc, f.severity,
@@ -52,7 +76,7 @@ pub fn lateral_hash_search(
             rule_id: r.get(5)?,
         })
     })?;
-    rows.collect()
+    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
 }
 
 /// TASK-197 — Verdict tree for a pasted hash. Combines:
@@ -76,7 +100,8 @@ pub fn hash_verdict_tree(
     hash_hex: &str,
     recent_limit: usize,
     now_unix: i64,
-) -> rusqlite::Result<HashVerdictTree> {
+) -> Result<HashVerdictTree, HashLookupError> {
+    validate_hash_hex(hash_hex)?;
     let needle = format!("%{}%", hash_hex.to_ascii_lowercase());
     let total: i64 = conn.query_row(
         "SELECT COUNT(*) FROM findings WHERE LOWER(COALESCE(evidence, '')) LIKE ?1",
@@ -168,6 +193,32 @@ mod tests {
         assert_eq!(tree.observations_last_30d, 2);
         assert_eq!(tree.recent_observations.len(), 2);
         assert_eq!(tree.hash_hex, "deadbeef");
+    }
+
+    #[test]
+    fn rejects_sql_wildcards_and_empty_hash() {
+        let conn = db::open_in_memory().unwrap();
+        seed_findings(&conn);
+        // SR-H1 — wildcard chars and short input rejected.
+        assert!(matches!(
+            lateral_hash_search(&conn, ""),
+            Err(HashLookupError::BadShape(_))
+        ));
+        assert!(matches!(
+            lateral_hash_search(&conn, "%"),
+            Err(HashLookupError::BadShape(_))
+        ));
+        assert!(matches!(
+            lateral_hash_search(&conn, "_"),
+            Err(HashLookupError::BadShape(_))
+        ));
+        // Non-hex but right length still rejected.
+        assert!(matches!(
+            lateral_hash_search(&conn, "GGGGGGGG"),
+            Err(HashLookupError::BadShape(_))
+        ));
+        // 8 hex chars OK.
+        lateral_hash_search(&conn, "deadbeef").unwrap();
     }
 
     #[test]

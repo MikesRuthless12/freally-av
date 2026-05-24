@@ -11,6 +11,44 @@ Each release section lists which `TASK-NNN` items from `docs/product-roadmap.md`
 ## [Unreleased]
 
 ### Added
+- **Phase 7B Wave 2 — Hash-path perf + allowlist intelligence + IOC tools + feed integrity** _(shipped 2026-05-23/24)_
+
+  22 of 23 Wave 2 tasks landed; only TASK-200 (v0.7.13 release tag) remains, gated on TASK-171 smoke + maintainer `git tag`. ~85 new unit tests across the engine + feed-builder.
+
+  **PR-A — Engine foundations** (commit `5d51c25`):
+  - **TASK-178** — Bloom filter front-end (`crates/mythkernel/src/detect/bloom.rs`). Sub-microsecond pre-screen consulted before the sorted-`.bin` binary search. 120 MB at 1% FPR / 100M items. Kirsch-Mitzenmacher double-hashing over the input digest's two u64 slices (no SipHash dep — SHA-256/BLAKE3 are uniformly distributed in every byte slice). 9 tests.
+  - **TASK-179** — Cuckoo filter alternative (`crates/mythkernel/src/detect/cuckoo.rs`). Same purpose as Bloom plus delete support for the TASK-181 aging job. 4-entry buckets, 12-bit fingerprint, partial-key Cuckoo from Fan et al. (2014). 6 tests.
+  - **TASK-180** — Partial-match for files ≥ 256 MB (`crates/mythkernel/src/detect/partial_match.rs`). `(prefix_blake3, size_band)` index. New `MYTHPMI1` on-disk format. 8 tests.
+  - **TASK-181** — Hash de-aging (`tools/feed-builder/src/aging.rs` + store.rs migration v6). `samples_aged` + `aging_events` tables; `feed-builder age [--dry-run]` subcommand; `confirm_sample` helper. 5 + 1 migration tests.
+  - **TASK-182** — Multi-source hash provenance (store.rs migration v7 + `record_provenance` + hashlist.rs wiring + consolidate.rs copy). New `provenance_events` table; one row per (hash, source, observed_at). Engine-side UI surfacing is a follow-up when the engine reads consolidated artifact directly. 1 test.
+  - **TASK-183** — Per-OS NSRL slice load (`detect/goodware_allowlist.rs` + `ui-bridge/commands.rs`). New `resolve_nsrl_slice_paths` helper detects host OS via `std::env::consts::OS` and returns host + `_other` slices; ui-bridge loader iterates the result. Halves install footprint on single-OS machines. 3 tests.
+  - **TASK-190** — Ephemeral allowlist / Trust-this-once (migration 0006 + `detect/ephemeral_allowlist.rs`). 7d / 30d / 365d duration presets, optional scope_path, mandatory reason, auto-prune at scan-start. Detector at priority 12 (above goodware, below blacklist). 5 tests.
+  - **TASK-199** — BLAKE3 + SHA-256 dual-key gate (`detect/dual_key_gate.rs`). `MatchStrength` enum (GoldMultihash | GoldSingle | Silver | Partial) + `combine()` merger. Silver-tier hits get a one-notch severity downgrade (Critical→High). 9 tests.
+
+  **PR-B — Allowlist intelligence + UI tools + feed integrity** (commit `cbd937d`):
+  - **TASK-184** — Vendor-by-package-manager (`detect/package_manager_allowlist.rs`). Cross-platform detector that asks dpkg/pacman/rpm/brew/winget. 24h per-path cache. 4 tests.
+  - **TASK-185** — macOS App Store provenance (`detect/platform_store_allowlist.rs::MacosAppStoreDetector`). `/Applications/.app/Contents/_MASReceipt/receipt` path check.
+  - **TASK-186** — Windows Microsoft Store provenance. `%ProgramFiles%\WindowsApps\` + `AppxManifest.xml` + `AppxSignature.p7x` check.
+  - **TASK-187** — Snap / Flatpak / AppImage. Path-shape detector for the three Linux store formats.
+  - **TASK-188** — Cargo / PyPI / npm publisher-key allowlist (`detect/dev_publisher_allowlist.rs`). `classify_dev_path` + TOML-loaded `(ecosystem, package)` → `(publisher_id, key_fingerprint)`. 5 tests.
+  - **TASK-189** — SBOM CycloneDX allowlist (`detect/sbom_allowlist.rs`). Parses CycloneDX 1.4 components filtered to SHA-256. 3 tests.
+  - **TASK-191** — Confidence-graded findings (`FindingRow.tsx`). MatchStrength → P0/P1/P2 pill with tooltip.
+  - **TASK-192** — Feed-freshness widget (`components/FeedFreshnessBadge.tsx`). Age-coloured per bucket.
+  - **TASK-195** — User-supplied IOC bundles (migration 0007 + `detect/user_iocs.rs`). Auto-detects plain hash list / CSV with type+value / STIX 2.1 indicator / MISP Event.Attribute[] JSON. 6 tests.
+  - **TASK-196** — Per-finding source-citation copy. `Cite` button on FindingRow → Markdown footnote to clipboard.
+  - **TASK-197** — Reverse-lookup helper (`detect/hash_lookup_explain.rs::hash_verdict_tree`). Lifetime + 30d counts + N most-recent observations for a given hash.
+  - **TASK-198** — Lateral hash search (`hash_lookup_explain.rs::lateral_hash_search`). Returns every prior scan that observed a hash.
+  - **TASK-193** — Mirror failover (`updater/mirrors.rs::MirrorPool`). Per-feed URL pool with per-URL error counters + 30-day fallback history + healthy-rotation logic. 5 tests.
+  - **TASK-194** — Chained ed25519 epoch sig (`updater/delta_sig.rs`). `Manifest` shape + `verify_chain` enforcing monotonicity + prev_epoch sha256 continuity + signature. 7 tests.
+
+  **/review + /security-review fixes** (after PR-B, applied before push):
+  - **CR-CRITICAL #1** — Cuckoo `fingerprint_mask` overflowed when `fingerprint_bits == 16` (panic in debug, accidental wrap in release). Now special-cased.
+  - **CR-CRITICAL #2** — Cuckoo `from_mmap_mut` accepted `bucket_count = 0` and any `fingerprint_bits` from disk → out-of-bounds panic on `contains()`. Now rejects with `LengthMismatch` unless `bucket_count.is_power_of_two() && bucket_count != 0` and `fingerprint_bits in 1..=16` and `entries_per_bucket != 0`.
+  - **CR-HIGH #1** — Cuckoo kick-chain start picked deterministically from `i1 % 2`. Now uses `rand::thread_rng()` to break the eviction-cycle deadlock.
+  - **SR-HIGH #1** — Hash-lookup `LIKE '%hash%'` accepted `%` / `_` / empty input → could dump all findings. Now validates `hash_hex` is 8-64 ASCII hex chars before formatting the needle. New regression test covers wildcard rejection.
+  - **SR-HIGH #2** — Cuckoo loader used `MmapMut` (writable) — required write permission on the artifact. Now `Mmap::map` (read-only); the aging-job delete path re-builds in RAM and writes a fresh artifact instead.
+  - **SR-MEDIUM #4** — Platform-store + dev-publisher path-shape detectors trusted `path.starts_with("/Applications/")` etc. without canonicalising → a symlink in a user-writable area could spoof the store-install root. Now `canonicalize()` first; symlink-redirected paths no longer match the store roots.
+
 - **Phase 7B Wave 1 — Hash-only blacklist + NSRL whitelist + tier-aware export + first-scan UX** _(shipped 2026-05-23)_
 
   Why: Detection at scale doesn't require labeling every malware sample with a clean-room family name. Hash-only ingest from public hash lists (VirusShare / ThreatFox / etc.) covers the bulk of detection value at a fraction of the build cost; NSRL whitelist short-circuits 95%+ of scan work on benign OS / app binaries. The "Mythodikal-original family / commentary" effort moves from release-gating to optional polish.

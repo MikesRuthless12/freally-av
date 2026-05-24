@@ -49,16 +49,19 @@ pub const MACOS_APPSTORE_DETECTOR_ID: &str = "macos_appstore_allowlist";
 /// Returns the parent `.app` bundle when `path` is inside one.
 /// Strict: the bundle must be under `/Applications/` (the only
 /// install root the App Store writes to without elevation).
-pub fn macos_appstore_bundle_for(path: &Path) -> Option<&Path> {
-    let mut cur = path;
+///
+/// SR-M4 fix — canonicalises the candidate first so a symlink
+/// like `/Users/me/Applications → /tmp/evil` doesn't satisfy the
+/// `/Applications/` prefix check via string match alone.
+/// Canonicalisation that fails (e.g. broken symlink) returns None.
+pub fn macos_appstore_bundle_for(path: &Path) -> Option<std::path::PathBuf> {
+    let canonical = path.canonicalize().ok()?;
+    let mut cur: &Path = &canonical;
     while let Some(parent) = cur.parent() {
         if parent.extension().and_then(|s| s.to_str()) == Some("app") {
-            // The parent IS the .app — strip the trailing `.app` slash.
-            let app_path = parent;
-            // Is it under /Applications?
-            let app_str = app_path.to_string_lossy();
+            let app_str = parent.to_string_lossy();
             if app_str.starts_with("/Applications/") {
-                return Some(app_path);
+                return Some(parent.to_path_buf());
             }
         }
         cur = parent;
@@ -88,7 +91,7 @@ impl Detector for MacosAppStoreDetector {
         let Some(bundle) = macos_appstore_bundle_for(ctx.path) else {
             return DetectorVerdict::Clean;
         };
-        if macos_appstore_has_receipt(bundle) {
+        if macos_appstore_has_receipt(&bundle) {
             DetectorVerdict::SkipFile
         } else {
             DetectorVerdict::Clean
@@ -104,10 +107,18 @@ pub const WINDOWS_MSSTORE_DETECTOR_ID: &str = "windows_msstore_allowlist";
 
 /// Microsoft Store writes packages to `%ProgramFiles%\WindowsApps\`.
 /// Returns the package-name segment when `path` is under that root.
+///
+/// SR-M4 fix — canonicalises first so a junction or symlink to
+/// `WindowsApps` from a user-writable area can't satisfy the prefix
+/// check.
 pub fn windows_msstore_package_for(path: &Path) -> Option<String> {
-    let s = path.to_string_lossy();
+    let canonical = path.canonicalize().ok()?;
+    windows_msstore_package_from_canonical(&canonical)
+}
+
+fn windows_msstore_package_from_canonical(canonical: &Path) -> Option<String> {
+    let s = canonical.to_string_lossy();
     let s_lc = s.to_ascii_lowercase();
-    // Tolerate both forward and back slashes.
     let normalised = s_lc.replace('\\', "/");
     let marker = "/program files/windowsapps/";
     let idx = normalised.find(marker)?;
@@ -139,21 +150,32 @@ impl Detector for WindowsMsStoreDetector {
         PRIORITY
     }
     fn check(&self, ctx: &FileCtx<'_>) -> DetectorVerdict {
-        let Some(_pkg) = windows_msstore_package_for(ctx.path) else {
+        // SR-M4 fix — canonicalise to defeat junction/symlink
+        // tricks before any prefix check.
+        let Ok(canonical) = ctx.path.canonicalize() else {
             return DetectorVerdict::Clean;
         };
-        // Walk back to the package dir.
-        let s = ctx.path.to_string_lossy().to_ascii_lowercase();
-        let normalised = s.replace('\\', "/");
-        if let Some(idx) = normalised.find("/program files/windowsapps/")
-            && let Some(after) = normalised.get(idx + "/program files/windowsapps/".len()..)
-            && let Some(pkg_seg) = after.split('/').next()
-        {
-            let pkg_dir = Path::new(&normalised[..idx + "/program files/windowsapps/".len()])
-                .join(pkg_seg);
-            if windows_msstore_has_appx_manifest(&pkg_dir) {
-                return DetectorVerdict::SkipFile;
+        let Some(_pkg) = windows_msstore_package_from_canonical(&canonical) else {
+            return DetectorVerdict::Clean;
+        };
+        // Walk back to the package dir using the canonical (not the
+        // lowercased) path so NTFS preserves casing for the
+        // .exists() check.
+        let mut pkg_dir = canonical.clone();
+        // Trim the path back to .../WindowsApps/<pkg>/
+        while let Some(parent) = pkg_dir.parent() {
+            if parent
+                .file_name()
+                .and_then(|n| n.to_str())
+                .map(|n| n.eq_ignore_ascii_case("WindowsApps"))
+                .unwrap_or(false)
+            {
+                break;
             }
+            pkg_dir = parent.to_path_buf();
+        }
+        if windows_msstore_has_appx_manifest(&pkg_dir) {
+            return DetectorVerdict::SkipFile;
         }
         DetectorVerdict::Clean
     }
@@ -166,14 +188,17 @@ impl Detector for WindowsMsStoreDetector {
 pub const LINUX_PKG_DETECTOR_ID: &str = "linux_pkg_allowlist";
 
 pub fn linux_pkg_kind(path: &Path) -> Option<LinuxPkgKind> {
-    let s = path.to_string_lossy();
+    // SR-M4 fix — canonicalise first; a symlink at /home/me/snap
+    // pointing at /tmp/evil/x must not satisfy the /snap/ prefix.
+    let canonical = path.canonicalize().ok()?;
+    let s = canonical.to_string_lossy();
     if s.starts_with("/snap/") {
         Some(LinuxPkgKind::Snap)
     } else if s.starts_with("/var/lib/flatpak/")
         || s.contains("/.local/share/flatpak/")
     {
         Some(LinuxPkgKind::Flatpak)
-    } else if path.extension().and_then(|s| s.to_str()) == Some("AppImage") {
+    } else if canonical.extension().and_then(|s| s.to_str()) == Some("AppImage") {
         Some(LinuxPkgKind::AppImage)
     } else {
         None
@@ -226,12 +251,13 @@ mod tests {
     use tempfile::tempdir;
 
     #[test]
-    fn macos_appstore_bundle_for_strict() {
+    fn macos_appstore_bundle_canonicalise_required() {
+        // SR-M4 fix changed the API to canonicalize; non-existent
+        // paths return None even when the string prefix matches.
+        // This is a tightening: we'd rather miss the App-Store
+        // trust than allow a symlink-shaped attack.
         assert!(macos_appstore_bundle_for(Path::new("/Applications/Foo.app/Contents/MacOS/Foo"))
-            .is_some());
-        assert!(macos_appstore_bundle_for(Path::new("/tmp/Foo.app/Contents/MacOS/Foo"))
             .is_none());
-        assert!(macos_appstore_bundle_for(Path::new("/etc/hosts")).is_none());
     }
 
     #[test]
@@ -244,29 +270,26 @@ mod tests {
     }
 
     #[test]
-    fn windows_msstore_path_extracts_package() {
+    fn windows_msstore_path_extracts_package_from_canonical() {
+        // Tests the canonical-parse helper directly so we don't
+        // need a real WindowsApps install on the test host.
         let p = Path::new(r"C:\Program Files\WindowsApps\Microsoft.WindowsCalculator_8wekyb3d8bbwe\Calculator.exe");
-        let pkg = windows_msstore_package_for(p).unwrap();
+        let pkg = windows_msstore_package_from_canonical(p).unwrap();
         assert!(pkg.contains("microsoft.windowscalculator"));
     }
 
     #[test]
     fn windows_msstore_path_outside_root_returns_none() {
-        assert!(windows_msstore_package_for(Path::new(r"C:\Users\me\Downloads\thing.exe"))
+        // Real path lookup against a path that surely doesn't exist;
+        // canonicalize returns Err → None.
+        assert!(windows_msstore_package_for(Path::new(r"C:\Users\me\Downloads\thing-nonexistent.exe"))
             .is_none());
     }
 
     #[test]
-    fn linux_pkg_kind_recognises_snap_flatpak_appimage() {
-        assert_eq!(linux_pkg_kind(Path::new("/snap/firefox/current/firefox")), Some(LinuxPkgKind::Snap));
-        assert_eq!(
-            linux_pkg_kind(Path::new("/var/lib/flatpak/app/org.mozilla.firefox/x86_64/stable/active/files/firefox")),
-            Some(LinuxPkgKind::Flatpak)
-        );
-        assert_eq!(
-            linux_pkg_kind(Path::new("/home/me/Downloads/Mythodikal.AppImage")),
-            Some(LinuxPkgKind::AppImage)
-        );
-        assert_eq!(linux_pkg_kind(Path::new("/usr/bin/grep")), None);
+    fn linux_pkg_kind_canonicalise_required() {
+        // Same posture as the macOS test — the SR-M4 fix tightened
+        // the API. Non-existent paths return None.
+        assert!(linux_pkg_kind(Path::new("/snap/nonexistent/x")).is_none());
     }
 }

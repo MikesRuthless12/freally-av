@@ -43,11 +43,11 @@
 //! than adding a SipHash dependency — SHA-256/BLAKE3 are uniformly
 //! distributed in every byte slice.
 
-use std::fs::{File, OpenOptions};
+use std::fs::File;
 use std::io::{self, BufWriter, Write};
 use std::path::Path;
 
-use memmap2::MmapMut;
+use memmap2::Mmap;
 
 const MAGIC: &[u8; 8] = b"MYTHCKOO";
 const VERSION: u32 = 1;
@@ -122,8 +122,21 @@ impl CuckooFilter {
         fingerprint_bits: u32,
         epoch_id: u64,
     ) -> Self {
-        let fingerprint_mask = (1u32 << fingerprint_bits) as u16 - 1;
-        let size = (bucket_count as usize) * (entries_per_bucket as usize);
+        // CR-C1 fix — `(1u32 << 16) as u16 - 1` underflows in debug
+        // and gets lucky in release; spell out the 16-bit case.
+        let fingerprint_mask: u16 = if fingerprint_bits >= 16 {
+            u16::MAX
+        } else if fingerprint_bits == 0 {
+            // Empty mask = degenerate filter; surface a usable
+            // single-bit minimum.
+            1
+        } else {
+            ((1u32 << fingerprint_bits) - 1) as u16
+        };
+        // CR-LOW-1 fix — checked_mul against absurd values.
+        let size = (bucket_count as usize)
+            .checked_mul(entries_per_bucket as usize)
+            .unwrap_or(0);
         Self {
             bucket_count,
             entries_per_bucket,
@@ -182,6 +195,9 @@ impl CuckooFilter {
         if digest.len() < 16 {
             return Err(CuckooError::DigestTooShort(digest.len()));
         }
+        if self.bucket_count == 0 {
+            return Err(CuckooError::InsertExhausted(0));
+        }
         let fp = self.fingerprint_from_digest(digest);
         let i1 = self.bucket1_from_digest(digest);
         let i2 = self.bucket2(i1, fp);
@@ -191,14 +207,24 @@ impl CuckooFilter {
             return Ok(());
         }
 
-        // Both buckets full — kick chain.
-        let mut current_bucket = if i1 % 2 == 0 { i1 } else { i2 };
+        // CR-H1 fix — bias the kick-chain start with real-ish
+        // randomness so colliding (i1,i2) pairs don't deadlock on
+        // the same victim. Seed from a process-wide RNG; for
+        // deterministic builds (e.g. CI), the runtime seed is fine
+        // because the filter content is content-addressed via the
+        // input digest stream anyway.
+        let mut current_bucket = {
+            use rand::Rng;
+            if rand::thread_rng().r#gen::<bool>() {
+                i1
+            } else {
+                i2
+            }
+        };
         let mut current_fp = fp;
-        // Deterministic-ish kick selection — pick entry index based
-        // on the rotating fingerprint so eviction order varies.
-        let mut kick_seed = current_fp as u32;
+        let mut kick_seed = current_fp as u32 ^ (rand::random::<u32>());
         for _ in 0..MAX_KICKS {
-            let entry = (kick_seed as u32) % self.entries_per_bucket;
+            let entry = (kick_seed) % self.entries_per_bucket;
             kick_seed = kick_seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
             let slot = self.slot(current_bucket, entry);
             let evicted = self.buckets[slot];
@@ -312,19 +338,24 @@ impl CuckooFilter {
         Ok(())
     }
 
+    /// SR-H2 fix — open read-only. The deletion path
+    /// (TASK-181 aging job) re-builds the filter in RAM and writes
+    /// a fresh artifact via [`Self::write_to`] rather than mutating
+    /// in place. Read-only mapping avoids needing write permission
+    /// on the artifact + closes off any concurrent-mutation footgun.
     pub fn open<P: AsRef<Path>>(
         path: P,
         expected_epoch: Option<u64>,
     ) -> Result<Self, CuckooError> {
-        let f = OpenOptions::new().read(true).write(true).open(path)?;
-        // SAFETY: file is a regular file we just opened; mmap_mut
-        // gives a writable mapping for in-place deletes.
-        let mmap = unsafe { MmapMut::map_mut(&f)? };
+        let f = File::open(path)?;
+        // SAFETY: we map a regular file we just opened read-only;
+        // the OS returns an immutable mapping.
+        let mmap = unsafe { Mmap::map(&f)? };
         Self::from_mmap_mut(mmap, expected_epoch)
     }
 
     fn from_mmap_mut(
-        mmap: MmapMut,
+        mmap: Mmap,
         expected_epoch: Option<u64>,
     ) -> Result<Self, CuckooError> {
         let bytes = &mmap[..];
@@ -352,6 +383,28 @@ impl CuckooFilter {
                 wanted_epoch: want,
             });
         }
+        // CR-C2 fix — reject malformed headers up front. The mask
+        // arithmetic in `bucket2` assumes `bucket_count` is a
+        // power of two ≥ 1; a corrupted file declaring 0 would
+        // wrap to u64::MAX and panic on the subsequent index.
+        // `fingerprint_bits` must also be in (0, 16] for the mask
+        // path to work after the CR-C1 fix.
+        if bucket_count == 0 || !bucket_count.is_power_of_two() {
+            return Err(CuckooError::LengthMismatch {
+                declared_buckets: bucket_count,
+                entries_per_bucket,
+                declared_payload_bytes: 0,
+                actual_payload_bytes: bytes.len() - HEADER_LEN,
+            });
+        }
+        if !(1..=16).contains(&fingerprint_bits) || entries_per_bucket == 0 {
+            return Err(CuckooError::LengthMismatch {
+                declared_buckets: bucket_count,
+                entries_per_bucket,
+                declared_payload_bytes: 0,
+                actual_payload_bytes: bytes.len() - HEADER_LEN,
+            });
+        }
         let declared_payload_bytes =
             bucket_count.saturating_mul(entries_per_bucket as u64).saturating_mul(2);
         let actual_payload_bytes = bytes.len() - HEADER_LEN;
@@ -373,7 +426,12 @@ impl CuckooFilter {
             buckets.push(u16::from_le_bytes(bytes[off..off + 2].try_into().expect("2 bytes")));
             off += 2;
         }
-        let fingerprint_mask = (1u32 << fingerprint_bits) as u16 - 1;
+        // Same CR-C1 derivation as `with_params`.
+        let fingerprint_mask: u16 = if fingerprint_bits >= 16 {
+            u16::MAX
+        } else {
+            ((1u32 << fingerprint_bits) - 1) as u16
+        };
         Ok(Self {
             bucket_count,
             entries_per_bucket,
@@ -463,6 +521,59 @@ mod tests {
         for i in 0u32..50 {
             assert!(!c.contains(&sha(i)).unwrap());
         }
+    }
+
+    #[test]
+    fn malformed_header_bucket_count_zero_rejected() {
+        let td = TempDir::new().unwrap();
+        let path = td.path().join("bad.cuckoo");
+        // Hand-write a header with bucket_count = 0.
+        let mut buf = Vec::new();
+        buf.extend_from_slice(b"MYTHCKOO");
+        buf.extend_from_slice(&1u32.to_le_bytes()); // version
+        buf.extend_from_slice(&0u32.to_le_bytes()); // reserved
+        buf.extend_from_slice(&1u64.to_le_bytes()); // epoch
+        buf.extend_from_slice(&0u64.to_le_bytes()); // bucket_count = 0 ← bad
+        buf.extend_from_slice(&4u32.to_le_bytes()); // entries_per_bucket
+        buf.extend_from_slice(&12u32.to_le_bytes()); // fingerprint_bits
+        buf.extend_from_slice(&0u64.to_le_bytes()); // n_items
+        buf.extend_from_slice(&0i64.to_le_bytes()); // built_at
+        buf.extend_from_slice(&[0u8; 16]); // reserved2
+        std::fs::write(&path, &buf).unwrap();
+        let err = CuckooFilter::open(&path, None).unwrap_err();
+        assert!(matches!(err, CuckooError::LengthMismatch { .. }));
+    }
+
+    #[test]
+    fn malformed_header_bad_fingerprint_bits_rejected() {
+        let td = TempDir::new().unwrap();
+        let path = td.path().join("bad2.cuckoo");
+        let mut buf = Vec::new();
+        buf.extend_from_slice(b"MYTHCKOO");
+        buf.extend_from_slice(&1u32.to_le_bytes());
+        buf.extend_from_slice(&0u32.to_le_bytes());
+        buf.extend_from_slice(&1u64.to_le_bytes());
+        buf.extend_from_slice(&8u64.to_le_bytes()); // bucket_count (pow2)
+        buf.extend_from_slice(&4u32.to_le_bytes());
+        buf.extend_from_slice(&99u32.to_le_bytes()); // fingerprint_bits = 99 ← bad
+        buf.extend_from_slice(&0u64.to_le_bytes());
+        buf.extend_from_slice(&0i64.to_le_bytes());
+        buf.extend_from_slice(&[0u8; 16]);
+        buf.extend(std::iter::repeat(0u8).take(8 * 4 * 2));
+        std::fs::write(&path, &buf).unwrap();
+        let err = CuckooFilter::open(&path, None).unwrap_err();
+        assert!(matches!(err, CuckooError::LengthMismatch { .. }));
+    }
+
+    #[test]
+    fn fingerprint_mask_works_at_16_bits() {
+        // CR-C1: ensure the 16-bit boundary doesn't overflow.
+        let c = CuckooFilter::with_params(16, 4, 16, 0);
+        let d = [0xAAu8; 32];
+        // Insert + contains must not panic with mask == u16::MAX.
+        let mut c2 = c;
+        c2.insert(&d).unwrap();
+        assert!(c2.contains(&d).unwrap());
     }
 
     #[test]
