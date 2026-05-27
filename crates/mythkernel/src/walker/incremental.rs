@@ -62,7 +62,13 @@ mod windows_impl {
 
     pub fn walk(root: &Path, opts: WalkOpts) -> crossbeam_channel::Receiver<WalkEvent> {
         let (tx, rx) = crossbeam_channel::unbounded();
-        let root_owned = root.to_path_buf();
+        // JournalSubscriber::open canonicalizes the root; the filter
+        // (path_is_under_root) compares against this `root` too, so
+        // they must agree. Without canonicalizing up-front, on Windows
+        // the verbatim `\\?\` prefix mismatch silently rejects every
+        // event. Same fix as NtfsWalker's windows_impl / macos_impl /
+        // linux_impl.
+        let root_owned = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
 
         std::thread::Builder::new()
             .name("mythkernel/incremental-walker".into())

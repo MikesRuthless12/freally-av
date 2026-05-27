@@ -164,7 +164,15 @@ mod windows_impl {
 
     pub fn walk(root: &Path, opts: WalkOpts) -> crossbeam_channel::Receiver<WalkEvent> {
         let (tx, rx) = crossbeam_channel::unbounded();
-        let root = root.to_path_buf();
+        // JournalSubscriber::open canonicalizes the root, which on
+        // Windows promotes paths to the verbatim `\\?\C:\...` form.
+        // If we then filter events through `path_is_under_root` with
+        // the *non*-canonical root (e.g. a tempdir path lacking the
+        // verbatim prefix), every event is rejected and the walker
+        // yields 0 files. Canonicalize up-front so the subscriber,
+        // the filter, and the PosixWalker fallback all see the same
+        // root form. (Same fix as macos_impl + linux_impl.)
+        let root = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
 
         std::thread::Builder::new()
             .name("mythkernel/ntfs-walker".into())
