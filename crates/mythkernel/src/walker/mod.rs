@@ -11,8 +11,10 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
+pub mod bomb_guard;
 pub mod dev_excludes;
 pub mod diff;
+pub mod hot_zones;
 pub mod incremental;
 pub mod loops;
 pub mod multi_root;

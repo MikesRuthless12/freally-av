@@ -14,6 +14,7 @@ pub mod eta;
 pub mod exclusions;
 pub mod findings;
 pub mod hasher;
+pub mod hasher_mmap;
 pub mod heuristics_scan;
 pub mod history;
 pub mod logging;
