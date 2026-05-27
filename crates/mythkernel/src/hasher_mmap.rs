@@ -119,7 +119,7 @@ mod tests {
     fn mmap_hash_matches_slice_hash() {
         let td = tempfile::tempdir().unwrap();
         let p = td.path().join("payload.bin");
-        let bytes: Vec<u8> = (0u32..10_000).flat_map(|i| (i as u32).to_le_bytes()).collect();
+        let bytes: Vec<u8> = (0u32..10_000).flat_map(|i| i.to_le_bytes()).collect();
         {
             let mut f = std::fs::File::create(&p).unwrap();
             f.write_all(&bytes).unwrap();

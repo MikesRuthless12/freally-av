@@ -102,11 +102,7 @@ impl AdaptiveThrottle {
     /// [`ForegroundState::Interactive`], the worker count is clamped
     /// to `max(1, base/2)` regardless of the CPU-driven policy. Idle
     /// foreground (or no signal) preserves the pure CPU policy.
-    pub fn policy_with_foreground(
-        max_workers: usize,
-        load: SysLoad,
-        fg: ForegroundState,
-    ) -> usize {
+    pub fn policy_with_foreground(max_workers: usize, load: SysLoad, fg: ForegroundState) -> usize {
         let cpu_choice = Self::policy(max_workers, load);
         match fg {
             ForegroundState::Idle => cpu_choice,

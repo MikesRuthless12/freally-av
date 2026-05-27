@@ -145,10 +145,7 @@ mod tests {
         agg.join().unwrap();
         // No producers were spawned; the aggregator's drop of event_tx
         // disconnects the channel.
-        assert!(matches!(
-            rx.recv(),
-            Err(crossbeam_channel::RecvError)
-        ));
+        assert!(matches!(rx.recv(), Err(crossbeam_channel::RecvError)));
     }
 
     #[test]

@@ -50,15 +50,23 @@ impl ExtensionPolicyMap {
         ] {
             m.inner.insert((*ext).into(), ExtensionPolicy::Archive);
         }
-        for ext in &["log", "tmp", "bak", "swp", "part", "crdownload", "download", "lock"] {
+        for ext in &[
+            "log",
+            "tmp",
+            "bak",
+            "swp",
+            "part",
+            "crdownload",
+            "download",
+            "lock",
+        ] {
             m.inner.insert((*ext).into(), ExtensionPolicy::Skip);
         }
         m
     }
 
     pub fn set(&mut self, ext: &str, policy: ExtensionPolicy) {
-        self.inner
-            .insert(ext.to_ascii_lowercase(), policy);
+        self.inner.insert(ext.to_ascii_lowercase(), policy);
     }
 
     /// Look up the policy for a file extension (no leading dot, any
@@ -90,14 +98,21 @@ mod tests {
     fn unconfigured_ext_defaults_to_full() {
         let m = ExtensionPolicyMap::new();
         assert_eq!(m.lookup("exe"), ExtensionPolicy::Full);
-        assert_eq!(m.lookup_path(&PathBuf::from("foo.exe")), ExtensionPolicy::Full);
+        assert_eq!(
+            m.lookup_path(&PathBuf::from("foo.exe")),
+            ExtensionPolicy::Full
+        );
     }
 
     #[test]
     fn defaults_classify_archives_and_skippables() {
         let m = ExtensionPolicyMap::with_defaults();
         assert_eq!(m.lookup("zip"), ExtensionPolicy::Archive);
-        assert_eq!(m.lookup("ZIP"), ExtensionPolicy::Archive, "case-insensitive");
+        assert_eq!(
+            m.lookup("ZIP"),
+            ExtensionPolicy::Archive,
+            "case-insensitive"
+        );
         assert_eq!(m.lookup("log"), ExtensionPolicy::Skip);
         assert_eq!(m.lookup("tmp"), ExtensionPolicy::Skip);
         assert_eq!(m.lookup("exe"), ExtensionPolicy::Full);

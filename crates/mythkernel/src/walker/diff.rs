@@ -180,10 +180,7 @@ pub fn record_clean(
 /// caller passes the current feed_epoch; the table tracks the epoch
 /// last used by `record_clean`. Mismatch → wipe `file_state` and
 /// update the tracker. Returns the number of rows deleted.
-pub fn invalidate_on_epoch_change(
-    conn: &Connection,
-    current_epoch: i64,
-) -> Result<usize, DbError> {
+pub fn invalidate_on_epoch_change(conn: &Connection, current_epoch: i64) -> Result<usize, DbError> {
     let stored: Option<i64> = conn
         .query_row(
             "SELECT current_epoch FROM feed_epoch_state WHERE rowid = 1",

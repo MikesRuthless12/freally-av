@@ -152,10 +152,8 @@ mod tests {
         );
         // `*` shouldn't cross `/`.
         assert!(
-            z.matches(&PathBuf::from(
-                "/home/user/Downloads/nested/setup.exe"
-            ))
-            .is_none()
+            z.matches(&PathBuf::from("/home/user/Downloads/nested/setup.exe"))
+                .is_none()
         );
     }
 
@@ -167,12 +165,13 @@ mod tests {
         let mut z = HotZones::new();
         z.add("/home/user/Documents/**/*.pdf", None);
         assert!(
-            z.matches(&PathBuf::from(
-                "/home/user/Documents/Tax/2025/return.pdf"
-            ))
-            .is_some()
+            z.matches(&PathBuf::from("/home/user/Documents/Tax/2025/return.pdf"))
+                .is_some()
         );
-        assert!(z.matches(&PathBuf::from("/home/user/Other/x.pdf")).is_none());
+        assert!(
+            z.matches(&PathBuf::from("/home/user/Other/x.pdf"))
+                .is_none()
+        );
     }
 
     #[test]

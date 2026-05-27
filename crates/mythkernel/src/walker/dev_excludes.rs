@@ -173,10 +173,14 @@ mod tests {
     fn bundled_set_is_non_empty_and_unique() {
         let pack = bundled_dev_excludes();
         assert!(pack.len() >= 10);
-        let mut sorted: Vec<&str> = pack.iter().copied().collect();
+        let mut sorted: Vec<&str> = pack.to_vec();
         sorted.sort();
         sorted.dedup();
-        assert_eq!(sorted.len(), pack.len(), "duplicate entries in bundled pack");
+        assert_eq!(
+            sorted.len(),
+            pack.len(),
+            "duplicate entries in bundled pack"
+        );
     }
 
     #[test]

@@ -79,11 +79,7 @@ pub fn classify(
 }
 
 /// Convenience wrapper: use real "now" from the system clock.
-pub fn classify_now(
-    path: &Path,
-    mtime_secs: i64,
-    stale_after_days: u64,
-) -> StaleTempVerdict {
+pub fn classify_now(path: &Path, mtime_secs: i64, stale_after_days: u64) -> StaleTempVerdict {
     let now = SystemTime::now()
         .duration_since(SystemTime::UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
@@ -102,7 +98,7 @@ fn has_exec_ext(path: &Path) -> bool {
         .and_then(|e| e.to_str())
         .map(|e| e.to_ascii_lowercase());
     match ext {
-        Some(e) => EXEC_EXTS.iter().any(|x| *x == e.as_str()),
+        Some(e) => EXEC_EXTS.contains(&e.as_str()),
         None => false,
     }
 }
@@ -141,12 +137,7 @@ mod tests {
 
     #[test]
     fn temp_exe_past_window_is_stale() {
-        let v = classify(
-            &PathBuf::from("/tmp/old.exe"),
-            DAY * 100,
-            DAY * 200,
-            30,
-        );
+        let v = classify(&PathBuf::from("/tmp/old.exe"), DAY * 100, DAY * 200, 30);
         assert!(v.is_temp_exec);
         assert_eq!(v.age_days, Some(100));
         assert!(v.is_stale);
@@ -178,24 +169,14 @@ mod tests {
 
     #[test]
     fn non_exec_in_temp_is_skipped() {
-        let v = classify(
-            &PathBuf::from("/tmp/document.txt"),
-            0,
-            DAY * 365,
-            30,
-        );
+        let v = classify(&PathBuf::from("/tmp/document.txt"), 0, DAY * 365, 30);
         assert!(!v.is_temp_exec);
     }
 
     #[test]
     fn negative_age_clamps_to_zero() {
         // mtime in the future (clock skew, restored from backup).
-        let v = classify(
-            &PathBuf::from("/tmp/x.exe"),
-            DAY * 1000,
-            DAY * 500,
-            30,
-        );
+        let v = classify(&PathBuf::from("/tmp/x.exe"), DAY * 1000, DAY * 500, 30);
         assert_eq!(v.age_days, Some(0));
         assert!(!v.is_stale);
     }

@@ -141,7 +141,11 @@ mod tests {
         let rep = entropy_heatmap(&buf, 1024);
         assert!(rep.windows.len() >= 6);
         // Mean should be roughly between 0 and 8; max should be near 8.
-        assert!(rep.max_bpb > 7.5, "max should be high-entropy, got {}", rep.max_bpb);
+        assert!(
+            rep.max_bpb > 7.5,
+            "max should be high-entropy, got {}",
+            rep.max_bpb
+        );
         assert!(rep.mean_bpb > 2.0 && rep.mean_bpb < 7.0);
         assert!(rep.high_window_fraction > 0.0);
     }

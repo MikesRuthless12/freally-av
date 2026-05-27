@@ -21,22 +21,16 @@
 
 use std::sync::atomic::{AtomicU64, Ordering};
 
-pub const DEFAULT_MAX_DECOMPRESSED_BYTES: u64 = 1 * 1024 * 1024 * 1024; // 1 GiB
+pub const DEFAULT_MAX_DECOMPRESSED_BYTES: u64 = 1024 * 1024 * 1024; // 1 GiB
 pub const DEFAULT_MAX_DEPTH: u32 = 8;
 pub const DEFAULT_MAX_EXPANSION_RATIO: u64 = 1000;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BombGuardError {
     /// Cumulative decompressed bytes exceeded the per-archive budget.
-    DecompressedTooLarge {
-        observed: u64,
-        limit: u64,
-    },
+    DecompressedTooLarge { observed: u64, limit: u64 },
     /// Nested archive depth exceeded the configured maximum.
-    DepthExceeded {
-        observed: u32,
-        limit: u32,
-    },
+    DepthExceeded { observed: u32, limit: u32 },
     /// A single entry's expansion ratio crossed the per-entry limit.
     /// (uncompressed_bytes / compressed_bytes > limit). Catches the
     /// classic zip-bomb where a small file decompresses to gigabytes.
@@ -80,11 +74,7 @@ impl BombGuard {
     /// error if any budget would be exceeded by this entry; the caller
     /// must abort expansion on Err. On Ok the cumulative counter is
     /// bumped.
-    pub fn observe_entry(
-        &self,
-        compressed: u64,
-        uncompressed: u64,
-    ) -> Result<(), BombGuardError> {
+    pub fn observe_entry(&self, compressed: u64, uncompressed: u64) -> Result<(), BombGuardError> {
         // Per-entry ratio check first — cheapest and catches the
         // classic zip bomb without needing the cumulative state.
         if compressed > 0 {
@@ -109,8 +99,7 @@ impl BombGuard {
                 limit: self.max_decompressed,
             });
         }
-        self.decompressed_total
-            .store(new_total, Ordering::Relaxed);
+        self.decompressed_total.store(new_total, Ordering::Relaxed);
         Ok(())
     }
 

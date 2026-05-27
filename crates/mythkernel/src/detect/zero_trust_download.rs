@@ -111,13 +111,7 @@ mod tests {
     fn marker_overrides_age() {
         // Old file but marker says untrusted → Untrusted wins.
         assert_eq!(
-            classify_with_marker(
-                &PathBuf::from("/x"),
-                1000,
-                1000 + 1_000_000,
-                24,
-                true,
-            ),
+            classify_with_marker(&PathBuf::from("/x"), 1000, 1000 + 1_000_000, 24, true,),
             DownloadOrigin::Untrusted
         );
         // Fresh file with marker also Untrusted (not Recent).
@@ -134,13 +128,7 @@ mod tests {
             DownloadOrigin::Recent
         );
         assert_eq!(
-            classify_with_marker(
-                &PathBuf::from("/x"),
-                1000,
-                1000 + 1_000_000,
-                24,
-                false,
-            ),
+            classify_with_marker(&PathBuf::from("/x"), 1000, 1000 + 1_000_000, 24, false,),
             DownloadOrigin::None
         );
     }
