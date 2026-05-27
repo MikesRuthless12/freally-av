@@ -257,10 +257,7 @@ pub fn is_microsoft_signer(identity: &str) -> bool {
     // Raw-string fast path: the platform extractor returned just the
     // org name without DN tokens. Matches both `Get-AuthenticodeSignature`
     // PowerShell output forms across Win 10/11.
-    if matches!(
-        s.as_str(),
-        "microsoft windows" | "microsoft corporation"
-    ) {
+    if matches!(s.as_str(), "microsoft windows" | "microsoft corporation") {
         return true;
     }
     // Token-anchored substring: the canonical org name must follow

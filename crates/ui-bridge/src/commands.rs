@@ -121,6 +121,17 @@ pub fn validate_restore_target(path: &Path) -> Result<(), PathPolicyError> {
 
 fn path_is_system(canonical: &Path) -> bool {
     let s = canonical.to_string_lossy();
+    // macOS: /var is a symlink to /private/var and user tempdirs live
+    // under /private/var/folders/. Without an exemption the canonical
+    // tempdir matches the /private denylist prefix and the user can't
+    // even scan their own scratch space. The same applies to /private/tmp
+    // (canonical form of /tmp). Both areas are user-writable by design.
+    #[cfg(target_os = "macos")]
+    {
+        if s.starts_with("/private/var/folders/") || s.starts_with("/private/tmp/") {
+            return false;
+        }
+    }
     let s_lower = s.to_lowercase();
     SYSTEM_PATH_DENYLIST.iter().any(|prefix| {
         let p = prefix.to_lowercase();
@@ -473,7 +484,7 @@ pub async fn scan_start(
             ));
         }
         let mut paths: Vec<PathBuf> = Vec::with_capacity(request.extra_paths.len() + 1);
-        if request.target_path.as_os_str().len() > 0 {
+        if !request.target_path.as_os_str().is_empty() {
             let canonical = validate_scan_target(&request.target_path).map_err(stringify)?;
             paths.push(canonical);
         }
@@ -663,21 +674,15 @@ async fn run_scan_event_forwarder(
                         // three-piece to X/Y presentation here.
                         ScanProgress::EnumerationComplete { .. } => "scan:enumeration_complete",
                         // Phase 6 — registry sweep events.
-                        ScanProgress::RegistryPhaseStarted { .. } => {
-                            "scan:registry_phase_started"
-                        }
+                        ScanProgress::RegistryPhaseStarted { .. } => "scan:registry_phase_started",
                         ScanProgress::RegistryProgress { .. } => "scan:registry_progress",
                         ScanProgress::RegistryPhaseComplete { .. } => {
                             "scan:registry_phase_complete"
                         }
                         // Phase 6 — process sweep events.
-                        ScanProgress::ProcessPhaseStarted { .. } => {
-                            "scan:process_phase_started"
-                        }
+                        ScanProgress::ProcessPhaseStarted { .. } => "scan:process_phase_started",
                         ScanProgress::ProcessProgress { .. } => "scan:process_progress",
-                        ScanProgress::ProcessPhaseComplete { .. } => {
-                            "scan:process_phase_complete"
-                        }
+                        ScanProgress::ProcessPhaseComplete { .. } => "scan:process_phase_complete",
                         ScanProgress::ArchiveEntry { .. } => "scan:archive_entry",
                         ScanProgress::HeuristicPhaseStarted { .. } => {
                             "scan:heuristic_phase_started"
@@ -851,9 +856,7 @@ pub async fn history_clear(state: State<'_, AppState>) -> Result<usize, String> 
     let _ = conn
         .execute("DELETE FROM findings", [])
         .map_err(stringify)?;
-    let scans_deleted = conn
-        .execute("DELETE FROM scans", [])
-        .map_err(stringify)?;
+    let scans_deleted = conn.execute("DELETE FROM scans", []).map_err(stringify)?;
     // Sec-clean: also wipe the verdict_cache so the next scan does a
     // fresh hash + pipeline pass on every file (the user clearing
     // history typically wants a fully clean slate).
@@ -1851,27 +1854,31 @@ pub fn build_pipeline_from_feeds(data_dir: &std::path::Path) -> DetectionPipelin
     // scan cost per file for a no-op.
     let yara_dir = feeds_dir.join("yara_rules");
     if let Some(yara) = mythkernel::detect::yara_engine::YaraDetector::from_dir(&yara_dir) {
-        tracing::info!(
-            yara_rules = yara.rule_count(),
-            "loaded YARA rule pack"
-        );
+        tracing::info!(yara_rules = yara.rule_count(), "loaded YARA rule pack");
         detectors.push(Box::new(yara));
     }
 
-    let nsrl_path = feeds_dir.join("nsrl_sha256.bin");
-    if nsrl_path.exists() {
+    // TASK-183 — load the per-OS NSRL slice when present; fall back
+    // to the union .bin when the per-OS variants aren't downloaded.
+    // Multiple slices may be loaded as parallel detector instances
+    // (host-OS slice + the cross-platform `_other` slice).
+    for nsrl_path in mythkernel::detect::goodware_allowlist::resolve_nsrl_slice_paths(&feeds_dir) {
         match GoodwareAllowlistDetector::open(&nsrl_path) {
             Ok(d) => {
                 tracing::info!(
                     feed = "nsrl",
                     path = %nsrl_path.display(),
                     count = d.loaded_count(),
-                    "loaded NSRL goodware allowlist"
+                    "loaded NSRL goodware allowlist slice"
                 );
                 detectors.push(Box::new(d.with_hash_kind(HashKind::Sha256)));
             }
             Err(err) => {
-                tracing::warn!(error = %err, path = %nsrl_path.display(), "NSRL load failed")
+                tracing::warn!(
+                    error = %err,
+                    path = %nsrl_path.display(),
+                    "NSRL slice load failed"
+                );
             }
         }
     }

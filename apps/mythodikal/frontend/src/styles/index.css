@@ -24,3 +24,103 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
+
+/* ------------------------------------------------------------------
+ * Modal overlay (TASK-062 — macOS UI parity polish).
+ *
+ * `<Modal />` in `src/components/Modal.tsx` picks between `.modal--center`
+ * (Windows / Linux: centered fade+scale) and `.modal--sheet` (macOS:
+ * top-anchored slide-down with HIG-style spring easing).
+ * ------------------------------------------------------------------ */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  z-index: 50;
+  animation: modal-backdrop-fade 0.15s ease-out;
+}
+
+.modal {
+  background-color: var(--myth-bg-1);
+  border: 1px solid var(--myth-line);
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.4);
+  min-width: 320px;
+  max-width: 90vw;
+  display: flex;
+  flex-direction: column;
+}
+
+.modal__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--myth-line);
+}
+
+.modal__title {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--myth-text-hi);
+  margin: 0;
+}
+
+.modal__close {
+  background: none;
+  border: 0;
+  color: var(--myth-text-md);
+  cursor: pointer;
+  font-size: 1.1rem;
+  padding: 0.25rem 0.5rem;
+  line-height: 1;
+  border-radius: 0.25rem;
+}
+
+.modal__close:hover {
+  color: var(--myth-text-hi);
+  background-color: var(--myth-bg-2, rgba(255, 255, 255, 0.05));
+}
+
+.modal__body {
+  padding: 1rem;
+  overflow-y: auto;
+}
+
+/* Default (Windows / Linux) — centered, fade+scale-in. */
+.modal--center {
+  margin: auto;
+  border-radius: 0.5rem;
+  animation: modal-fade-scale-in 0.15s ease-out;
+}
+
+/* macOS — sheet: slides down from the top edge of the window,
+ * anchored at the top, with a spring-cubic-bezier easing per Apple's
+ * HIG sheet specification. Top corners are square because the sheet
+ * is conceptually attached to the title bar. */
+.modal--sheet {
+  margin-left: auto;
+  margin-right: auto;
+  margin-top: 0;
+  border-top: 0;
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+  border-bottom-left-radius: 0.5rem;
+  border-bottom-right-radius: 0.5rem;
+  animation: modal-sheet-slide-down 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes modal-backdrop-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes modal-fade-scale-in {
+  from { opacity: 0; transform: scale(0.95); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes modal-sheet-slide-down {
+  from { opacity: 0; transform: translateY(-30px); }
+  to { opacity: 1; transform: translateY(0); }
+}

@@ -135,6 +135,26 @@ pub async fn run(
                     last_completed = Some(event);
                     break;
                 }
+                // Phase-6-staged scan phases (registry / process / archive /
+                // heuristic). The engine emits them and ui-bridge dispatches
+                // them as named Tauri topics for the desktop UI; the CLI
+                // mirrors them on stdout in JSON mode so machine consumers
+                // see the full event stream, and ignores them in Text mode
+                // where no terse human-readable mapping is defined yet.
+                ScanProgress::RegistryPhaseStarted { .. }
+                | ScanProgress::RegistryProgress { .. }
+                | ScanProgress::RegistryPhaseComplete { .. }
+                | ScanProgress::ProcessPhaseStarted { .. }
+                | ScanProgress::ProcessProgress { .. }
+                | ScanProgress::ProcessPhaseComplete { .. }
+                | ScanProgress::ArchiveEntry { .. }
+                | ScanProgress::HeuristicPhaseStarted { .. }
+                | ScanProgress::HeuristicProgress { .. }
+                | ScanProgress::HeuristicPhaseComplete { .. } => {
+                    if matches!(format, Format::Json) {
+                        writeln!(stdout, "{}", serde_json::to_string(&event)?)?;
+                    }
+                }
             },
             Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
             Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {

@@ -1,0 +1,32 @@
+MYTHODIKAL ANTI-VIRUS — RUST CRATE ATTRIBUTIONS
+================================================
+
+This file lists every Rust crate compiled into Mythodikal Anti-Virus,
+together with its version, license, and (where the upstream license
+requires) the full text of that license. Generated automatically by
+`cargo about generate about.hbs` per `about.toml`. Do not hand-edit;
+regenerate at release time.
+
+Each section below names a license, the third-party crates that
+ship under it, and the full license text. Crates whose license is
+already captured by an earlier section appear under that section's
+"Used by" list, not separately.
+
+================================================================
+Full license texts
+================================================================
+{{#each licenses}}
+
+----------------------------------------------------------------
+{{{name}}}  ({{{id}}})
+Used by:
+{{#each used_by}}    - {{crate.name}} {{crate.version}}
+{{/each}}
+----------------------------------------------------------------
+
+{{{text}}}
+{{/each}}
+
+================================================================
+End of Rust crate attributions.
+================================================================

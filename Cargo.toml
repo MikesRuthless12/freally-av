@@ -61,7 +61,7 @@ zip = { version = "4", default-features = false, features = ["deflate"] }
 # `yara-x` is the official Rust port (VirusTotal). Powers the
 # pattern-based detector with public rule packs like
 # Neo23x0/signature-base.
-yara-x = "0.10"
+yara-x = "1.16"
 
 # TASK-050 / TASK-051 — futures::Stream + futures::channel::mpsc back the
 # Windows USN journal subscriber pattern vendored from sister project

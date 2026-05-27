@@ -54,8 +54,13 @@ jobs:
           - { os: ubuntu-22.04, label: linux-x86_64, rust_target: x86_64-unknown-linux-gnu, args: "" }
           - { os: ubuntu-22.04-arm, label: linux-aarch64, rust_target: aarch64-unknown-linux-gnu, args: "" }
           - { os: windows-latest, label: windows-x86_64, rust_target: x86_64-pc-windows-msvc, args: "" }
-          - { os: macos-14, label: macos-aarch64, rust_target: aarch64-apple-darwin, args: "--target aarch64-apple-darwin" }
-          - { os: macos-13, label: macos-x86_64, rust_target: x86_64-apple-darwin, args: "--target x86_64-apple-darwin" }
+          # TASK-059: single universal-apple-darwin build instead of two per-arch
+          # builds. `tauri build --target universal-apple-darwin` invokes lipo to
+          # fuse the aarch64 + x86_64 binaries into one Mach-O fat file, so the
+          # resulting .app / .dmg runs on every supported Mac without per-arch
+          # downloads. Hosted on macos-14 (Apple Silicon) because it cross-compiles
+          # x86_64 cleanly and is the faster of the two runner tiers.
+          - { os: macos-14, label: macos-universal, rust_target: universal-apple-darwin, args: "--target universal-apple-darwin" }
     steps:
       # Sec-review H1: every third-party action is pinned to a commit
       # SHA. Pinning the `v4` / `v0` tag would let the action owner
@@ -95,10 +100,12 @@ jobs:
       - name: Setup Rust
         # `dtolnay/rust-toolchain` doesn't tag releases; pin to a SHA
         # known to support the `toolchain:` + `targets:` inputs.
+        # For the macos-universal entry we install both Apple targets so
+        # `cargo build --target universal-apple-darwin` can lipo them.
         uses: dtolnay/rust-toolchain@b3b07ba8b418998c39fb20f53e8b695cdcc8de1b # 2025-08 stable
         with:
           toolchain: 1.94.0
-          targets: ${{ matrix.target.rust_target }}
+          targets: ${{ matrix.target.rust_target == 'universal-apple-darwin' && 'aarch64-apple-darwin,x86_64-apple-darwin' || matrix.target.rust_target }}
 
       - name: Cache cargo
         uses: actions/cache@1bd1e32a3bdc45362d1e726936510720a7c30a57 # v4.2.0
@@ -199,9 +206,12 @@ jobs:
           ALLOWED_PLATFORMS = {
               "linux-x86_64", "linux-aarch64",
               "windows-x86_64",
-              "darwin-aarch64", "darwin-x86_64",
-              # Tauri also accepts `macos-` aliases; accept both spellings.
-              "macos-aarch64", "macos-x86_64",
+              # TASK-059: macOS ships as a single universal binary. The
+              # per-arch keys are intentionally NOT in the allowlist — the
+              # release pipeline does not produce per-arch bundles anymore.
+              # Tauri also accepts the `macos-` alias spelling.
+              "darwin-universal",
+              "macos-universal",
           }
 
           tag = os.environ["TAG"]

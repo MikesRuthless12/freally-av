@@ -322,8 +322,7 @@ impl ScanEngine {
         // enumerate millions more. Trade-off: memory grows with
         // pending-file count. At ~200 B per `(PathBuf, u64, i64)`,
         // 1 M files ≈ 200 MB; tolerable for a desktop AV scanner.
-        let (work_tx, work_rx) =
-            crossbeam_channel::unbounded::<(std::path::PathBuf, u64, i64)>();
+        let (work_tx, work_rx) = crossbeam_channel::unbounded::<(std::path::PathBuf, u64, i64)>();
         let files_running = Arc::new(AtomicU64::new(0));
         let bytes_running = Arc::new(AtomicU64::new(0));
         let enum_complete = Arc::new(AtomicBool::new(false));
@@ -470,8 +469,7 @@ impl ScanEngine {
                                 {
                                     tracing::warn!(
                                         stalled_for_secs = last_event_at.elapsed().as_secs(),
-                                        files_enumerated =
-                                            files_running_p.load(Ordering::Relaxed),
+                                        files_enumerated = files_running_p.load(Ordering::Relaxed),
                                         "walker stalled — finalizing enumeration"
                                     );
                                     break;
@@ -601,54 +599,54 @@ impl ScanEngine {
         // that logs once every 5 s isn't expensive, but the WARN-level
         // logs on a healthy big-file scan (where workers legitimately
         // sit on a slow hash for >5 s) are noise in production logs.
-        let heartbeat_enabled = cfg!(debug_assertions)
-            || std::env::var_os("MYTHODIKAL_HEARTBEAT").is_some();
+        let heartbeat_enabled =
+            cfg!(debug_assertions) || std::env::var_os("MYTHODIKAL_HEARTBEAT").is_some();
         let heartbeat_visited = files_visited_atom.clone();
         let heartbeat_hashed = files_hashed_atom.clone();
         let heartbeat_running = files_running.clone();
         let heartbeat_alive = scan_alive.clone();
         if heartbeat_enabled {
-        std::thread::Builder::new()
-            .name("mythkernel/scan-heartbeat".into())
-            .spawn(move || {
-                let mut prev_visited = 0i64;
-                let mut prev_hashed = 0i64;
-                let mut stall_ticks = 0u32;
-                loop {
-                    std::thread::sleep(std::time::Duration::from_secs(5));
-                    if !heartbeat_alive.load(Ordering::Relaxed) {
-                        return;
+            std::thread::Builder::new()
+                .name("mythkernel/scan-heartbeat".into())
+                .spawn(move || {
+                    let mut prev_visited = 0i64;
+                    let mut prev_hashed = 0i64;
+                    let mut stall_ticks = 0u32;
+                    loop {
+                        std::thread::sleep(std::time::Duration::from_secs(5));
+                        if !heartbeat_alive.load(Ordering::Relaxed) {
+                            return;
+                        }
+                        let v = heartbeat_visited.load(Ordering::Relaxed);
+                        let h = heartbeat_hashed.load(Ordering::Relaxed);
+                        let r = heartbeat_running.load(Ordering::Relaxed);
+                        let dv = v - prev_visited;
+                        let dh = h - prev_hashed;
+                        if dv == 0 && dh == 0 {
+                            stall_ticks += 1;
+                            tracing::warn!(
+                                files_visited = v,
+                                files_hashed = h,
+                                files_enumerated = r,
+                                stall_ticks,
+                                "scan heartbeat: NO PROGRESS in last 5 s"
+                            );
+                        } else {
+                            stall_ticks = 0;
+                            tracing::info!(
+                                files_visited = v,
+                                files_hashed = h,
+                                files_enumerated = r,
+                                delta_visited = dv,
+                                delta_hashed = dh,
+                                "scan heartbeat"
+                            );
+                        }
+                        prev_visited = v;
+                        prev_hashed = h;
                     }
-                    let v = heartbeat_visited.load(Ordering::Relaxed);
-                    let h = heartbeat_hashed.load(Ordering::Relaxed);
-                    let r = heartbeat_running.load(Ordering::Relaxed);
-                    let dv = v - prev_visited;
-                    let dh = h - prev_hashed;
-                    if dv == 0 && dh == 0 {
-                        stall_ticks += 1;
-                        tracing::warn!(
-                            files_visited = v,
-                            files_hashed = h,
-                            files_enumerated = r,
-                            stall_ticks,
-                            "scan heartbeat: NO PROGRESS in last 5 s"
-                        );
-                    } else {
-                        stall_ticks = 0;
-                        tracing::info!(
-                            files_visited = v,
-                            files_hashed = h,
-                            files_enumerated = r,
-                            delta_visited = dv,
-                            delta_hashed = dh,
-                            "scan heartbeat"
-                        );
-                    }
-                    prev_visited = v;
-                    prev_hashed = h;
-                }
-            })
-            .expect("spawn scan-heartbeat");
+                })
+                .expect("spawn scan-heartbeat");
         } // end heartbeat_enabled gate
         let foreground = opts.foreground;
         let compute_sha256 = opts.compute_sha256;
@@ -842,8 +840,7 @@ impl ScanEngine {
                     &cancel_flag_for_finalize,
                 );
                 if flagged > 0 {
-                    findings_count_for_finalize
-                        .fetch_add(flagged as i64, Ordering::Relaxed);
+                    findings_count_for_finalize.fetch_add(flagged as i64, Ordering::Relaxed);
                 }
                 tracing::info!(items, flagged, "heuristics post-pass done");
             }
@@ -1001,6 +998,16 @@ struct WorkerCtx {
 /// each iteration and resumes from the exact same point in the queue
 /// when the flag clears. Cancel still exits the worker permanently.
 fn run_worker_loop(ctx: &WorkerCtx) {
+    // Pause-interrupt retry slot: when `process_one_file` reports the
+    // hash was interrupted mid-flight by a pause-induced abort, the
+    // file's counters were rolled back and the file itself is held
+    // here. On the next iteration (after the pause-wait below blocks
+    // until resume), the worker re-processes this file from scratch
+    // before pulling the next item off `work_rx`. Without this the
+    // pause/resume cycle silently drops every file that was mid-hash
+    // when pause fired — breaking the `pause_then_resume_completes_all_files`
+    // invariant and, in production, losing user-visible scan coverage.
+    let mut pending_retry: Option<(std::path::PathBuf, u64, i64)> = None;
     loop {
         if ctx.cancel_flag.load(Ordering::Relaxed) {
             return;
@@ -1015,32 +1022,54 @@ fn run_worker_loop(ctx: &WorkerCtx) {
             }
             std::thread::sleep(std::time::Duration::from_millis(50));
         }
-        let (path, size, mtime) = match ctx
-            .work_rx
-            .recv_timeout(std::time::Duration::from_millis(100))
-        {
-            Ok(item) => item,
-            Err(crossbeam_channel::RecvTimeoutError::Timeout) => continue,
-            Err(crossbeam_channel::RecvTimeoutError::Disconnected) => return,
+        // Retry the previously-interrupted file before pulling a fresh
+        // one from the queue. Keeps the in-flight file count bounded
+        // (one per worker) and preserves FIFO-ish processing.
+        let (path, size, mtime) = if let Some(retry_item) = pending_retry.take() {
+            retry_item
+        } else {
+            match ctx
+                .work_rx
+                .recv_timeout(std::time::Duration::from_millis(100))
+            {
+                Ok(item) => item,
+                Err(crossbeam_channel::RecvTimeoutError::Timeout) => continue,
+                Err(crossbeam_channel::RecvTimeoutError::Disconnected) => return,
+            }
         };
-        // Interrupted mid-hash → re-loop. The pause-wait above will
-        // catch a pause; a cancel will exit on the next iteration's
-        // top check. The Interrupted arm in `process_one_file` rolled
-        // back the visited counters so the partial file isn't counted.
-        process_one_file(ctx, path, size, mtime);
+        // Snapshot path/size for retry-on-interrupt; process_one_file
+        // moves the path so we need a clone to stash if the call signals
+        // retry. The clone is cheap (one PathBuf alloc per file at most
+        // and only on the interrupt path).
+        let path_for_retry = path.clone();
+        if process_one_file(ctx, path, size, mtime) == ProcessOutcome::Interrupted {
+            pending_retry = Some((path_for_retry, size, mtime));
+        }
     }
+}
+
+/// Whether a single-file processing attempt succeeded or was aborted
+/// mid-hash by a pause-induced abort. The worker uses this to decide
+/// whether to retry the same file after the pause clears.
+#[derive(Debug, PartialEq, Eq)]
+enum ProcessOutcome {
+    Done,
+    Interrupted,
 }
 
 /// Single-file pipeline run. All of the per-file work — verdict
 /// cache lookup, MS-signed fast-path, exclusions, hash, pipeline
 /// evaluation, file_mutation enqueue, processed_paths bookkeeping —
-/// happens here. Returns whether the caller should stop the worker.
+/// happens here. Returns `ProcessOutcome::Interrupted` when the hash
+/// was aborted mid-flight by a pause-induced abort (so the worker can
+/// retry the same file after pause clears); `ProcessOutcome::Done`
+/// for every other terminal state (success, skipped, errored, cached).
 fn process_one_file(
     ctx: &WorkerCtx,
     path: std::path::PathBuf,
     size: u64,
     mtime: i64,
-) {
+) -> ProcessOutcome {
     let path_str_owned = path.to_string_lossy().into_owned();
 
     // 1. Skip already-processed (resume carry or another worker
@@ -1048,7 +1077,7 @@ fn process_one_file(
     if let Ok(paths) = ctx.processed_paths.lock()
         && paths.contains(&path_str_owned)
     {
-        return;
+        return ProcessOutcome::Done;
     }
 
     // Bump the visited counters before any work — matches the
@@ -1106,7 +1135,7 @@ fn process_one_file(
     };
     if path_excluded.is_some() {
         mark_processed(&ctx.processed_paths, &path_str_owned);
-        return;
+        return ProcessOutcome::Done;
     }
 
     // 4. Perf phase 4 — Microsoft-signed system file fast-path.
@@ -1136,7 +1165,7 @@ fn process_one_file(
             );
         }
         mark_processed(&ctx.processed_paths, &path_str_owned);
-        return;
+        return ProcessOutcome::Done;
     }
 
     // 5. Perf phase 3 — verdict cache lookup. Skip hash + pipeline
@@ -1214,7 +1243,7 @@ fn process_one_file(
             );
         }
         mark_processed(&ctx.processed_paths, &path_str_owned);
-        return;
+        return ProcessOutcome::Done;
     }
 
     // 6. Perf phase 2 — skip per-file throttle sleep on foreground
@@ -1252,7 +1281,7 @@ fn process_one_file(
                 const CRC32_SKIP_SENTINEL: &str = "<crc32-skip>";
                 emit_file_event(ctx, &path, CRC32_SKIP_SENTINEL, size);
                 mark_processed(&ctx.processed_paths, &path_str_owned);
-                return;
+                return ProcessOutcome::Done;
             }
             Ok(MaybeHashResult::Hashed { result, .. }) => Ok(result),
             Err(e) => Err(e),
@@ -1372,11 +1401,14 @@ fn process_one_file(
         }
         Err(err) if err.kind() == std::io::ErrorKind::Interrupted => {
             // Pause-triggered hash abort. Roll back the visited
-            // counters so the partial file isn't double-counted and
-            // re-loop — the worker's top-of-loop pause-wait will park
-            // the thread until Resume.
+            // counters so the partial file isn't double-counted, then
+            // signal the caller to retry this file after the pause
+            // clears. The caller (run_worker_loop) stashes the path
+            // in `pending_retry` and re-processes from the top of the
+            // next iteration once `pause_flag` flips back off.
             ctx.files_visited.fetch_sub(1, Ordering::Relaxed);
             ctx.bytes_visited.fetch_sub(size as i64, Ordering::Relaxed);
+            return ProcessOutcome::Interrupted;
         }
         Err(err) => {
             let _ = ctx.tx.send(ScanProgress::Error {
@@ -1385,6 +1417,7 @@ fn process_one_file(
             });
         }
     }
+    ProcessOutcome::Done
 }
 
 /// Extract the signer identity for `path`, going through the

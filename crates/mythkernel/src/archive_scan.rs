@@ -24,8 +24,8 @@
 
 use std::io::Read;
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
 
 use tokio::sync::broadcast;
 use zip::ZipArchive;
@@ -40,8 +40,7 @@ const MAX_EXTRACT_BYTES_PER_ENTRY: u64 = 512 * 1024 * 1024; // 512 MiB
 /// "current entry" updated a few times a second. The cumulative
 /// counter still increments per-entry; we just drop intermediate
 /// path-display events between throttle ticks.
-const ARCHIVE_EMIT_THROTTLE: std::time::Duration =
-    std::time::Duration::from_millis(100);
+const ARCHIVE_EMIT_THROTTLE: std::time::Duration = std::time::Duration::from_millis(100);
 
 /// Returns `true` when the path's extension matches an archive
 /// container we can open. Lower-cased extension comparison.

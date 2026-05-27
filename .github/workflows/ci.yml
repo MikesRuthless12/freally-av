@@ -104,6 +104,11 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
+      # rust-toolchain.toml pins to 1.94.0; install it explicitly so the
+      # cargo-deny action doesn't fail with "override toolchain not installed".
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.94.0
       - uses: EmbarkStudios/cargo-deny-action@v2
         with:
           command: check

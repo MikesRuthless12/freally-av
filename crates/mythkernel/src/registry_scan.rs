@@ -13,8 +13,13 @@
 //! compiles cross-platform — Linux/macOS callers just skip the
 //! registry phase.
 
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+// `Ordering` is only consumed inside the Windows-gated scanner body
+// (cancel_flag.load(Ordering::Relaxed) calls). Off-Windows the whole
+// scanner is a no-op stub, so the import would be flagged as unused.
+#[cfg(windows)]
+use std::sync::atomic::Ordering;
 
 use tokio::sync::broadcast;
 
@@ -37,49 +42,165 @@ use crate::scan::ScanProgress;
 #[cfg(windows)]
 const PERSISTENCE_KEYS: &[(&str, &str, bool)] = &[
     // Per-user / per-machine Run / RunOnce (classic autoruns).
-    ("HKLM", r"Software\Microsoft\Windows\CurrentVersion\Run", false),
-    ("HKLM", r"Software\Microsoft\Windows\CurrentVersion\RunOnce", false),
-    ("HKLM", r"Software\Microsoft\Windows\CurrentVersion\RunOnceEx", false),
-    ("HKLM", r"Software\Microsoft\Windows\CurrentVersion\RunServices", false),
-    ("HKLM", r"Software\Microsoft\Windows\CurrentVersion\RunServicesOnce", false),
-    ("HKCU", r"Software\Microsoft\Windows\CurrentVersion\Run", false),
-    ("HKCU", r"Software\Microsoft\Windows\CurrentVersion\RunOnce", false),
-    ("HKCU", r"Software\Microsoft\Windows\CurrentVersion\RunOnceEx", false),
+    (
+        "HKLM",
+        r"Software\Microsoft\Windows\CurrentVersion\Run",
+        false,
+    ),
+    (
+        "HKLM",
+        r"Software\Microsoft\Windows\CurrentVersion\RunOnce",
+        false,
+    ),
+    (
+        "HKLM",
+        r"Software\Microsoft\Windows\CurrentVersion\RunOnceEx",
+        false,
+    ),
+    (
+        "HKLM",
+        r"Software\Microsoft\Windows\CurrentVersion\RunServices",
+        false,
+    ),
+    (
+        "HKLM",
+        r"Software\Microsoft\Windows\CurrentVersion\RunServicesOnce",
+        false,
+    ),
+    (
+        "HKCU",
+        r"Software\Microsoft\Windows\CurrentVersion\Run",
+        false,
+    ),
+    (
+        "HKCU",
+        r"Software\Microsoft\Windows\CurrentVersion\RunOnce",
+        false,
+    ),
+    (
+        "HKCU",
+        r"Software\Microsoft\Windows\CurrentVersion\RunOnceEx",
+        false,
+    ),
     // Wow6432Node mirrors for 32-bit apps on 64-bit Windows.
-    ("HKLM", r"Software\Wow6432Node\Microsoft\Windows\CurrentVersion\Run", false),
-    ("HKLM", r"Software\Wow6432Node\Microsoft\Windows\CurrentVersion\RunOnce", false),
+    (
+        "HKLM",
+        r"Software\Wow6432Node\Microsoft\Windows\CurrentVersion\Run",
+        false,
+    ),
+    (
+        "HKLM",
+        r"Software\Wow6432Node\Microsoft\Windows\CurrentVersion\RunOnce",
+        false,
+    ),
     // Winlogon + Userinit + Shell + AppInit_DLLs.
-    ("HKLM", r"Software\Microsoft\Windows NT\CurrentVersion\Winlogon", false),
-    ("HKLM", r"Software\Microsoft\Windows NT\CurrentVersion\Windows", false),
-    ("HKCU", r"Software\Microsoft\Windows NT\CurrentVersion\Windows", false),
+    (
+        "HKLM",
+        r"Software\Microsoft\Windows NT\CurrentVersion\Winlogon",
+        false,
+    ),
+    (
+        "HKLM",
+        r"Software\Microsoft\Windows NT\CurrentVersion\Windows",
+        false,
+    ),
+    (
+        "HKCU",
+        r"Software\Microsoft\Windows NT\CurrentVersion\Windows",
+        false,
+    ),
     // Image File Execution Options — debugger redirect hijack. One
     // subkey per debugged exe; recurse to count every Debugger / etc.
-    ("HKLM", r"Software\Microsoft\Windows NT\CurrentVersion\Image File Execution Options", true),
-    ("HKLM", r"Software\Wow6432Node\Microsoft\Windows NT\CurrentVersion\Image File Execution Options", true),
+    (
+        "HKLM",
+        r"Software\Microsoft\Windows NT\CurrentVersion\Image File Execution Options",
+        true,
+    ),
+    (
+        "HKLM",
+        r"Software\Wow6432Node\Microsoft\Windows NT\CurrentVersion\Image File Execution Options",
+        true,
+    ),
     // Services — one subkey per service, ImagePath/Start/etc. each.
     ("HKLM", r"System\CurrentControlSet\Services", true),
     // Shell / Explorer extension hooks.
-    ("HKLM", r"Software\Microsoft\Windows\CurrentVersion\Explorer\Browser Helper Objects", true),
-    ("HKLM", r"Software\Microsoft\Windows\CurrentVersion\Explorer\ShellExecuteHooks", false),
-    ("HKLM", r"Software\Microsoft\Windows\CurrentVersion\Explorer\ShellIconOverlayIdentifiers", true),
-    ("HKLM", r"Software\Microsoft\Windows\CurrentVersion\Explorer\SharedTaskScheduler", false),
+    (
+        "HKLM",
+        r"Software\Microsoft\Windows\CurrentVersion\Explorer\Browser Helper Objects",
+        true,
+    ),
+    (
+        "HKLM",
+        r"Software\Microsoft\Windows\CurrentVersion\Explorer\ShellExecuteHooks",
+        false,
+    ),
+    (
+        "HKLM",
+        r"Software\Microsoft\Windows\CurrentVersion\Explorer\ShellIconOverlayIdentifiers",
+        true,
+    ),
+    (
+        "HKLM",
+        r"Software\Microsoft\Windows\CurrentVersion\Explorer\SharedTaskScheduler",
+        false,
+    ),
     // Active Setup — per-user-first-login dropper site.
-    ("HKLM", r"Software\Microsoft\Active Setup\Installed Components", true),
+    (
+        "HKLM",
+        r"Software\Microsoft\Active Setup\Installed Components",
+        true,
+    ),
     // App Paths — alternate exe lookup hijack.
-    ("HKLM", r"Software\Microsoft\Windows\CurrentVersion\App Paths", true),
+    (
+        "HKLM",
+        r"Software\Microsoft\Windows\CurrentVersion\App Paths",
+        true,
+    ),
     // Boot-time execution.
-    ("HKLM", r"System\CurrentControlSet\Control\Session Manager", false),
-    ("HKLM", r"System\CurrentControlSet\Control\Session Manager\KnownDLLs", false),
+    (
+        "HKLM",
+        r"System\CurrentControlSet\Control\Session Manager",
+        false,
+    ),
+    (
+        "HKLM",
+        r"System\CurrentControlSet\Control\Session Manager\KnownDLLs",
+        false,
+    ),
     // Drivers32 — legacy WAVE/MIDI driver autoruns.
-    ("HKLM", r"Software\Microsoft\Windows NT\CurrentVersion\Drivers32", false),
+    (
+        "HKLM",
+        r"Software\Microsoft\Windows NT\CurrentVersion\Drivers32",
+        false,
+    ),
     // Internet Explorer extensions / BHOs.
-    ("HKLM", r"Software\Microsoft\Internet Explorer\Extensions", true),
-    ("HKCU", r"Software\Microsoft\Internet Explorer\Extensions", true),
+    (
+        "HKLM",
+        r"Software\Microsoft\Internet Explorer\Extensions",
+        true,
+    ),
+    (
+        "HKCU",
+        r"Software\Microsoft\Internet Explorer\Extensions",
+        true,
+    ),
     // Scheduled-task cache root (real schtasks live in subkeys).
-    ("HKLM", r"Software\Microsoft\Windows NT\CurrentVersion\Schedule\TaskCache\Tasks", true),
+    (
+        "HKLM",
+        r"Software\Microsoft\Windows NT\CurrentVersion\Schedule\TaskCache\Tasks",
+        true,
+    ),
     // Print monitors / providers (DLL load-on-spooler-start).
-    ("HKLM", r"System\CurrentControlSet\Control\Print\Monitors", true),
-    ("HKLM", r"System\CurrentControlSet\Control\Print\Providers", true),
+    (
+        "HKLM",
+        r"System\CurrentControlSet\Control\Print\Monitors",
+        true,
+    ),
+    (
+        "HKLM",
+        r"System\CurrentControlSet\Control\Print\Providers",
+        true,
+    ),
 ];
 
 /// Sweep entry point. Streams progress events through `tx` and returns
@@ -130,7 +251,13 @@ fn count_expected_items() -> u64 {
             .collect::<Vec<u16>>();
         let mut hkey = HKEY::default();
         let open = unsafe {
-            RegOpenKeyExW(hive, PCWSTR(subkey_w.as_ptr()), Some(0), KEY_READ, &mut hkey)
+            RegOpenKeyExW(
+                hive,
+                PCWSTR(subkey_w.as_ptr()),
+                Some(0),
+                KEY_READ,
+                &mut hkey,
+            )
         };
         if open.is_err() {
             continue;
@@ -178,8 +305,7 @@ fn count_expected_items() -> u64 {
                     }
                     // Null-terminate at name_len (RegEnumKeyExW returns
                     // the name without the trailing NUL).
-                    let mut sub_w: Vec<u16> =
-                        name_buf[..name_len as usize].to_vec();
+                    let mut sub_w: Vec<u16> = name_buf[..name_len as usize].to_vec();
                     sub_w.push(0);
                     let mut sub_hkey = HKEY::default();
                     let sub_open = unsafe {
@@ -299,7 +425,7 @@ fn sweep_impl(
                 continue;
             }
             total += 1;
-            if total.is_multiple_of(25) {
+            if total % 25 == 0 {
                 let _ = tx.send(ScanProgress::RegistryProgress {
                     scan_id,
                     items_scanned_total: total,
@@ -331,8 +457,7 @@ fn sweep_impl(
         // Review L3 — bind the raw pointer locally so a future
         // refactor can't accidentally drop `subkey_w` before the call.
         let subkey_ptr = subkey_w.as_ptr();
-        let open =
-            unsafe { RegOpenKeyExW(hive, PCWSTR(subkey_ptr), Some(0), KEY_READ, &mut hkey) };
+        let open = unsafe { RegOpenKeyExW(hive, PCWSTR(subkey_ptr), Some(0), KEY_READ, &mut hkey) };
         // `subkey_w` borrow extends through the call; drop only after.
         drop(subkey_w);
         if open.is_err() {
@@ -342,9 +467,7 @@ fn sweep_impl(
         }
 
         // Count the top-level values on this key first.
-        total = unsafe {
-            count_values_on_key(hkey, scan_id, &display, tx, cancel_flag, total)
-        };
+        total = unsafe { count_values_on_key(hkey, scan_id, &display, tx, cancel_flag, total) };
 
         // For container keys (Services, IFEO, Browser Helper Objects,
         // etc.) recurse one level into every direct subkey. This is
@@ -392,12 +515,9 @@ fn sweep_impl(
                     if res.is_err() {
                         continue;
                     }
-                    let sub_name = String::from_utf16_lossy(
-                        &name_buf[..name_len as usize],
-                    );
+                    let sub_name = String::from_utf16_lossy(&name_buf[..name_len as usize]);
                     let sub_display = format!("{display}\\{sub_name}");
-                    let mut sub_w: Vec<u16> =
-                        name_buf[..name_len as usize].to_vec();
+                    let mut sub_w: Vec<u16> = name_buf[..name_len as usize].to_vec();
                     sub_w.push(0);
                     let mut sub_hkey = HKEY::default();
                     let sub_open = unsafe {
@@ -413,14 +533,7 @@ fn sweep_impl(
                         continue;
                     }
                     total = unsafe {
-                        count_values_on_key(
-                            sub_hkey,
-                            scan_id,
-                            &sub_display,
-                            tx,
-                            cancel_flag,
-                            total,
-                        )
+                        count_values_on_key(sub_hkey, scan_id, &sub_display, tx, cancel_flag, total)
                     };
                     unsafe {
                         let _ = RegCloseKey(sub_hkey);

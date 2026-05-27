@@ -101,18 +101,17 @@ fn run_impl(
     // Pull every path we've already hashed. Soft-cap at 5M rows so a
     // very long-lived install doesn't OOM on a comically large
     // verdict_cache.
-    let mut stmt = match conn.prepare(
-        "SELECT path, blake3_hex, size_bytes FROM verdict_cache LIMIT 5000000",
-    ) {
+    let mut stmt = match conn
+        .prepare("SELECT path, blake3_hex, size_bytes FROM verdict_cache LIMIT 5000000")
+    {
         Ok(s) => s,
         Err(_) => return (0, 0),
     };
-    let rows: Vec<(String, String, i64)> = match stmt
-        .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
-    {
-        Ok(iter) => iter.flatten().collect(),
-        Err(_) => return (0, 0),
-    };
+    let rows: Vec<(String, String, i64)> =
+        match stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))) {
+            Ok(iter) => iter.flatten().collect(),
+            Err(_) => return (0, 0),
+        };
     drop(stmt);
     drop(conn);
 

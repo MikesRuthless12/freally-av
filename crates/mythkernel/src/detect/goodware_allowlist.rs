@@ -20,11 +20,64 @@
 //! installs, mainstream applications, and developer tooling. Per
 //! `docs/prd.md` § 1.5.1 NSRL is unrestricted for commercial redistribution.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use super::hash_set_file::{HashSetError, HashSetFile};
 use super::{Detector, DetectorVerdict, FileCtx, HashKind};
+
+/// TASK-183 — Resolve the per-OS NSRL slice the engine should
+/// load. End users who opted into NSRL via the first-run prompt
+/// (TASK-Phase-7B UI) get one of:
+///
+///   * `nsrl_sha256_windows.bin` / `_macos.bin` / `_linux.bin` —
+///     the host-OS slice, ~50% the size of the full union (Wave 2
+///     space win).
+///   * `nsrl_sha256_other.bin` — cross-platform manufacturer rows
+///     (e.g. embedded firmware, generic Unix). Always loaded
+///     alongside the host slice because some packages live there.
+///   * `nsrl_sha256.bin` — full union, fallback for forensic /
+///     multi-platform machines (and for users who haven't moved to
+///     per-OS slices yet).
+///
+/// Resolution preference per host:
+///   1. If the host-OS slice + `_other` slice both exist, return them.
+///   2. If only the host-OS slice exists, return just that.
+///   3. If only the union `.bin` exists, return that.
+///   4. If nothing exists, return an empty vec (caller skips load).
+///
+/// Returns paths in the order the engine should load them.
+pub fn resolve_nsrl_slice_paths(feeds_dir: &Path) -> Vec<PathBuf> {
+    let host_slice_name = match std::env::consts::OS {
+        "windows" => "nsrl_sha256_windows.bin",
+        "macos" => "nsrl_sha256_macos.bin",
+        "linux" | "android" => "nsrl_sha256_linux.bin",
+        // FreeBSD/Solaris/Other → use the `other` bucket plus the
+        // full union as a backstop.
+        _ => "nsrl_sha256_other.bin",
+    };
+    let host_slice = feeds_dir.join(host_slice_name);
+    let other_slice = feeds_dir.join("nsrl_sha256_other.bin");
+    let union = feeds_dir.join("nsrl_sha256.bin");
+
+    let mut out: Vec<PathBuf> = Vec::new();
+    if host_slice.exists() {
+        out.push(host_slice.clone());
+        // The `_other` slice carries cross-platform packages that
+        // might land on any host. If it exists and isn't the same
+        // file we already picked (FreeBSD/Solaris falls through to
+        // the other-slice as the host slice), include it.
+        if other_slice.exists() && other_slice != host_slice {
+            out.push(other_slice);
+        }
+        return out;
+    }
+    // No host-OS slice — fall back to the union.
+    if union.exists() {
+        out.push(union);
+    }
+    out
+}
 
 /// Stable detector id used in logs, audit, and the pipeline's
 /// `feed_versions` summary.
@@ -177,6 +230,52 @@ mod tests {
             sha256: None,
         };
         assert_eq!(d.check(&ctx), DetectorVerdict::Clean);
+    }
+
+    #[test]
+    fn resolve_picks_host_slice_when_present_with_other() {
+        let dir = tempdir().unwrap();
+        let host_slice = match std::env::consts::OS {
+            "windows" => "nsrl_sha256_windows.bin",
+            "macos" => "nsrl_sha256_macos.bin",
+            "linux" | "android" => "nsrl_sha256_linux.bin",
+            _ => "nsrl_sha256_other.bin",
+        };
+        std::fs::write(dir.path().join(host_slice), b"x").unwrap();
+        if host_slice != "nsrl_sha256_other.bin" {
+            std::fs::write(dir.path().join("nsrl_sha256_other.bin"), b"x").unwrap();
+        }
+        std::fs::write(dir.path().join("nsrl_sha256.bin"), b"x").unwrap();
+        let paths = super::resolve_nsrl_slice_paths(dir.path());
+        // Host slice should be first.
+        assert!(paths[0].ends_with(host_slice));
+        // _other should be loaded too unless host = other.
+        if host_slice != "nsrl_sha256_other.bin" {
+            assert_eq!(paths.len(), 2);
+            assert!(paths[1].ends_with("nsrl_sha256_other.bin"));
+        } else {
+            assert_eq!(paths.len(), 1);
+        }
+        // The full union must NOT be loaded when slices are present
+        // (avoids double-counting the same hashes).
+        assert!(paths.iter().all(|p| !p.ends_with("nsrl_sha256.bin")
+            || p.file_name().unwrap().to_string_lossy().contains('_')));
+    }
+
+    #[test]
+    fn resolve_falls_back_to_union_when_no_slices() {
+        let dir = tempdir().unwrap();
+        std::fs::write(dir.path().join("nsrl_sha256.bin"), b"x").unwrap();
+        let paths = super::resolve_nsrl_slice_paths(dir.path());
+        assert_eq!(paths.len(), 1);
+        assert!(paths[0].ends_with("nsrl_sha256.bin"));
+    }
+
+    #[test]
+    fn resolve_returns_empty_when_no_files() {
+        let dir = tempdir().unwrap();
+        let paths = super::resolve_nsrl_slice_paths(dir.path());
+        assert!(paths.is_empty());
     }
 
     #[test]

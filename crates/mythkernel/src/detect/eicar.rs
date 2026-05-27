@@ -24,8 +24,7 @@ pub const PRIORITY: u32 = 100;
 /// The canonical 68-byte EICAR Standard Anti-Virus Test File.
 /// Quoted exactly per the EICAR spec; the trailing `H+H*` and the
 /// `$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$` middle are load-bearing.
-const EICAR_BYTES: &[u8] =
-    b"X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*";
+const EICAR_BYTES: &[u8] = b"X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*";
 
 /// EICAR detector. Hashes the canonical bytes once at construction
 /// and caches the digest; per-file `check` is a constant-time `==`.

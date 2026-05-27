@@ -575,9 +575,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let p = dir.path().join("nogate.bin");
         fs::write(&p, b"plain content").unwrap();
-        let outcome = Hasher::new()
-            .hash_file_with_crc32_gate(&p)
-            .expect("hash");
+        let outcome = Hasher::new().hash_file_with_crc32_gate(&p).expect("hash");
         match outcome {
             MaybeHashResult::Hashed { crc32, result } => {
                 assert_eq!(crc32, crc32_of(b"plain content"));

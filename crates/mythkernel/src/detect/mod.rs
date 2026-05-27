@@ -18,15 +18,26 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
+pub mod bloom;
 pub mod byovd;
 pub mod crc32_set_file;
+pub mod cuckoo;
+pub mod dev_publisher_allowlist;
+pub mod dual_key_gate;
 pub mod eicar;
+pub mod ephemeral_allowlist;
 pub mod file_mutation;
 pub mod goodware_allowlist;
 pub mod hash_blacklist;
+pub mod hash_lookup_explain;
 pub mod hash_set_file;
 pub mod heuristics;
+pub mod package_manager_allowlist;
+pub mod partial_match;
+pub mod platform_store_allowlist;
 pub mod publisher;
+pub mod sbom_allowlist;
+pub mod user_iocs;
 pub mod verdict_cache;
 pub mod yara_engine;
 
