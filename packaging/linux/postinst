@@ -1,0 +1,26 @@
+#!/bin/sh
+# Mythodikal Anti-Virus — .deb / .rpm postinst (TASK-076, Phase 8).
+#
+# Installs the systemd unit if it isn't already loaded, then enables
+# and starts the daemon. Idempotent — re-running this script on an
+# upgraded install is a no-op past the first boot. Distinct from
+# FR-161 / TASK-157 (user-app autostart): this script is the
+# DAEMON-level enable; the user-mode UI's start-at-login is governed
+# by tauri-plugin-autostart.
+
+set -e
+
+UNIT_PATH="/lib/systemd/system/mythd.service"
+
+if [ ! -f "$UNIT_PATH" ]; then
+    echo "mythd.service unit not found at $UNIT_PATH — skipping enable"
+    exit 0
+fi
+
+if command -v systemctl > /dev/null 2>&1; then
+    systemctl daemon-reload || true
+    systemctl enable mythd.service || true
+    systemctl start mythd.service || true
+fi
+
+exit 0

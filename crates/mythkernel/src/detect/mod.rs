@@ -18,6 +18,7 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
+pub mod active_findings;
 pub mod bloom;
 pub mod byovd;
 pub mod crc32_set_file;
@@ -32,6 +33,7 @@ pub mod hash_blacklist;
 pub mod hash_lookup_explain;
 pub mod hash_set_file;
 pub mod heuristics;
+pub mod honeyfiles;
 pub mod package_manager_allowlist;
 pub mod partial_match;
 pub mod platform_store_allowlist;

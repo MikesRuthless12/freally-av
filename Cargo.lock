@@ -3332,6 +3332,69 @@ dependencies = [
 ]
 
 [[package]]
+name = "mythd-linux"
+version = "0.0.1"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "ciborium",
+ "clap",
+ "hex",
+ "libc",
+ "mythkernel",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "mythd-macos"
+version = "0.0.1"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "ciborium",
+ "clap",
+ "hex",
+ "libc",
+ "mythkernel",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "mythd-windows"
+version = "0.0.1"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "ciborium",
+ "clap",
+ "hex",
+ "mythkernel",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "windows 0.62.2",
+]
+
+[[package]]
 name = "mythkernel"
 version = "0.0.1"
 dependencies = [
@@ -3339,6 +3402,7 @@ dependencies = [
  "base64 0.22.1",
  "blake3",
  "chrono",
+ "ciborium",
  "core-foundation",
  "core-foundation-sys",
  "crc32fast",

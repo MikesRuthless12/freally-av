@@ -7,4 +7,8 @@
 #![allow(dead_code)]
 
 pub mod commands;
+/// Phase 8 Wave 2 — per-mount real-time toggle (TASK-238).
+pub mod commands_mount;
+/// Phase 8 Wave 2 — USB stack Tauri commands (TASK-242/244/249/250).
+pub mod commands_usb;
 pub mod types;

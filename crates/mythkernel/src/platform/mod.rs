@@ -12,6 +12,12 @@ pub mod mac;
 #[cfg(target_os = "windows")]
 pub mod win;
 
+/// WSL distro parser — shared between the Windows host bridge and the
+/// Linux peer tagger (TASK-240, Phase 8 Wave 2). Pure parsing; the
+/// actual `wsl.exe` shell-out lives in
+/// `daemon/mythd-windows/src/wsl_bridge.rs`.
+pub mod wsl;
+
 pub mod codesign {
     //! Cross-platform signer extraction (TASK-136).
 

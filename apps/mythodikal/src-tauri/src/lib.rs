@@ -145,7 +145,12 @@ pub fn run() {
         builder = builder.manage(SchedulerSlot(std::sync::Mutex::new(Some(h))));
     }
     builder
-        .invoke_handler(tauri::generate_handler![
+        // Tauri v2: only ONE `.invoke_handler()` call per builder —
+        // a second call replaces the first. Both the app-level commands
+        // (defined locally below) and the ui-bridge commands are
+        // wired through `invoke_handler!(...)` so they land in one
+        // `generate_handler!` invocation.
+        .invoke_handler(invoke_handler!(
             engine_install_update,
             autostart_get,
             autostart_set,
@@ -156,8 +161,7 @@ pub fn run() {
             window_show_main,
             window_hide_main,
             app_quit,
-        ])
-        .invoke_handler(invoke_handler!())
+        ))
         .run(tauri::generate_context!())
         .expect("error while running Mythodikal Anti-Virus");
 }

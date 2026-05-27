@@ -49,6 +49,13 @@ base64 = { workspace = true }
 # TASK-131 — `If-Modified-Since` / `ETag` handling for the database channel.
 httpdate = { workspace = true }
 
+# TASK-074 / Phase 8 — length-prefixed CBOR for the engine ↔ daemon IPC
+# frame format. Both the engine-side consumer (`crates/ui-bridge`) and
+# the daemon binary speak the same `IpcFrame` enum, so the codec lives
+# in `mythkernel::ipc::linfan` and the daemon depends on it through
+# the workspace path import.
+ciborium = { workspace = true }
+
 # TASK-050 — direct FSCTL wrappers (FSCTL_ENUM_USN_DATA + OpenFileById +
 # GetFinalPathNameByHandleW). Pattern lifted from sister project Sourcerer
 # (`crates/sourcerer-journal-win`). MIT/Apache-2.0 — license-clean per

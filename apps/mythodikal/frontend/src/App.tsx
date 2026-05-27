@@ -15,6 +15,13 @@ import Quarantine from "@/pages/Quarantine";
 import Exclusions from "@/pages/Exclusions";
 import Settings from "@/pages/Settings";
 import FirstRun from "@/pages/FirstRun";
+// Phase 8 Wave 1 — TASK-075 Real-time UI.
+import Realtime from "@/pages/Realtime";
+// Phase 8 Wave 2 — TASK-242 / TASK-245 / TASK-249 / TASK-250 USB pages.
+import UsbAllowlist from "@/pages/Settings/UsbAllowlist";
+import UsbPolicy from "@/pages/Settings/UsbPolicy";
+import UsbWrites from "@/pages/History/UsbWrites";
+import UsbDevices from "@/pages/UsbDevices";
 import { attachScanEvents } from "@/stores/scan";
 import { attachQuarantineEvents } from "@/stores/quarantine";
 import { attachShieldsEvents } from "@/stores/shields";
@@ -49,9 +56,14 @@ const App: Component = () => {
         <Route path="/" component={() => <Navigate href="/scan" />} />
         <Route path="/scan" component={Scan} />
         <Route path="/history" component={History} />
+        <Route path="/history/usb-writes" component={UsbWrites} />
         <Route path="/quarantine" component={Quarantine} />
         <Route path="/exclusions" component={Exclusions} />
+        <Route path="/realtime" component={Realtime} />
+        <Route path="/usb-devices" component={UsbDevices} />
         <Route path="/settings" component={Settings} />
+        <Route path="/settings/usb-allowlist" component={UsbAllowlist} />
+        <Route path="/settings/usb-policy" component={UsbPolicy} />
       </Router>
     </Show>
   );

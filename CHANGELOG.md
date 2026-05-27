@@ -11,6 +11,124 @@ Each release section lists which `TASK-NNN` items from `docs/product-roadmap.md`
 ## [Unreleased]
 
 ### Added
+- **Phase 8 — Linux Real-time + Wave 2 (eBPF + audit + per-mount + container + WSL) + Cross-Platform USB stack** _(foundation 2026-05-27)_
+
+  All 24 Phase 8 tasks landed across waves 1 + 2. Bundled mega-commit at the
+  user's request; full Phase Closeout (smoke test, `/review`, `/security-review`)
+  runs against the PR. Foundation pattern follows the Phase 7C precedent —
+  every module's pure logic + types + tests land here; Linux-syscall paths
+  (fanotify/inotify/audit/eBPF/udev/IOKit/SetupDi) are cfg-gated so
+  `cargo build --workspace` succeeds on every host. Runtime validation on
+  Linux / macOS / Windows runs in the per-OS CI matrix and the v0.8.0 smoke
+  test in `docs/launch-checklists/v0.8.md`.
+
+  **Wave 1 — Linux fanotify core (TASK-073..078, TASK-140..142):**
+  - **TASK-074** — `crates/mythkernel/src/ipc/linfan.rs`. Length-prefixed
+    CBOR IPC. `IpcFrame { Verdict, VerdictReply, ShieldsPush,
+    ActiveFindingsPush, Heartbeat, NotifyEvent }`; `IpcCodec` reader/writer
+    with 4 MiB payload cap; ShieldsState push frame so the daemon can
+    short-circuit verdicts locally when Shields=OFF (FR-160 + TASK-156).
+    7 tests.
+  - **TASK-073** — `daemon/mythd-linux` new crate. `fanotify.rs` with
+    `FAN_OPEN_PERM` / `FAN_ACCESS_PERM` wiring; drops every capability
+    except `CAP_SYS_ADMIN` at startup; binds Unix socket
+    `/run/mythd/mythd.sock`. Honors Shields=OFF locally per FR-160.
+  - **TASK-076** — `packaging/linux/mythd.service` + `postinst` + `prerm`.
+    `Restart=on-failure RestartSec=2s`; `systemctl enable` shipped in
+    `.deb` / `.rpm` postinst. `daemon/mythd-linux/src/watchdog.rs`
+    crash-budget tracker (> 3 restarts / hour trips the UI badge).
+    Distinct from FR-161 / TASK-157 user-app autostart.
+  - **TASK-077** — `daemon/mythd-linux/src/inotify_fallback.rs`. Kernel
+    < 5.1 fallback; observe-only; UI surfaces "inotify (observe-only)".
+  - **TASK-075** — `apps/mythodikal/frontend/src/pages/Realtime.tsx`.
+    Shields master switch (mirrors TASK-156) + Monitored mounts +
+    WSL distros panel.
+  - **TASK-140** — `crates/mythkernel/src/detect/active_findings.rs`
+    (engine-side index) + `daemon/mythd-linux/src/block.rs` (daemon-side
+    verdict policy). DENY on opens against paths with open `detected`
+    findings; honored even when Shields=OFF (FR-160 point 5). 3+4 tests.
+  - **TASK-141** — `daemon/mythd-linux/src/rules/browser_creds.rs`.
+    Chrome / Firefox / Brave credential-store opener detector with
+    process-path allowlist. 5 tests.
+  - **TASK-142** — `crates/mythkernel/src/detect/honeyfiles.rs`
+    (cross-platform canary planner + planter + shape detector;
+    deterministic per-install seed) + `daemon/mythd-linux/src/rules/honey.rs`
+    (Linux SIGSTOP of writer's process tree via `/proc/<pid>/stat` walk).
+    6 tests.
+  - **TASK-078** — `docs/launch-checklists/v0.8.md` shipping checklist.
+
+  **Wave 2 — eBPF + audit + per-mount + container + WSL + USB (TASK-236..250):**
+  - **TASK-236** — `daemon/mythd-linux/src/ebpf.rs`. CO-RE eBPF observer
+    scaffold via `aya` (MIT/Apache, gated on Linux target). Observe-only
+    per § 1.5.4: no LSM hooks, no `bpf_send_signal`. Gracefully disabled
+    when BTF / `CAP_BPF` / kernel < 5.8.
+  - **TASK-237** — `daemon/mythd-linux/src/audit.rs`. NETLINK_AUDIT
+    fallback when `FAN_MARK_FILESYSTEM` is missing. Observe-only;
+    `parse_audit_block` joins `type=SYSCALL` + `type=PATH` records by
+    audit id. 3 tests.
+  - **TASK-238** — `daemon/mythd-linux/src/mounts.rs` + `crates/ui-bridge/src/commands_mount.rs`.
+    `/proc/self/mountinfo` parser + diff helper; per-mount on/off
+    persisted to `realtime_mounts`; daemon applies `FAN_MARK_ADD` /
+    `FAN_MARK_REMOVE` live on its 5 s poll. 4 tests.
+  - **TASK-239** — `daemon/mythd-linux/src/container_dedupe.rs`. Peer-group
+    canonicalization map + bounded LRU(64K) for `(st_dev, st_ino)` dedup.
+    4 tests.
+  - **TASK-240** — `daemon/mythd-linux/src/wsl_peer.rs` (Linux side:
+    `WslContext::detect`, `event_tag`, UTF-16 LE `wsl.exe --list`
+    parser) + `daemon/mythd-windows/src/wsl_bridge.rs` (Windows side:
+    `list_distros_argv`, `distro_socket_path`,
+    `\\wsl.localhost\<distro>\run\mythd\mythd.sock`). 7 tests.
+  - **TASK-241** — `crates/mythkernel/src/usb/mod.rs` (`UsbInsertEvent`,
+    `UsbInterface`, `UsbWatcher` trait, `coalesce_events` helper) +
+    per-OS `daemon/mythd-{linux,macos,windows}/src/usb.rs` wrappers +
+    `apps/mythodikal/frontend/src/components/UsbInsertModal.tsx`.
+    3+1+1 tests.
+  - **TASK-242** — `crates/mythkernel/src/usb/allowlist.rs` (sqlite
+    `usb_allowlist` + wildcard serial) + `crates/ui-bridge/src/commands_usb.rs`
+    + `apps/mythodikal/frontend/src/pages/Settings/UsbAllowlist.tsx`.
+    4 tests.
+  - **TASK-243** — `crates/mythkernel/src/usb/hid_anomaly.rs`. Composite
+    HID-keyboard + mass-storage detector with 2 s window; alert-only
+    per § 1.5.4. 6 tests.
+  - **TASK-244** — `crates/mythkernel/src/usb/power_only.rs` (sqlite
+    `usb_power_only` store + lookup) + per-OS daemon glue
+    (`bConfigurationValue=0` on Linux, IOKit interface-close on macOS,
+    Windows documentation-only per § 1.5.4). 2 tests.
+  - **TASK-245** — `daemon/mythd-linux/src/usb_ro.rs` (mount(8) argv
+    builder + linux-only runner) + `daemon/mythd-macos/src/usb_ro.rs`
+    (diskutil argv builder) + `apps/mythodikal/frontend/src/pages/Settings/UsbPolicy.tsx`.
+    Windows path is a hint card only per § 1.5.4. 3 tests.
+  - **TASK-246** — `crates/mythkernel/src/usb/autorun.rs`. 4 KiB-capped
+    `[autorun]` INI reader; extracts `open=` / `shellexecute=` / `icon=`;
+    fail-safe parser; case-insensitive on Linux. 6 tests.
+  - **TASK-247** — `daemon/mythd-macos/src/rules/app_on_usb.rs`. Bounded
+    `.app`-bundle enumerator (depth ≤ 3) for the macOS USB-insert scan.
+    3 tests.
+  - **TASK-248** — `crates/mythkernel/src/usb/rtl_override.rs`. Bidi-
+    override codepoint detector + `visualize` helper for the modal
+    explainer; P0 when paired with `.exe`/`.scr`/`.bat`/`.sh`/`.command`
+    in logical byte order. 5 tests.
+  - **TASK-249** — `crates/mythkernel/src/usb/write_log.rs`. `usb_write_events`
+    table + 100K-row ring buffer with `pin_device` opt-out from eviction.
+    + `apps/mythodikal/frontend/src/pages/History/UsbWrites.tsx`. 3 tests.
+  - **TASK-250** — `crates/mythkernel/src/usb/device_history.rs`.
+    `usb_device_history` + `usb_device_files` tables; BLAKE3-quick-hash
+    over first 64 KiB + size; `is_unchanged` short-circuit for re-insert
+    scans. + `apps/mythodikal/frontend/src/pages/UsbDevices.tsx`. 3 tests.
+
+  **Per-OS daemon binaries:**
+  - `daemon/mythd-linux` — main + fanotify + inotify_fallback + audit + ebpf
+    + block + mounts + container_dedupe + wsl_peer + usb + usb_ro + watchdog
+    + ipc_client + rules/{browser_creds, honey}.
+  - `daemon/mythd-macos` — scaffolded binary + usb + usb_ro + rules/app_on_usb.
+    Full FSEvents + opportunistic ESF NOTIFY land in Phase 9.
+  - `daemon/mythd-windows` — scaffolded binary + usb + wsl_bridge. Full
+    ETW + AMSI + WDAC + Defender bridge lands in Phase 12.
+
+  **Dependency adds:** `ciborium 0.2` (MIT/Apache; engine ↔ daemon IPC
+  codec). All deps clean against `deny.toml`'s allow-list. No new GPL /
+  AGPL / SSPL trees added.
+
 - **Phase 7B Wave 2 — Hash-path perf + allowlist intelligence + IOC tools + feed integrity** _(shipped 2026-05-23/24)_
 
   22 of 23 Wave 2 tasks landed; only TASK-200 (v0.7.13 release tag) remains, gated on TASK-171 smoke + maintainer `git tag`. ~85 new unit tests across the engine + feed-builder.

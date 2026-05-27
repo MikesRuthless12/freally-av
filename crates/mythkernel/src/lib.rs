@@ -31,6 +31,12 @@ pub mod ipc;
 pub mod platform;
 pub mod realtime;
 pub mod updater;
+/// Phase 8 Wave 2 — cross-platform USB / removable-media surface
+/// (TASK-241..250). Per-OS daemon glue (udev / IOKit / SetupDi) lives
+/// under `daemon/mythd-{linux,macos,windows}/src/usb.rs`; the shared
+/// types, allowlist, BadUSB detector, RTL-override heuristic, and
+/// per-device scan history all live here.
+pub mod usb;
 pub mod walker;
 
 pub use error::EngineError;

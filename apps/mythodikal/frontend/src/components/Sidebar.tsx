@@ -11,8 +11,10 @@ import { ShieldsBadge } from "./ShieldsBadge";
 
 const NAV: { path: string; label: string }[] = [
   { path: "/scan", label: "Scan" },
+  { path: "/realtime", label: "Real-time" },
   { path: "/history", label: "History" },
   { path: "/quarantine", label: "Quarantine" },
+  { path: "/usb-devices", label: "USB" },
   { path: "/exclusions", label: "Exclusions" },
   { path: "/settings", label: "Settings" },
 ];
