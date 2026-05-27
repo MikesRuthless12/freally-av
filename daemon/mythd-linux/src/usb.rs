@@ -54,12 +54,55 @@ impl UsbWatcher for LinuxUsbWatcher {
 }
 
 /// Apply the per-port power-only override (TASK-244 Linux portion).
-/// Writes `"0"` to `/sys/bus/usb/devices/<port>/bConfigurationValue`,
-/// unbinding the device's interfaces. The device keeps drawing
-/// power. Pure logic — the test scaffolds a temp file.
+/// Writes `"0"` to `<sysfs_root>/bConfigurationValue`, unbinding the
+/// device's interfaces. The device keeps drawing power.
+///
+/// `sysfs_root` must be absolute and contain no `..` components and
+/// no NUL bytes. The caller is expected to have already pinned this
+/// under `/sys/bus/usb/devices/`; this routine refuses paths that
+/// could traverse outside sysfs even when the eventual data source
+/// (the `usb_power_only` SQLite table) gets corrupted (security-review
+/// follow-up, Phase 9 Wave 2 closeout).
 pub fn power_only_apply(sysfs_root: &std::path::Path) -> std::io::Result<()> {
+    validate_sysfs_path(sysfs_root)?;
     let target = sysfs_root.join("bConfigurationValue");
     std::fs::write(target, b"0")
+}
+
+/// Reject obviously-unsafe sysfs paths before any I/O. Defense in
+/// depth: callers should also pin the path to `/sys/bus/usb/devices/`,
+/// but a corrupted DB row or a future refactor that bypasses the
+/// canonical pinning still can't escape sysfs through this helper.
+fn validate_sysfs_path(p: &std::path::Path) -> std::io::Result<()> {
+    use std::io::{Error, ErrorKind};
+    use std::path::Component;
+    if !p.is_absolute() {
+        return Err(Error::new(
+            ErrorKind::InvalidInput,
+            "sysfs path must be absolute",
+        ));
+    }
+    if p.as_os_str().is_empty() {
+        return Err(Error::new(
+            ErrorKind::InvalidInput,
+            "sysfs path must not be empty",
+        ));
+    }
+    if p.as_os_str().to_string_lossy().contains('\0') {
+        return Err(Error::new(
+            ErrorKind::InvalidInput,
+            "sysfs path must not contain NUL bytes",
+        ));
+    }
+    for c in p.components() {
+        if matches!(c, Component::ParentDir) {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "sysfs path must not contain `..` components",
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// Parse one udev environment block (typical `DEVTYPE=usb_device` row)
@@ -132,6 +175,22 @@ mod tests {
         power_only_apply(dir.path()).unwrap();
         let body = std::fs::read(dir.path().join("bConfigurationValue")).unwrap();
         assert_eq!(body, b"0");
+    }
+
+    #[test]
+    fn power_only_rejects_relative_path() {
+        let err = power_only_apply(std::path::Path::new("foo/bar")).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
+    }
+
+    #[test]
+    fn power_only_rejects_parent_dir_traversal() {
+        // `/sys/bus/usb/devices/../../etc/passwd` would otherwise let a
+        // corrupted `usb_power_only.port_path` row write `0` to
+        // arbitrary files under the daemon's privilege.
+        let err =
+            power_only_apply(std::path::Path::new("/sys/bus/usb/devices/../../etc")).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
     }
 
     #[cfg(not(target_os = "linux"))]

@@ -36,14 +36,23 @@ pub struct UsbPolicyEvent {
     pub action: &'static str,
 }
 
-/// Build the argv for `mount -o remount,ro <mountpoint>`. Returned
+/// Build the argv for `mount -o remount,ro -- <mountpoint>`. Returned
 /// instead of executed so the unit tests can assert the shape
 /// without spawning a process.
+///
+/// The literal `--` separator forces `mount(8)` to treat the
+/// mountpoint as a positional argument even if it begins with `-`,
+/// preventing a corrupted mount table row from being interpreted as
+/// extra `mount` flags. The caller still validates that the
+/// mountpoint is absolute and contains no NUL bytes or `..` —
+/// `--` defends against a narrower attack (the `mount` argv parser)
+/// (security-review follow-up, Phase 9 Wave 2 closeout).
 pub fn remount_ro_argv(mountpoint: &str) -> Vec<String> {
     vec![
         "mount".to_string(),
         "-o".to_string(),
         "remount,ro".to_string(),
+        "--".to_string(),
         mountpoint.to_string(),
     ]
 }
@@ -53,6 +62,7 @@ pub fn remount_rw_argv(mountpoint: &str) -> Vec<String> {
         "mount".to_string(),
         "-o".to_string(),
         "remount,rw".to_string(),
+        "--".to_string(),
         mountpoint.to_string(),
     ]
 }
@@ -87,12 +97,26 @@ mod tests {
     #[test]
     fn ro_argv_is_canonical() {
         let argv = remount_ro_argv("/mnt/usb");
-        assert_eq!(argv, vec!["mount", "-o", "remount,ro", "/mnt/usb"]);
+        assert_eq!(argv, vec!["mount", "-o", "remount,ro", "--", "/mnt/usb"]);
     }
 
     #[test]
     fn rw_argv_is_canonical() {
         let argv = remount_rw_argv("/mnt/usb");
-        assert_eq!(argv, vec!["mount", "-o", "remount,rw", "/mnt/usb"]);
+        assert_eq!(argv, vec!["mount", "-o", "remount,rw", "--", "/mnt/usb"]);
+    }
+
+    #[test]
+    fn ro_argv_separator_protects_dash_prefixed_mountpoint() {
+        // A corrupted mount table row whose `mountpoint` begins with
+        // `-` (e.g., `-osource=...`) must NOT be consumed by mount(8)
+        // as extra flags. The `--` separator is the standard guard.
+        let argv = remount_ro_argv("-evil");
+        let dash_dash_idx = argv.iter().position(|a| a == "--").unwrap();
+        let mp_idx = argv.iter().position(|a| a == "-evil").unwrap();
+        assert!(
+            dash_dash_idx < mp_idx,
+            "the `--` argv separator must appear before any mountpoint that begins with `-`"
+        );
     }
 }

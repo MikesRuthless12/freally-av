@@ -32,9 +32,17 @@
     <integer>1</integer>
     <key>ProcessType</key>
     <string>Background</string>
-    <key>StandardOutPath</key>
-    <string>/tmp/mythd.out.log</string>
-    <key>StandardErrorPath</key>
-    <string>/tmp/mythd.err.log</string>
+    <!--
+      StandardOutPath / StandardErrorPath intentionally omitted.
+      launchd does not expand `~` or `$HOME` in plist path keys, so
+      routing logs through a per-user file would require the .dmg
+      first-run installer to rewrite the plist with the resolved
+      $HOME at install time. Until that installer pass lands,
+      letting launchd route stdout / stderr to the system asl log
+      (visible in Console.app under the daemon's Label) keeps logs
+      off world-readable `/tmp/` — a non-root attacker on the same
+      Mac could otherwise watch the file for daemon internals
+      (security-review follow-up, Phase 9 Wave 2 closeout).
+    -->
 </dict>
 </plist>
