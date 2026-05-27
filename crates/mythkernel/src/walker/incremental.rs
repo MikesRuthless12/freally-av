@@ -20,7 +20,11 @@
 
 use std::path::Path;
 
-use super::{FileWalker, NtfsWalker, PosixWalker, WalkEvent, WalkOpts};
+use super::{FileWalker, PosixWalker, WalkEvent, WalkOpts};
+// NtfsWalker only exists / is consumed on Windows. Importing it
+// unconditionally trips `unused_imports` on non-Windows builds.
+#[cfg(windows)]
+use super::NtfsWalker;
 
 #[derive(Debug, Default, Clone, Copy)]
 pub struct IncrementalWalker;

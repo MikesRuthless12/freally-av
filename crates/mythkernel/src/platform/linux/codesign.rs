@@ -246,9 +246,6 @@ mod tests {
         let resolved = resolve_binary(&["/this/does/not/exist", "/bin/sh"], "sh");
         // On most Unixes /bin/sh exists; on systems where it doesn't,
         // we fall through to the fallback name `sh`.
-        assert!(
-            resolved == std::ffi::OsString::from("/bin/sh")
-                || resolved == std::ffi::OsString::from("sh")
-        );
+        assert!(resolved == "/bin/sh" || resolved == "sh");
     }
 }

@@ -14,7 +14,12 @@
 //! registry phase.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::AtomicBool;
+// `Ordering` is only consumed inside the Windows-gated scanner body
+// (cancel_flag.load(Ordering::Relaxed) calls). Off-Windows the whole
+// scanner is a no-op stub, so the import would be flagged as unused.
+#[cfg(windows)]
+use std::sync::atomic::Ordering;
 
 use tokio::sync::broadcast;
 
