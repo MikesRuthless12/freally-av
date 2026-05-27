@@ -1,5 +1,8 @@
 //! Concurrency throttle — static baseline + adaptive feedback (TASK-013 + TASK-039).
 //!
+//! Phase 7C wave 3 adds the battery-aware modes (TASK-208) as a
+//! sibling submodule [`battery`].
+//!
 //! TASK-013 (Phase 1) shipped the static baseline: a fixed `max_workers`
 //! count of `available_parallelism / 2`. TASK-039 (Phase 4) adds the
 //! [`AdaptiveThrottle`] wrapper that combines that ceiling with a live
@@ -21,6 +24,8 @@
 use serde::{Deserialize, Serialize};
 
 use crate::sysload::{SysLoad, SysLoadSampler};
+
+pub mod battery;
 
 /// Static throttle configuration. Default = `available_parallelism / 2`,
 /// minimum 1, so a quad-core box scans with 2 workers and a 16-core box
