@@ -3319,7 +3319,7 @@ dependencies = [
 
 [[package]]
 name = "mythctl"
-version = "0.0.1"
+version = "0.7.20"
 dependencies = [
  "anyhow",
  "clap",
@@ -3333,7 +3333,7 @@ dependencies = [
 
 [[package]]
 name = "mythkernel"
-version = "0.0.1"
+version = "0.7.20"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -3376,7 +3376,7 @@ dependencies = [
 
 [[package]]
 name = "mythodikal-app"
-version = "0.0.1"
+version = "0.7.20"
 dependencies = [
  "dirs 5.0.1",
  "mythkernel",
@@ -6489,7 +6489,7 @@ dependencies = [
 
 [[package]]
 name = "ui-bridge"
-version = "0.0.1"
+version = "0.7.20"
 dependencies = [
  "hex",
  "mythkernel",

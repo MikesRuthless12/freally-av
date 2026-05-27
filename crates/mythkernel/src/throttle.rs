@@ -1,5 +1,8 @@
 //! Concurrency throttle — static baseline + adaptive feedback (TASK-013 + TASK-039).
 //!
+//! Phase 7C wave 3 adds the battery-aware modes (TASK-208) as a
+//! sibling submodule [`battery`].
+//!
 //! TASK-013 (Phase 1) shipped the static baseline: a fixed `max_workers`
 //! count of `available_parallelism / 2`. TASK-039 (Phase 4) adds the
 //! [`AdaptiveThrottle`] wrapper that combines that ceiling with a live
@@ -21,6 +24,8 @@
 use serde::{Deserialize, Serialize};
 
 use crate::sysload::{SysLoad, SysLoadSampler};
+
+pub mod battery;
 
 /// Static throttle configuration. Default = `available_parallelism / 2`,
 /// minimum 1, so a quad-core box scans with 2 workers and a 16-core box
@@ -95,6 +100,33 @@ impl AdaptiveThrottle {
         }
     }
 
+    /// TASK-204 — Same as [`Self::policy`] but applies an additional
+    /// downshift when the user's foreground app is interactive. The
+    /// caller subscribes to the per-OS foreground watcher
+    /// ([`foreground_state`]); when the watcher reports
+    /// [`ForegroundState::Interactive`], the worker count is clamped
+    /// to `max(1, base/2)` regardless of the CPU-driven policy. Idle
+    /// foreground (or no signal) preserves the pure CPU policy.
+    pub fn policy_with_foreground(max_workers: usize, load: SysLoad, fg: ForegroundState) -> usize {
+        let cpu_choice = Self::policy(max_workers, load);
+        match fg {
+            ForegroundState::Idle => cpu_choice,
+            ForegroundState::Interactive => {
+                let foreground_ceiling = (max_workers / 2).max(1);
+                cpu_choice.min(foreground_ceiling)
+            }
+        }
+    }
+
+    /// TASK-204 — Resize the ceiling: useful when the user toggles
+    /// `Battery-gentle` mode (TASK-208) or moves the
+    /// `Performance → Worker count` slider in Settings. The new
+    /// ceiling is clamped to ≥ 1; subsequent `current_workers` calls
+    /// reflect it immediately.
+    pub fn resize(&mut self, new_max: usize) {
+        self.base.max_workers = new_max.max(1);
+    }
+
     pub fn base(&self) -> Throttle {
         self.base
     }
@@ -102,6 +134,38 @@ impl AdaptiveThrottle {
     pub fn last_load(&self) -> Option<SysLoad> {
         self.sampler.last()
     }
+}
+
+/// TASK-204 — Foreground-window state. Set by a per-OS watcher; read
+/// by the throttle when computing the live worker count. `Idle` is the
+/// safe default — when no watcher has reported yet, behave as if the
+/// machine has nothing interactive going on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ForegroundState {
+    /// No foreground change observed (or watcher not yet running).
+    Idle,
+    /// User just changed window focus → likely interacting; downshift.
+    Interactive,
+}
+
+/// Process-wide foreground state holder. The per-OS watcher updates it
+/// via [`set_foreground_state`]; the throttle reads via
+/// [`current_foreground_state`]. Cheap atomic load.
+static FOREGROUND_STATE: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+
+pub fn current_foreground_state() -> ForegroundState {
+    match FOREGROUND_STATE.load(std::sync::atomic::Ordering::Relaxed) {
+        1 => ForegroundState::Interactive,
+        _ => ForegroundState::Idle,
+    }
+}
+
+pub fn set_foreground_state(state: ForegroundState) {
+    let val = match state {
+        ForegroundState::Idle => 0,
+        ForegroundState::Interactive => 1,
+    };
+    FOREGROUND_STATE.store(val, std::sync::atomic::Ordering::Relaxed);
 }
 
 #[cfg(test)]
@@ -167,5 +231,62 @@ mod tests {
             mythodikal_cpu_percent: 90.0,
         };
         assert_eq!(AdaptiveThrottle::policy(8, scan_pegging), 8);
+    }
+
+    // TASK-204 — adaptive parallelism + foreground backoff tests.
+
+    #[test]
+    fn task_204_foreground_idle_preserves_cpu_policy() {
+        assert_eq!(
+            AdaptiveThrottle::policy_with_foreground(8, load(5.0), ForegroundState::Idle),
+            8
+        );
+        assert_eq!(
+            AdaptiveThrottle::policy_with_foreground(8, load(50.0), ForegroundState::Idle),
+            6
+        );
+    }
+
+    #[test]
+    fn task_204_foreground_interactive_clamps_to_half() {
+        // Even with idle CPU, an interactive foreground clamps to
+        // max(1, base/2).
+        assert_eq!(
+            AdaptiveThrottle::policy_with_foreground(8, load(5.0), ForegroundState::Interactive),
+            4
+        );
+        // CPU-driven downshift wins when it's tighter than the
+        // foreground clamp.
+        assert_eq!(
+            AdaptiveThrottle::policy_with_foreground(8, load(95.0), ForegroundState::Interactive),
+            1
+        );
+        // Floor at 1 even for tiny base.
+        assert_eq!(
+            AdaptiveThrottle::policy_with_foreground(1, load(5.0), ForegroundState::Interactive),
+            1
+        );
+    }
+
+    #[test]
+    fn task_204_resize_updates_base() {
+        let mut t = AdaptiveThrottle::new(Throttle::with_workers(4));
+        assert_eq!(t.base().max_workers, 4);
+        t.resize(12);
+        assert_eq!(t.base().max_workers, 12);
+        // Zero clamps to 1.
+        t.resize(0);
+        assert_eq!(t.base().max_workers, 1);
+    }
+
+    #[test]
+    fn task_204_foreground_state_atomic_set_get() {
+        // Default is Idle.
+        set_foreground_state(ForegroundState::Idle);
+        assert_eq!(current_foreground_state(), ForegroundState::Idle);
+        set_foreground_state(ForegroundState::Interactive);
+        assert_eq!(current_foreground_state(), ForegroundState::Interactive);
+        // Reset so other tests aren't affected by the shared static.
+        set_foreground_state(ForegroundState::Idle);
     }
 }

@@ -26,6 +26,7 @@ use crate::scan::{
     RESUME_TOKEN_PATH_CAP, ResumeToken, ScanHandle, ScanOptions, ScanProgress, ScanTarget,
 };
 use crate::throttle::{AdaptiveThrottle, Throttle};
+use crate::walker::resume::ScanCursor;
 use crate::walker::{FileWalker, MultiVolumeWalker, WalkEvent, WalkOpts};
 
 /// The default progress-channel capacity. Subscribers that lag past this
@@ -170,6 +171,56 @@ impl ScanEngine {
             (id, snap)
         };
         let _ = exclusions_snap; // reserved for future per-scan matcher
+
+        // TASK-201 — Resumable scans across reboots (the *ungraceful*
+        // counterpart to Phase 4's ResumeToken). Load any unfinished
+        // cursor from a prior crashed scan and adopt it as a read-only
+        // skip-set IF its root matches this scan's first root — a stale
+        // cursor from a different scope would silently skip legitimate
+        // work. Mark the recovered cursor finished as we adopt it so a
+        // later scan doesn't try to re-adopt the same one. Construct a
+        // fresh live cursor for THIS scan and persist it once before
+        // the workers start so a SIGKILL between here and the first
+        // 5 s tick still surfaces a recovery candidate.
+        let first_root: std::path::PathBuf = target
+            .paths()
+            .next()
+            .cloned()
+            .unwrap_or_else(|| std::path::PathBuf::from("."));
+        let (recovery_cursor, live_cursor) = match self.db.lock() {
+            Ok(conn) => {
+                let recovery: Option<ScanCursor> = ScanCursor::load_latest_unfinished(&conn)
+                    .ok()
+                    .flatten()
+                    .filter(|c| c.root == first_root);
+                if let Some(rc) = &recovery
+                    && let Err(err) = ScanCursor::mark_finished(&conn, rc.scan_id, started_at_utc)
+                {
+                    tracing::warn!(
+                        error = %err,
+                        recovered_scan_id = rc.scan_id,
+                        "mark prior scan-cursor finished failed; continuing"
+                    );
+                }
+                let live = ScanCursor::new(scan_id, first_root.clone(), started_at_utc);
+                if let Err(err) = live.persist(&conn) {
+                    tracing::warn!(
+                        error = %err,
+                        scan_id,
+                        "initial scan-cursor persist failed; continuing"
+                    );
+                }
+                (recovery.map(Arc::new), Arc::new(Mutex::new(live)))
+            }
+            Err(_) => (
+                None,
+                Arc::new(Mutex::new(ScanCursor::new(
+                    scan_id,
+                    first_root,
+                    started_at_utc,
+                ))),
+            ),
+        };
 
         let (tx, rx) = broadcast::channel(PROGRESS_CHANNEL_CAPACITY);
         let (
@@ -648,6 +699,61 @@ impl ScanEngine {
                 })
                 .expect("spawn scan-heartbeat");
         } // end heartbeat_enabled gate
+
+        // TASK-201 — Scan-cursor persister. Snapshots the live walked-
+        // set cursor every 5 s so a SIGKILL or power loss loses at most
+        // a few seconds of progress. Non-blocking from the worker's
+        // perspective: we lock the cursor only long enough to serialize
+        // the bloom to bytes, release the cursor lock, and then take
+        // the DB lock just for the upsert. Retires when `scan_alive`
+        // flips to false at finalize.
+        let cursor_persister_alive = scan_alive.clone();
+        let cursor_persister_cursor = live_cursor.clone();
+        let cursor_persister_db = db.clone();
+        std::thread::Builder::new()
+            .name("mythkernel/scan-cursor-persister".into())
+            .spawn(move || {
+                loop {
+                    std::thread::sleep(std::time::Duration::from_secs(5));
+                    if !cursor_persister_alive.load(Ordering::Relaxed) {
+                        return;
+                    }
+                    let snapshot = match cursor_persister_cursor.lock() {
+                        Ok(c) => Some((
+                            c.scan_id,
+                            c.root.clone(),
+                            c.cursor_path.clone(),
+                            c.walked_bloom.to_bytes(),
+                            c.started_at,
+                        )),
+                        Err(_) => None,
+                    };
+                    let Some((sid, root, cpath, blob, started_at)) = snapshot else {
+                        continue;
+                    };
+                    if let Ok(conn) = cursor_persister_db.lock()
+                        && let Err(err) = conn.execute(
+                            "INSERT INTO scan_cursors (scan_id, root, cursor_path, walked_bloom, started_at)
+                             VALUES (?1, ?2, ?3, ?4, ?5)
+                             ON CONFLICT(scan_id) DO UPDATE SET
+                                 root         = excluded.root,
+                                 cursor_path  = excluded.cursor_path,
+                                 walked_bloom = excluded.walked_bloom",
+                            rusqlite::params![
+                                sid,
+                                root.to_string_lossy().as_ref(),
+                                cpath.to_string_lossy().as_ref(),
+                                blob,
+                                started_at,
+                            ],
+                        )
+                    {
+                        tracing::warn!(error = %err, scan_id = sid, "scan-cursor persist failed");
+                    }
+                }
+            })
+            .expect("spawn scan-cursor-persister");
+
         let foreground = opts.foreground;
         let compute_sha256 = opts.compute_sha256;
         let include_archives = opts.include_archives;
@@ -713,18 +819,29 @@ impl ScanEngine {
                 let ended_at_utc = now_utc();
                 let duration_ms = started_at_instant.elapsed().as_millis() as u64;
                 let finalize_status = match db.lock() {
-                    Ok(conn) => history::finalize_scan(
-                        &conn,
-                        scan_id,
-                        ended_at_utc,
-                        ScanStatus::Completed,
-                        files_visited,
-                        files_hashed,
-                        0,
-                        0,
-                        bytes_visited,
-                        findings_count,
-                    ),
+                    Ok(conn) => {
+                        // TASK-201 — Flush the live walked-set one last
+                        // time so the persisted row reflects every path
+                        // the workers visited (the 5 s persister may
+                        // not have caught a fast / short scan); then
+                        // mark the cursor finished.
+                        if let Ok(live) = live_cursor.lock() {
+                            let _ = live.persist(&conn);
+                        }
+                        let _ = ScanCursor::mark_finished(&conn, scan_id, ended_at_utc);
+                        history::finalize_scan(
+                            &conn,
+                            scan_id,
+                            ended_at_utc,
+                            ScanStatus::Completed,
+                            files_visited,
+                            files_hashed,
+                            0,
+                            0,
+                            bytes_visited,
+                            findings_count,
+                        )
+                    }
                     Err(_) => Err(crate::db::DbError::Poisoned),
                 };
                 match finalize_status {
@@ -779,6 +896,8 @@ impl ScanEngine {
                 let enum_complete = enum_complete.clone();
                 let tx = tx_for_worker.clone();
                 let archive_entries_counter = archive_entries_counter.clone();
+                let recovery_cursor = recovery_cursor.clone();
+                let live_cursor = live_cursor.clone();
                 let handle = std::thread::Builder::new()
                     .name(format!("mythkernel/scan-worker-{worker_idx}"))
                     .spawn(move || {
@@ -810,6 +929,8 @@ impl ScanEngine {
                             include_archives,
                             archive_entries_counter,
                             has_crc32_gate,
+                            recovery_cursor,
+                            live_cursor,
                         };
                         run_worker_loop(&ctx);
                     })
@@ -870,6 +991,15 @@ impl ScanEngine {
                 // intent. Counters carry the work actually done.
                 if let Ok(conn) = db.lock() {
                     let _ = history::set_resume_token(&conn, scan_id, &[]);
+                    // TASK-201 — Flush walked-set + mark finished. User
+                    // explicitly cancelled, so the next scan launch
+                    // should NOT adopt this scan's walked-set as
+                    // recovery skip data (cancellation is the user's
+                    // signal to start fresh next time).
+                    if let Ok(live) = live_cursor.lock() {
+                        let _ = live.persist(&conn);
+                    }
+                    let _ = ScanCursor::mark_finished(&conn, scan_id, ended_at_utc);
                     let _ = history::finalize_scan(
                         &conn,
                         scan_id,
@@ -894,18 +1024,28 @@ impl ScanEngine {
             }
 
             let finalize_status = match db.lock() {
-                Ok(conn) => history::finalize_scan(
-                    &conn,
-                    scan_id,
-                    ended_at_utc,
-                    ScanStatus::Completed,
-                    files_visited,
-                    files_hashed,
-                    0,
-                    0,
-                    bytes_visited,
-                    findings_count,
-                ),
+                Ok(conn) => {
+                    // TASK-201 — Flush walked-set + mark finished. See
+                    // the include_files=false branch above for context;
+                    // workers have already joined, so the cursor lock
+                    // is uncontended.
+                    if let Ok(live) = live_cursor.lock() {
+                        let _ = live.persist(&conn);
+                    }
+                    let _ = ScanCursor::mark_finished(&conn, scan_id, ended_at_utc);
+                    history::finalize_scan(
+                        &conn,
+                        scan_id,
+                        ended_at_utc,
+                        ScanStatus::Completed,
+                        files_visited,
+                        files_hashed,
+                        0,
+                        0,
+                        bytes_visited,
+                        findings_count,
+                    )
+                }
                 Err(_) => Err(crate::db::DbError::Poisoned),
             };
 
@@ -987,6 +1127,14 @@ struct WorkerCtx {
     /// routes hashing through the gated entry-point and skips
     /// BLAKE3 (+ pipeline) for files whose CRC32 isn't in the set.
     has_crc32_gate: bool,
+    /// TASK-201 — Read-only walked-set from a prior crashed scan. When
+    /// `contains_walked(path)` is true the worker treats the file as
+    /// already processed and short-circuits the hash + detect work.
+    recovery_cursor: Option<Arc<ScanCursor>>,
+    /// TASK-201 — Live cursor for THIS scan. Workers append every
+    /// successfully-processed path; a dedicated persister thread
+    /// snapshots it to SQLite every 5 s.
+    live_cursor: Arc<Mutex<ScanCursor>>,
 }
 
 /// One scan worker's body. Loops on `work_rx` until cancel fires or
@@ -1037,13 +1185,45 @@ fn run_worker_loop(ctx: &WorkerCtx) {
                 Err(crossbeam_channel::RecvTimeoutError::Disconnected) => return,
             }
         };
+
+        // TASK-201 — Recovery skip. When a prior scan crashed mid-walk
+        // its `walked_bloom` was loaded at scan start; if this path is
+        // a bloom hit we treat the file as already processed: bump the
+        // visited counters (matching the exclusions short-circuit
+        // semantics), record it in the live cursor so the persisted
+        // walked-set stays accurate, dedup in `processed_paths`, and
+        // skip the hash + detect pipeline. The 0.1 % FPR means up to
+        // ~1 in 1000 files we WOULD have re-hashed are silently
+        // dropped — correctness is preserved (we just don't re-detect
+        // those files until the next clean scan).
+        if let Some(rc) = ctx.recovery_cursor.as_deref()
+            && rc.contains_walked(&path)
+        {
+            ctx.files_visited.fetch_add(1, Ordering::Relaxed);
+            ctx.bytes_visited.fetch_add(size as i64, Ordering::Relaxed);
+            if let Ok(mut live) = ctx.live_cursor.lock() {
+                live.record_walked(&path);
+            }
+            mark_processed(&ctx.processed_paths, &path.to_string_lossy());
+            continue;
+        }
+
         // Snapshot path/size for retry-on-interrupt; process_one_file
         // moves the path so we need a clone to stash if the call signals
         // retry. The clone is cheap (one PathBuf alloc per file at most
         // and only on the interrupt path).
         let path_for_retry = path.clone();
-        if process_one_file(ctx, path, size, mtime) == ProcessOutcome::Interrupted {
-            pending_retry = Some((path_for_retry, size, mtime));
+        match process_one_file(ctx, path, size, mtime) {
+            ProcessOutcome::Done => {
+                // TASK-201 — Record this path in the live walked-set so
+                // the next persister tick (every ~5 s) captures it.
+                if let Ok(mut live) = ctx.live_cursor.lock() {
+                    live.record_walked(&path_for_retry);
+                }
+            }
+            ProcessOutcome::Interrupted => {
+                pending_retry = Some((path_for_retry, size, mtime));
+            }
         }
     }
 }
@@ -2043,5 +2223,141 @@ mod tests {
             .unwrap();
         assert_eq!(fv, 0);
         assert_eq!(fh, 0);
+    }
+
+    // TASK-201 — Resumable scans across reboots (engine wiring tests).
+
+    #[tokio::test]
+    async fn task_201_cursor_marked_finished_on_completion() {
+        let conn = db::open_in_memory().unwrap();
+        let engine = ScanEngine::new(conn);
+        let dir = tempdir().unwrap();
+        fs::write(dir.path().join("only.txt"), b"hello").unwrap();
+
+        let handle = engine
+            .scan(
+                ScanTarget::Path(dir.path().to_path_buf()),
+                ScanOptions::default(),
+            )
+            .unwrap();
+        let scan_id = handle.scan_id;
+        handle.worker.await.unwrap();
+
+        let db = engine.db.lock().unwrap();
+        let finished_at: Option<i64> = db
+            .query_row(
+                "SELECT finished_at FROM scan_cursors WHERE scan_id = ?1",
+                [scan_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(
+            finished_at.is_some(),
+            "completed scan should leave scan_cursors.finished_at NOT NULL"
+        );
+    }
+
+    #[tokio::test]
+    async fn task_201_recovery_skips_walked_paths_on_next_scan() {
+        // The prompt's validation gate, lifted to the engine layer: when
+        // an unfinished cursor exists at scan-start and its `root`
+        // matches the new scan's first root, every file in its walked-
+        // set bloom is skipped (files_visited still ticks; files_hashed
+        // does NOT).
+        let conn = db::open_in_memory().unwrap();
+        let engine = ScanEngine::new(conn);
+        let dir = tempdir().unwrap();
+        const FILES: usize = 5;
+        for i in 0..FILES {
+            fs::write(
+                dir.path().join(format!("f_{i}.txt")),
+                format!("payload {i}"),
+            )
+            .unwrap();
+        }
+
+        // Scan A — populates the cursor with every file's path.
+        let handle = engine
+            .scan(
+                ScanTarget::Path(dir.path().to_path_buf()),
+                ScanOptions::default(),
+            )
+            .unwrap();
+        let scan_a_id = handle.scan_id;
+        handle.worker.await.unwrap();
+
+        // Simulate a crash mid-scan: un-finish scan A's cursor so the
+        // next scan adopts it as recovery. (The fresh-completion path
+        // already marked it finished above.)
+        {
+            let db = engine.db.lock().unwrap();
+            db.execute(
+                "UPDATE scan_cursors SET finished_at = NULL WHERE scan_id = ?1",
+                [scan_a_id],
+            )
+            .unwrap();
+        }
+
+        // Scan B — runs over the same dir. The recovery cursor's bloom
+        // contains every f_*.txt; every file should short-circuit on
+        // the recovery-skip check before reaching the hasher.
+        let handle = engine
+            .scan(
+                ScanTarget::Path(dir.path().to_path_buf()),
+                ScanOptions::default(),
+            )
+            .unwrap();
+        let scan_b_id = handle.scan_id;
+        let mut rx = handle.progress;
+        handle.worker.await.unwrap();
+
+        let mut files_visited_b = -1i64;
+        let mut files_hashed_b = -1i64;
+        while let Ok(event) = rx.try_recv() {
+            if let ScanProgress::Completed {
+                files_visited,
+                files_hashed,
+                ..
+            } = event
+            {
+                files_visited_b = files_visited;
+                files_hashed_b = files_hashed;
+            }
+        }
+        assert_eq!(
+            files_visited_b, FILES as i64,
+            "visited counter still advances on recovery-skip"
+        );
+        assert_eq!(
+            files_hashed_b, 0,
+            "every file should have been recovery-skipped (no hashes performed)"
+        );
+
+        // The recovery cursor (scan A's) should be marked finished
+        // again now that scan B adopted it.
+        let db = engine.db.lock().unwrap();
+        let finished_at_a: Option<i64> = db
+            .query_row(
+                "SELECT finished_at FROM scan_cursors WHERE scan_id = ?1",
+                [scan_a_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(
+            finished_at_a.is_some(),
+            "adopted recovery cursor should be marked finished"
+        );
+        // And scan B's own cursor should be finished too.
+        let finished_at_b: Option<i64> = db
+            .query_row(
+                "SELECT finished_at FROM scan_cursors WHERE scan_id = ?1",
+                [scan_b_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert!(
+            finished_at_b.is_some(),
+            "scan B's cursor should be marked finished on its own completion"
+        );
     }
 }
