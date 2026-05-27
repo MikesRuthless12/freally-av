@@ -15,7 +15,6 @@
 
 import { Show, createSignal, onCleanup, onMount, type Component } from "solid-js";
 import { invoke } from "@tauri-apps/api/core";
-import { platform as detectPlatform } from "@tauri-apps/plugin-os";
 
 interface MacHeartbeat {
   last_beat_at_ms: number;
@@ -67,7 +66,7 @@ export const MacRealtimeHeartbeat: Component = () => {
 
   onMount(async () => {
     try {
-      setIsMac((await detectPlatform()) === "macos");
+      setIsMac((await invoke<string>("host_os")) === "macos");
     } catch {
       setIsMac(false);
     }

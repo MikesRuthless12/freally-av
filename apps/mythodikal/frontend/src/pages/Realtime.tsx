@@ -18,7 +18,6 @@
 import { For, Show, createResource, createSignal, onMount, type Component } from "solid-js";
 import { A } from "@solidjs/router";
 import { invoke } from "@tauri-apps/api/core";
-import { platform as detectPlatform } from "@tauri-apps/plugin-os";
 import { setShields, shieldsState, shieldsStatusText } from "@/stores/shields";
 import { MacRealtimeHeartbeat } from "@/components/MacRealtimeHeartbeat";
 
@@ -76,7 +75,7 @@ const Realtime: Component = () => {
 
   onMount(async () => {
     try {
-      setIsMac((await detectPlatform()) === "macos");
+      setIsMac((await invoke<string>("host_os")) === "macos");
     } catch {
       setIsMac(false);
     }

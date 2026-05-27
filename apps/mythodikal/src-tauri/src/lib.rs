@@ -158,6 +158,7 @@ pub fn run() {
             tray_set_scanning,
             tray_set_update_available,
             tray_quick_scan_default_path,
+            host_os,
             window_show_main,
             window_hide_main,
             app_quit,
@@ -266,6 +267,24 @@ fn tray_quick_scan_default_path() -> Result<String, String> {
     let home = dirs::home_dir()
         .ok_or_else(|| "could not resolve current user's home directory".to_string())?;
     Ok(home.to_string_lossy().to_string())
+}
+
+/// Return the host OS family the renderer is running on (Phase 9 Wave 2).
+/// The macOS-only Real-time chips (`MacRealtimeHeartbeat`, the Real-time
+/// page's macOS section) call this once on mount to decide whether to
+/// render or stay invisible. Avoids pulling `tauri-plugin-os` for a
+/// single static lookup that `cfg!` already encodes at build time.
+#[tauri::command]
+fn host_os() -> &'static str {
+    if cfg!(target_os = "macos") {
+        "macos"
+    } else if cfg!(target_os = "windows") {
+        "windows"
+    } else if cfg!(target_os = "linux") {
+        "linux"
+    } else {
+        "unknown"
+    }
 }
 
 // ============================================================================
