@@ -103,8 +103,18 @@ pub fn combine(
 
     match (blake3_verdict, sha256_verdict) {
         (
-            Malicious { rule_id: b_id, rule_source: b_src, severity: b_sev, evidence: b_ev },
-            Malicious { rule_id: _s_id, rule_source: s_src, severity: _s_sev, evidence: _s_ev },
+            Malicious {
+                rule_id: b_id,
+                rule_source: b_src,
+                severity: b_sev,
+                evidence: b_ev,
+            },
+            Malicious {
+                rule_id: _s_id,
+                rule_source: s_src,
+                severity: _s_sev,
+                evidence: _s_ev,
+            },
         ) if b_src == s_src => (
             PipelineOutcome::Detected {
                 rule_id: b_id,
@@ -116,7 +126,12 @@ pub fn combine(
             MatchStrength::GoldMultihash,
         ),
         (
-            Malicious { rule_id, rule_source, severity, evidence },
+            Malicious {
+                rule_id,
+                rule_source,
+                severity,
+                evidence,
+            },
             _,
         ) => (
             PipelineOutcome::Detected {
@@ -126,11 +141,20 @@ pub fn combine(
                 evidence,
                 detector_id: "hash_blacklist".to_string(),
             },
-            if is_silver { MatchStrength::Silver } else { MatchStrength::GoldSingle },
+            if is_silver {
+                MatchStrength::Silver
+            } else {
+                MatchStrength::GoldSingle
+            },
         ),
         (
             _,
-            Malicious { rule_id, rule_source, severity, evidence },
+            Malicious {
+                rule_id,
+                rule_source,
+                severity,
+                evidence,
+            },
         ) => (
             PipelineOutcome::Detected {
                 rule_id,
@@ -139,7 +163,11 @@ pub fn combine(
                 evidence,
                 detector_id: "hash_blacklist".to_string(),
             },
-            if is_silver { MatchStrength::Silver } else { MatchStrength::GoldSingle },
+            if is_silver {
+                MatchStrength::Silver
+            } else {
+                MatchStrength::GoldSingle
+            },
         ),
         (Clean, Clean) => (PipelineOutcome::Clean, MatchStrength::GoldSingle),
         // SkipFile pairs are already handled by the early-return
@@ -209,7 +237,11 @@ mod tests {
         );
         assert_eq!(strength, MatchStrength::GoldMultihash);
         match outcome {
-            PipelineOutcome::Detected { rule_source, severity, .. } => {
+            PipelineOutcome::Detected {
+                rule_source,
+                severity,
+                ..
+            } => {
                 assert_eq!(rule_source, "abusech");
                 assert_eq!(severity, Severity::High);
             }
@@ -262,7 +294,10 @@ mod tests {
         );
         // Just ensure it doesn't panic. Severity assert above.
         // Medium stays Medium per downgrade_if_silver logic.
-        assert_eq!(downgrade_if_silver(Severity::Medium, true), Severity::Medium);
+        assert_eq!(
+            downgrade_if_silver(Severity::Medium, true),
+            Severity::Medium
+        );
     }
 
     #[test]
@@ -280,11 +315,7 @@ mod tests {
 
     #[test]
     fn both_clean_stays_clean() {
-        let (outcome, _) = combine(
-            DetectorVerdict::Clean,
-            DetectorVerdict::Clean,
-            false,
-        );
+        let (outcome, _) = combine(DetectorVerdict::Clean, DetectorVerdict::Clean, false);
         assert_eq!(outcome, PipelineOutcome::Clean);
     }
 

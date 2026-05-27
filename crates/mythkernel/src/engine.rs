@@ -322,8 +322,7 @@ impl ScanEngine {
         // enumerate millions more. Trade-off: memory grows with
         // pending-file count. At ~200 B per `(PathBuf, u64, i64)`,
         // 1 M files ≈ 200 MB; tolerable for a desktop AV scanner.
-        let (work_tx, work_rx) =
-            crossbeam_channel::unbounded::<(std::path::PathBuf, u64, i64)>();
+        let (work_tx, work_rx) = crossbeam_channel::unbounded::<(std::path::PathBuf, u64, i64)>();
         let files_running = Arc::new(AtomicU64::new(0));
         let bytes_running = Arc::new(AtomicU64::new(0));
         let enum_complete = Arc::new(AtomicBool::new(false));
@@ -470,8 +469,7 @@ impl ScanEngine {
                                 {
                                     tracing::warn!(
                                         stalled_for_secs = last_event_at.elapsed().as_secs(),
-                                        files_enumerated =
-                                            files_running_p.load(Ordering::Relaxed),
+                                        files_enumerated = files_running_p.load(Ordering::Relaxed),
                                         "walker stalled — finalizing enumeration"
                                     );
                                     break;
@@ -601,54 +599,54 @@ impl ScanEngine {
         // that logs once every 5 s isn't expensive, but the WARN-level
         // logs on a healthy big-file scan (where workers legitimately
         // sit on a slow hash for >5 s) are noise in production logs.
-        let heartbeat_enabled = cfg!(debug_assertions)
-            || std::env::var_os("MYTHODIKAL_HEARTBEAT").is_some();
+        let heartbeat_enabled =
+            cfg!(debug_assertions) || std::env::var_os("MYTHODIKAL_HEARTBEAT").is_some();
         let heartbeat_visited = files_visited_atom.clone();
         let heartbeat_hashed = files_hashed_atom.clone();
         let heartbeat_running = files_running.clone();
         let heartbeat_alive = scan_alive.clone();
         if heartbeat_enabled {
-        std::thread::Builder::new()
-            .name("mythkernel/scan-heartbeat".into())
-            .spawn(move || {
-                let mut prev_visited = 0i64;
-                let mut prev_hashed = 0i64;
-                let mut stall_ticks = 0u32;
-                loop {
-                    std::thread::sleep(std::time::Duration::from_secs(5));
-                    if !heartbeat_alive.load(Ordering::Relaxed) {
-                        return;
+            std::thread::Builder::new()
+                .name("mythkernel/scan-heartbeat".into())
+                .spawn(move || {
+                    let mut prev_visited = 0i64;
+                    let mut prev_hashed = 0i64;
+                    let mut stall_ticks = 0u32;
+                    loop {
+                        std::thread::sleep(std::time::Duration::from_secs(5));
+                        if !heartbeat_alive.load(Ordering::Relaxed) {
+                            return;
+                        }
+                        let v = heartbeat_visited.load(Ordering::Relaxed);
+                        let h = heartbeat_hashed.load(Ordering::Relaxed);
+                        let r = heartbeat_running.load(Ordering::Relaxed);
+                        let dv = v - prev_visited;
+                        let dh = h - prev_hashed;
+                        if dv == 0 && dh == 0 {
+                            stall_ticks += 1;
+                            tracing::warn!(
+                                files_visited = v,
+                                files_hashed = h,
+                                files_enumerated = r,
+                                stall_ticks,
+                                "scan heartbeat: NO PROGRESS in last 5 s"
+                            );
+                        } else {
+                            stall_ticks = 0;
+                            tracing::info!(
+                                files_visited = v,
+                                files_hashed = h,
+                                files_enumerated = r,
+                                delta_visited = dv,
+                                delta_hashed = dh,
+                                "scan heartbeat"
+                            );
+                        }
+                        prev_visited = v;
+                        prev_hashed = h;
                     }
-                    let v = heartbeat_visited.load(Ordering::Relaxed);
-                    let h = heartbeat_hashed.load(Ordering::Relaxed);
-                    let r = heartbeat_running.load(Ordering::Relaxed);
-                    let dv = v - prev_visited;
-                    let dh = h - prev_hashed;
-                    if dv == 0 && dh == 0 {
-                        stall_ticks += 1;
-                        tracing::warn!(
-                            files_visited = v,
-                            files_hashed = h,
-                            files_enumerated = r,
-                            stall_ticks,
-                            "scan heartbeat: NO PROGRESS in last 5 s"
-                        );
-                    } else {
-                        stall_ticks = 0;
-                        tracing::info!(
-                            files_visited = v,
-                            files_hashed = h,
-                            files_enumerated = r,
-                            delta_visited = dv,
-                            delta_hashed = dh,
-                            "scan heartbeat"
-                        );
-                    }
-                    prev_visited = v;
-                    prev_hashed = h;
-                }
-            })
-            .expect("spawn scan-heartbeat");
+                })
+                .expect("spawn scan-heartbeat");
         } // end heartbeat_enabled gate
         let foreground = opts.foreground;
         let compute_sha256 = opts.compute_sha256;
@@ -842,8 +840,7 @@ impl ScanEngine {
                     &cancel_flag_for_finalize,
                 );
                 if flagged > 0 {
-                    findings_count_for_finalize
-                        .fetch_add(flagged as i64, Ordering::Relaxed);
+                    findings_count_for_finalize.fetch_add(flagged as i64, Ordering::Relaxed);
                 }
                 tracing::info!(items, flagged, "heuristics post-pass done");
             }
@@ -1035,12 +1032,7 @@ fn run_worker_loop(ctx: &WorkerCtx) {
 /// cache lookup, MS-signed fast-path, exclusions, hash, pipeline
 /// evaluation, file_mutation enqueue, processed_paths bookkeeping —
 /// happens here. Returns whether the caller should stop the worker.
-fn process_one_file(
-    ctx: &WorkerCtx,
-    path: std::path::PathBuf,
-    size: u64,
-    mtime: i64,
-) {
+fn process_one_file(ctx: &WorkerCtx, path: std::path::PathBuf, size: u64, mtime: i64) {
     let path_str_owned = path.to_string_lossy().into_owned();
 
     // 1. Skip already-processed (resume carry or another worker

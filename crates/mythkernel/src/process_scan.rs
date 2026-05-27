@@ -11,8 +11,8 @@
 //!
 //! Cancellable: checks `cancel_flag` between processes.
 
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System};
 

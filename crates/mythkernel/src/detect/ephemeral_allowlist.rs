@@ -80,7 +80,10 @@ impl EphemeralAllowlistStore {
         created_by: &str,
     ) -> rusqlite::Result<i64> {
         let now = unix_now();
-        let conn = self.conn.lock().expect("ephemeral allowlist mutex poisoned");
+        let conn = self
+            .conn
+            .lock()
+            .expect("ephemeral allowlist mutex poisoned");
         conn.execute(
             "INSERT INTO ephemeral_allowlist
                 (sha256_hex, scope_path, reason, created_at_utc, expires_at_utc, created_by)
@@ -101,7 +104,10 @@ impl EphemeralAllowlistStore {
     /// at scan-start so the detector path doesn't bother evaluating
     /// stale rows.
     pub fn prune_expired(&self, now: i64) -> rusqlite::Result<usize> {
-        let conn = self.conn.lock().expect("ephemeral allowlist mutex poisoned");
+        let conn = self
+            .conn
+            .lock()
+            .expect("ephemeral allowlist mutex poisoned");
         conn.execute(
             "DELETE FROM ephemeral_allowlist WHERE expires_at_utc <= ?1",
             params![now],
@@ -118,7 +124,10 @@ impl EphemeralAllowlistStore {
         candidate_path: Option<&str>,
         now: i64,
     ) -> rusqlite::Result<bool> {
-        let conn = self.conn.lock().expect("ephemeral allowlist mutex poisoned");
+        let conn = self
+            .conn
+            .lock()
+            .expect("ephemeral allowlist mutex poisoned");
         // Prefer the path-scoped row if one matches; fall back to
         // an unscoped row.
         if let Some(p) = candidate_path {
@@ -217,7 +226,9 @@ mod tests {
     #[test]
     fn grant_then_trusted() {
         let store = fresh_store();
-        store.grant("abc", None, "test", TrustDuration::Days7, "user").unwrap();
+        store
+            .grant("abc", None, "test", TrustDuration::Days7, "user")
+            .unwrap();
         let trusted = store.is_trusted("abc", None, unix_now()).unwrap();
         assert!(trusted);
     }
@@ -226,22 +237,34 @@ mod tests {
     fn scope_path_enforced() {
         let store = fresh_store();
         store
-            .grant("abc", Some("/home/me/x.exe"), "test", TrustDuration::Days7, "user")
+            .grant(
+                "abc",
+                Some("/home/me/x.exe"),
+                "test",
+                TrustDuration::Days7,
+                "user",
+            )
             .unwrap();
         // Matching path is trusted.
-        assert!(store
-            .is_trusted("abc", Some("/home/me/x.exe"), unix_now())
-            .unwrap());
+        assert!(
+            store
+                .is_trusted("abc", Some("/home/me/x.exe"), unix_now())
+                .unwrap()
+        );
         // Different path is NOT trusted (no fallback to unscoped — there's no unscoped row).
-        assert!(!store
-            .is_trusted("abc", Some("/tmp/x.exe"), unix_now())
-            .unwrap());
+        assert!(
+            !store
+                .is_trusted("abc", Some("/tmp/x.exe"), unix_now())
+                .unwrap()
+        );
     }
 
     #[test]
     fn expired_row_not_trusted() {
         let store = fresh_store();
-        store.grant("abc", None, "test", TrustDuration::Days7, "user").unwrap();
+        store
+            .grant("abc", None, "test", TrustDuration::Days7, "user")
+            .unwrap();
         // Probe far into the future — past expiry.
         let way_future = unix_now() + 365 * 24 * 60 * 60;
         assert!(!store.is_trusted("abc", None, way_future).unwrap());
@@ -250,7 +273,9 @@ mod tests {
     #[test]
     fn prune_drops_expired() {
         let store = fresh_store();
-        store.grant("abc", None, "old", TrustDuration::Days7, "user").unwrap();
+        store
+            .grant("abc", None, "old", TrustDuration::Days7, "user")
+            .unwrap();
         let way_future = unix_now() + 365 * 24 * 60 * 60;
         let pruned = store.prune_expired(way_future).unwrap();
         assert_eq!(pruned, 1);

@@ -116,10 +116,8 @@ impl SbomAllowlist {
                 };
                 let lc = hex.to_ascii_lowercase();
                 if lc.len() == 64 && lc.chars().all(|c| c.is_ascii_hexdigit()) {
-                    self.by_sha256.insert(
-                        lc,
-                        (name.clone(), version.clone(), label.to_string()),
-                    );
+                    self.by_sha256
+                        .insert(lc, (name.clone(), version.clone(), label.to_string()));
                     added += 1;
                 }
             }

@@ -76,9 +76,7 @@ pub enum CuckooError {
         declared_payload_bytes: u64,
         actual_payload_bytes: usize,
     },
-    #[error(
-        "cuckoo epoch mismatch: file says {file_epoch}, caller asked for {wanted_epoch}"
-    )]
+    #[error("cuckoo epoch mismatch: file says {file_epoch}, caller asked for {wanted_epoch}")]
     EpochMismatch { file_epoch: u64, wanted_epoch: u64 },
     #[error("digest must be at least 16 bytes, got {0}")]
     DigestTooShort(usize),
@@ -225,7 +223,9 @@ impl CuckooFilter {
         let mut kick_seed = current_fp as u32 ^ (rand::random::<u32>());
         for _ in 0..MAX_KICKS {
             let entry = (kick_seed) % self.entries_per_bucket;
-            kick_seed = kick_seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+            kick_seed = kick_seed
+                .wrapping_mul(1_664_525)
+                .wrapping_add(1_013_904_223);
             let slot = self.slot(current_bucket, entry);
             let evicted = self.buckets[slot];
             self.buckets[slot] = current_fp;
@@ -343,10 +343,7 @@ impl CuckooFilter {
     /// a fresh artifact via [`Self::write_to`] rather than mutating
     /// in place. Read-only mapping avoids needing write permission
     /// on the artifact + closes off any concurrent-mutation footgun.
-    pub fn open<P: AsRef<Path>>(
-        path: P,
-        expected_epoch: Option<u64>,
-    ) -> Result<Self, CuckooError> {
+    pub fn open<P: AsRef<Path>>(path: P, expected_epoch: Option<u64>) -> Result<Self, CuckooError> {
         let f = File::open(path)?;
         // SAFETY: we map a regular file we just opened read-only;
         // the OS returns an immutable mapping.
@@ -354,10 +351,7 @@ impl CuckooFilter {
         Self::from_mmap_mut(mmap, expected_epoch)
     }
 
-    fn from_mmap_mut(
-        mmap: Mmap,
-        expected_epoch: Option<u64>,
-    ) -> Result<Self, CuckooError> {
+    fn from_mmap_mut(mmap: Mmap, expected_epoch: Option<u64>) -> Result<Self, CuckooError> {
         let bytes = &mmap[..];
         if bytes.len() < HEADER_LEN {
             return Err(CuckooError::TooShort(bytes.len()));
@@ -405,8 +399,9 @@ impl CuckooFilter {
                 actual_payload_bytes: bytes.len() - HEADER_LEN,
             });
         }
-        let declared_payload_bytes =
-            bucket_count.saturating_mul(entries_per_bucket as u64).saturating_mul(2);
+        let declared_payload_bytes = bucket_count
+            .saturating_mul(entries_per_bucket as u64)
+            .saturating_mul(2);
         let actual_payload_bytes = bytes.len() - HEADER_LEN;
         if actual_payload_bytes as u64 != declared_payload_bytes {
             return Err(CuckooError::LengthMismatch {
@@ -420,10 +415,13 @@ impl CuckooFilter {
         // self-contained even after the mmap drops. Trade memory for
         // simplicity — the production scanner uses Bloom (TASK-178)
         // as the hot-path filter; Cuckoo is build-pipeline only.
-        let mut buckets = Vec::with_capacity((bucket_count as usize) * (entries_per_bucket as usize));
+        let mut buckets =
+            Vec::with_capacity((bucket_count as usize) * (entries_per_bucket as usize));
         let mut off = HEADER_LEN;
         for _ in 0..(bucket_count as usize) * (entries_per_bucket as usize) {
-            buckets.push(u16::from_le_bytes(bytes[off..off + 2].try_into().expect("2 bytes")));
+            buckets.push(u16::from_le_bytes(
+                bytes[off..off + 2].try_into().expect("2 bytes"),
+            ));
             off += 2;
         }
         // Same CR-C1 derivation as `with_params`.
@@ -511,7 +509,10 @@ mod tests {
         let err = CuckooFilter::open(&path, Some(99)).unwrap_err();
         assert!(matches!(
             err,
-            CuckooError::EpochMismatch { file_epoch: 42, wanted_epoch: 99 }
+            CuckooError::EpochMismatch {
+                file_epoch: 42,
+                wanted_epoch: 99
+            }
         ));
     }
 

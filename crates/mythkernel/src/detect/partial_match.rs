@@ -79,9 +79,7 @@ pub enum PartialMatchError {
     },
     #[error("rows are not sorted ascending (failed at row {0})")]
     NotSorted(usize),
-    #[error(
-        "partial-match epoch mismatch: file says {file_epoch}, caller wants {wanted_epoch}"
-    )]
+    #[error("partial-match epoch mismatch: file says {file_epoch}, caller wants {wanted_epoch}")]
     EpochMismatch { file_epoch: u64, wanted_epoch: u64 },
 }
 
@@ -101,9 +99,7 @@ pub fn size_band(file_size: u64) -> u64 {
 /// The returned tuple is what the [`PartialMatchIndex::contains`]
 /// path consumes; the build pipeline emits the same tuple for every
 /// gold-tier sample whose `size_bytes ≥ PARTIAL_MATCH_MIN_FILE_BYTES`.
-pub fn compute_fingerprint(
-    path: &Path,
-) -> Result<Option<PartialFingerprint>, io::Error> {
+pub fn compute_fingerprint(path: &Path) -> Result<Option<PartialFingerprint>, io::Error> {
     let mut f = File::open(path)?;
     let file_size = f.metadata()?.len();
     if file_size < PARTIAL_MATCH_MIN_FILE_BYTES {
@@ -171,10 +167,7 @@ impl PartialMatchIndex {
         Self::from_mmap(mmap, expected_epoch)
     }
 
-    fn from_mmap(
-        mmap: Mmap,
-        expected_epoch: Option<u64>,
-    ) -> Result<Self, PartialMatchError> {
+    fn from_mmap(mmap: Mmap, expected_epoch: Option<u64>) -> Result<Self, PartialMatchError> {
         let bytes = &mmap[..];
         if bytes.len() < HEADER_LEN {
             return Err(PartialMatchError::TooShort(bytes.len()));
@@ -277,11 +270,7 @@ impl PartialMatchIndex {
         // count * ROW_LEN, so offset + ROW_LEN <= payload bounds.
         let mut out = [0u8; ROW_LEN];
         unsafe {
-            std::ptr::copy_nonoverlapping(
-                self.payload_ptr.add(offset),
-                out.as_mut_ptr(),
-                ROW_LEN,
-            );
+            std::ptr::copy_nonoverlapping(self.payload_ptr.add(offset), out.as_mut_ptr(), ROW_LEN);
         }
         out
     }
@@ -331,7 +320,10 @@ pub fn write_sorted<P: AsRef<Path>>(
     }
     w.flush()?;
     let mut file = w.into_inner().map_err(|e| {
-        PartialMatchError::Io(io::Error::other(format!("flush partial-match: {}", e.error())))
+        PartialMatchError::Io(io::Error::other(format!(
+            "flush partial-match: {}",
+            e.error()
+        )))
     })?;
     file.seek(SeekFrom::Start(0))?;
     file.sync_all()?;
@@ -457,7 +449,9 @@ mod tests {
             }
             f.sync_all().unwrap();
         }
-        let fp = compute_fingerprint(&path).unwrap().expect("file is big enough");
+        let fp = compute_fingerprint(&path)
+            .unwrap()
+            .expect("file is big enough");
         // Expected prefix: BLAKE3 of 8 MB of 0xCD.
         let expected: [u8; 32] = {
             let mut h = blake3::Hasher::new();

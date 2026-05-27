@@ -27,7 +27,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 pub enum IocError {
     #[error("sqlite: {0}")]
     Sqlite(#[from] rusqlite::Error),
-    #[error("input doesn't look like a supported IOC bundle (plain hash list, CSV, STIX 2.1, or MISP export)")]
+    #[error(
+        "input doesn't look like a supported IOC bundle (plain hash list, CSV, STIX 2.1, or MISP export)"
+    )]
     UnrecognisedFormat,
     #[error("invalid IOC type: {0} (expected md5, sha1, sha256, or blake3)")]
     BadType(String),
@@ -166,9 +168,7 @@ fn parse_csv(text: &str) -> Result<Vec<Ioc>, IocError> {
                 Err(_) => continue,
             };
             let val = parts[vi].to_ascii_lowercase();
-            if val.len() == kind.expected_hex_len()
-                && val.chars().all(|c| c.is_ascii_hexdigit())
-            {
+            if val.len() == kind.expected_hex_len() && val.chars().all(|c| c.is_ascii_hexdigit()) {
                 iocs.push(Ioc { kind, value: val });
             }
         }
@@ -224,12 +224,12 @@ fn parse_stix_json(text: &str) -> Result<Vec<Ioc>, IocError> {
                 && let Some(start) = pattern[idx..].find('\'')
                 && let Some(end_rel) = pattern[idx + start + 1..].find('\'')
             {
-                let v = pattern[idx + start + 1..idx + start + 1 + end_rel]
-                    .to_ascii_lowercase();
-                if v.len() == kind.expected_hex_len()
-                    && v.chars().all(|c| c.is_ascii_hexdigit())
-                {
-                    iocs.push(Ioc { kind: *kind, value: v });
+                let v = pattern[idx + start + 1..idx + start + 1 + end_rel].to_ascii_lowercase();
+                if v.len() == kind.expected_hex_len() && v.chars().all(|c| c.is_ascii_hexdigit()) {
+                    iocs.push(Ioc {
+                        kind: *kind,
+                        value: v,
+                    });
                 }
             }
         }
@@ -276,9 +276,7 @@ fn parse_misp_json(text: &str) -> Result<Vec<Ioc>, IocError> {
             _ => continue,
         };
         let v = a.value.to_ascii_lowercase();
-        if v.len() == kind.expected_hex_len()
-            && v.chars().all(|c| c.is_ascii_hexdigit())
-        {
+        if v.len() == kind.expected_hex_len() && v.chars().all(|c| c.is_ascii_hexdigit()) {
             iocs.push(Ioc { kind, value: v });
         }
     }
@@ -305,12 +303,7 @@ pub fn insert_bundle(
              VALUES (?1, ?2, ?3, ?4)",
         )?;
         for ioc in iocs {
-            inserted += stmt.execute(params![
-                bundle_label,
-                ioc.kind.as_str(),
-                &ioc.value,
-                now,
-            ])?;
+            inserted += stmt.execute(params![bundle_label, ioc.kind.as_str(), &ioc.value, now,])?;
         }
     }
     tx.commit()?;

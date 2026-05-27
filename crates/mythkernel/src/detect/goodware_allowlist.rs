@@ -258,7 +258,8 @@ mod tests {
         }
         // The full union must NOT be loaded when slices are present
         // (avoids double-counting the same hashes).
-        assert!(paths.iter().all(|p| !p.ends_with("nsrl_sha256.bin") || p.file_name().unwrap().to_string_lossy().contains('_')));
+        assert!(paths.iter().all(|p| !p.ends_with("nsrl_sha256.bin")
+            || p.file_name().unwrap().to_string_lossy().contains('_')));
     }
 
     #[test]

@@ -663,21 +663,15 @@ async fn run_scan_event_forwarder(
                         // three-piece to X/Y presentation here.
                         ScanProgress::EnumerationComplete { .. } => "scan:enumeration_complete",
                         // Phase 6 — registry sweep events.
-                        ScanProgress::RegistryPhaseStarted { .. } => {
-                            "scan:registry_phase_started"
-                        }
+                        ScanProgress::RegistryPhaseStarted { .. } => "scan:registry_phase_started",
                         ScanProgress::RegistryProgress { .. } => "scan:registry_progress",
                         ScanProgress::RegistryPhaseComplete { .. } => {
                             "scan:registry_phase_complete"
                         }
                         // Phase 6 — process sweep events.
-                        ScanProgress::ProcessPhaseStarted { .. } => {
-                            "scan:process_phase_started"
-                        }
+                        ScanProgress::ProcessPhaseStarted { .. } => "scan:process_phase_started",
                         ScanProgress::ProcessProgress { .. } => "scan:process_progress",
-                        ScanProgress::ProcessPhaseComplete { .. } => {
-                            "scan:process_phase_complete"
-                        }
+                        ScanProgress::ProcessPhaseComplete { .. } => "scan:process_phase_complete",
                         ScanProgress::ArchiveEntry { .. } => "scan:archive_entry",
                         ScanProgress::HeuristicPhaseStarted { .. } => {
                             "scan:heuristic_phase_started"
@@ -851,9 +845,7 @@ pub async fn history_clear(state: State<'_, AppState>) -> Result<usize, String> 
     let _ = conn
         .execute("DELETE FROM findings", [])
         .map_err(stringify)?;
-    let scans_deleted = conn
-        .execute("DELETE FROM scans", [])
-        .map_err(stringify)?;
+    let scans_deleted = conn.execute("DELETE FROM scans", []).map_err(stringify)?;
     // Sec-clean: also wipe the verdict_cache so the next scan does a
     // fresh hash + pipeline pass on every file (the user clearing
     // history typically wants a fully clean slate).
@@ -1851,10 +1843,7 @@ pub fn build_pipeline_from_feeds(data_dir: &std::path::Path) -> DetectionPipelin
     // scan cost per file for a no-op.
     let yara_dir = feeds_dir.join("yara_rules");
     if let Some(yara) = mythkernel::detect::yara_engine::YaraDetector::from_dir(&yara_dir) {
-        tracing::info!(
-            yara_rules = yara.rule_count(),
-            "loaded YARA rule pack"
-        );
+        tracing::info!(yara_rules = yara.rule_count(), "loaded YARA rule pack");
         detectors.push(Box::new(yara));
     }
 

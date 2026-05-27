@@ -69,9 +69,7 @@ pub enum BloomError {
         declared_bytes: u64,
         actual_payload_bytes: usize,
     },
-    #[error(
-        "bloom epoch mismatch: file says {file_epoch}, caller asked for {wanted_epoch}"
-    )]
+    #[error("bloom epoch mismatch: file says {file_epoch}, caller asked for {wanted_epoch}")]
     EpochMismatch { file_epoch: u64, wanted_epoch: u64 },
     #[error("bloom filter input digest must be at least 16 bytes, got {0}")]
     DigestTooShort(usize),
@@ -102,10 +100,7 @@ impl BloomFile {
     /// caller enforce that the filter matches the same export epoch
     /// the rest of the artifacts came from — pass `None` to skip the
     /// epoch check (forensic / debugging only).
-    pub fn open<P: AsRef<Path>>(
-        path: P,
-        expected_epoch: Option<u64>,
-    ) -> Result<Self, BloomError> {
+    pub fn open<P: AsRef<Path>>(path: P, expected_epoch: Option<u64>) -> Result<Self, BloomError> {
         let f = File::open(path)?;
         // SAFETY: we map a regular file we just opened read-only; the
         // OS returns an immutable mapping.
@@ -279,7 +274,10 @@ impl Builder {
     pub fn write_to<P: AsRef<Path>>(&self, path: P) -> Result<(), BloomError> {
         let final_path = path.as_ref();
         let tmp_path = final_path.with_extension({
-            let ext = final_path.extension().and_then(|s| s.to_str()).unwrap_or("bloom");
+            let ext = final_path
+                .extension()
+                .and_then(|s| s.to_str())
+                .unwrap_or("bloom");
             format!("{ext}.tmp")
         });
         let now = std::time::SystemTime::now()
@@ -451,7 +449,10 @@ mod tests {
         let err = BloomFile::open(&path, Some(43)).unwrap_err();
         assert!(matches!(
             err,
-            BloomError::EpochMismatch { file_epoch: 42, wanted_epoch: 43 }
+            BloomError::EpochMismatch {
+                file_epoch: 42,
+                wanted_epoch: 43
+            }
         ));
 
         // Open with the right epoch works.
@@ -466,7 +467,10 @@ mod tests {
         // Write a header with the wrong magic.
         std::fs::write(&path, b"NOPENOPE\x01\x00\x00\x00\x00\x00\x00\x00").unwrap();
         // Pad to header length.
-        let mut f = std::fs::OpenOptions::new().append(true).open(&path).unwrap();
+        let mut f = std::fs::OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .unwrap();
         f.write_all(&[0u8; HEADER_LEN - 16]).unwrap();
         drop(f);
         let err = BloomFile::open(&path, None).unwrap_err();

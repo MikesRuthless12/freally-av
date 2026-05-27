@@ -135,8 +135,7 @@ fn windows_msstore_package_from_canonical(canonical: &Path) -> Option<String> {
 /// AppX/MSIX install. **Existence is a soft signal**; full signature
 /// validation is platform-daemon scope.
 pub fn windows_msstore_has_appx_manifest(package_dir: &Path) -> bool {
-    package_dir.join("AppxManifest.xml").exists()
-        && package_dir.join("AppxSignature.p7x").exists()
+    package_dir.join("AppxManifest.xml").exists() && package_dir.join("AppxSignature.p7x").exists()
 }
 
 #[derive(Debug, Default)]
@@ -194,9 +193,7 @@ pub fn linux_pkg_kind(path: &Path) -> Option<LinuxPkgKind> {
     let s = canonical.to_string_lossy();
     if s.starts_with("/snap/") {
         Some(LinuxPkgKind::Snap)
-    } else if s.starts_with("/var/lib/flatpak/")
-        || s.contains("/.local/share/flatpak/")
-    {
+    } else if s.starts_with("/var/lib/flatpak/") || s.contains("/.local/share/flatpak/") {
         Some(LinuxPkgKind::Flatpak)
     } else if canonical.extension().and_then(|s| s.to_str()) == Some("AppImage") {
         Some(LinuxPkgKind::AppImage)
@@ -256,8 +253,10 @@ mod tests {
         // paths return None even when the string prefix matches.
         // This is a tightening: we'd rather miss the App-Store
         // trust than allow a symlink-shaped attack.
-        assert!(macos_appstore_bundle_for(Path::new("/Applications/Foo.app/Contents/MacOS/Foo"))
-            .is_none());
+        assert!(
+            macos_appstore_bundle_for(Path::new("/Applications/Foo.app/Contents/MacOS/Foo"))
+                .is_none()
+        );
     }
 
     #[test]
@@ -273,7 +272,9 @@ mod tests {
     fn windows_msstore_path_extracts_package_from_canonical() {
         // Tests the canonical-parse helper directly so we don't
         // need a real WindowsApps install on the test host.
-        let p = Path::new(r"C:\Program Files\WindowsApps\Microsoft.WindowsCalculator_8wekyb3d8bbwe\Calculator.exe");
+        let p = Path::new(
+            r"C:\Program Files\WindowsApps\Microsoft.WindowsCalculator_8wekyb3d8bbwe\Calculator.exe",
+        );
         let pkg = windows_msstore_package_from_canonical(p).unwrap();
         assert!(pkg.contains("microsoft.windowscalculator"));
     }
@@ -282,8 +283,10 @@ mod tests {
     fn windows_msstore_path_outside_root_returns_none() {
         // Real path lookup against a path that surely doesn't exist;
         // canonicalize returns Err → None.
-        assert!(windows_msstore_package_for(Path::new(r"C:\Users\me\Downloads\thing-nonexistent.exe"))
-            .is_none());
+        assert!(
+            windows_msstore_package_for(Path::new(r"C:\Users\me\Downloads\thing-nonexistent.exe"))
+                .is_none()
+        );
     }
 
     #[test]

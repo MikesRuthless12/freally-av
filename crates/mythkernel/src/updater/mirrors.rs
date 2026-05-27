@@ -69,10 +69,7 @@ impl MirrorPool {
     /// scheme allowlist. Returns `Err(MirrorError)` on the first
     /// invalid URL so a typo doesn't silently accept an `http://`
     /// mirror.
-    pub fn new(
-        feed_name: impl Into<String>,
-        urls: Vec<String>,
-    ) -> Result<Self, MirrorError> {
+    pub fn new(feed_name: impl Into<String>, urls: Vec<String>) -> Result<Self, MirrorError> {
         for u in &urls {
             validate_mirror_url(u)?;
         }
@@ -250,7 +247,10 @@ mod tests {
     fn fetch_with_failover_walks_pool() {
         let mut pool = MirrorPool::new(
             "x",
-            vec!["https://bad.example.com".to_string(), "https://good.example.com".to_string()],
+            vec![
+                "https://bad.example.com".to_string(),
+                "https://good.example.com".to_string(),
+            ],
         )
         .unwrap();
         let result: Result<(u32, String), &'static str> =

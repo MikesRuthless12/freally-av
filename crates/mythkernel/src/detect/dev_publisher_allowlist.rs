@@ -47,7 +47,10 @@ impl Ecosystem {
 /// `(ecosystem, package_name)` when the path is recognisable as
 /// living under a known install root.
 pub fn classify_dev_path(path: &Path) -> Option<(Ecosystem, String)> {
-    let s = path.to_string_lossy().replace('\\', "/").to_ascii_lowercase();
+    let s = path
+        .to_string_lossy()
+        .replace('\\', "/")
+        .to_ascii_lowercase();
     // Cargo: `~/.cargo/registry/src/index.crates.io-<hash>/<crate>-<ver>/...`
     if let Some(idx) = s.find("/.cargo/registry/src/")
         && let Some(after) = s.get(idx..)
@@ -137,7 +140,10 @@ impl DevPublisherAllowlistDetector {
         let mut by_eco_pkg = HashMap::new();
         for p in &keys.publishers {
             by_eco_pkg.insert(
-                (p.ecosystem.to_ascii_lowercase(), p.package.to_ascii_lowercase()),
+                (
+                    p.ecosystem.to_ascii_lowercase(),
+                    p.package.to_ascii_lowercase(),
+                ),
                 (),
             );
         }

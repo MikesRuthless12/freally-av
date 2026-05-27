@@ -72,7 +72,10 @@ impl Manifest {
     pub fn parse(json: &str) -> Result<Self, DeltaSigError> {
         let m: Manifest = serde_json::from_str(json)?;
         if m.feed_artifact_sha256.len() != 64
-            || !m.feed_artifact_sha256.chars().all(|c| c.is_ascii_hexdigit())
+            || !m
+                .feed_artifact_sha256
+                .chars()
+                .all(|c| c.is_ascii_hexdigit())
         {
             return Err(DeltaSigError::Malformed("feed_artifact_sha256 not hex(64)"));
         }
@@ -121,9 +124,7 @@ where
         });
     }
     if let Some(prior) = cached_prior_sha256
-        && !manifest
-            .prev_epoch_sha256
-            .eq_ignore_ascii_case(prior)
+        && !manifest.prev_epoch_sha256.eq_ignore_ascii_case(prior)
     {
         return Err(DeltaSigError::BrokenChain {
             expected: manifest.prev_epoch_sha256.to_ascii_lowercase(),

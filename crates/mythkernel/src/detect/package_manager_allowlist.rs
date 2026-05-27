@@ -155,18 +155,27 @@ impl PackageManagerAllowlistDetector {
 fn query_owner(path: &Path) -> bool {
     #[cfg(target_os = "linux")]
     {
-        if let Ok(out) = std::process::Command::new("dpkg").arg("-S").arg(path).output()
+        if let Ok(out) = std::process::Command::new("dpkg")
+            .arg("-S")
+            .arg(path)
+            .output()
             && out.status.success()
             && !out.stdout.is_empty()
         {
             return true;
         }
-        if let Ok(out) = std::process::Command::new("pacman").arg("-Qo").arg(path).output()
+        if let Ok(out) = std::process::Command::new("pacman")
+            .arg("-Qo")
+            .arg(path)
+            .output()
             && out.status.success()
         {
             return parse_pacman_qo(&String::from_utf8_lossy(&out.stdout)).is_some();
         }
-        if let Ok(out) = std::process::Command::new("rpm").arg("-qf").arg(path).output()
+        if let Ok(out) = std::process::Command::new("rpm")
+            .arg("-qf")
+            .arg(path)
+            .output()
             && out.status.success()
             && !out.stdout.is_empty()
         {
