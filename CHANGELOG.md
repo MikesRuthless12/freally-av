@@ -10,6 +10,134 @@ Each release section lists which `TASK-NNN` items from `docs/product-roadmap.md`
 
 ## [Unreleased]
 
+## [0.7.20] — Phase 7C Engine Enhancement — _(shipped 2026-05-27)_
+
+### Added — Phase 7C ("Engine Enhancement") foundation wave
+
+20 of 20 Phase 7C wave-1-4 foundation modules landed. ~115 new
+unit tests across the wave; 638 total tests in
+`cargo test -p mythkernel --lib` green.
+
+  **Wave 1 — Scan-orchestration foundations** (already shipped earlier
+  in the phase): TASK-201 (resumable scans), TASK-202 (file_state diff
+  cache + epoch invalidation), TASK-203 (multi-root parallel
+  producers), TASK-204 (foreground-aware throttle + resize),
+  TASK-205 + TASK-206 (dev exclude pack + project detect),
+  TASK-210 (LoopGuard).
+
+  **Wave 2 — File-policy and content modules** (already shipped earlier
+  in the phase): TASK-217 (packer ID), TASK-225 (entropy heatmap),
+  TASK-227 + TASK-228 + TASK-229 (file-policy modules), TASK-230 +
+  TASK-232 + TASK-233 (hot zones + mmap hash + archive bomb guard).
+
+  **Wave 3 — Format-aware detectors** (this release):
+  - **TASK-216** — In-tree PE/ELF/Mach-O header parser
+    (`crates/mythkernel/src/detect/header_parse.rs`). Pure-Rust;
+    triages format, arch, subsystem, linker version, sections,
+    entry RVA, has_signature without `pelite`/`goblin` deps.
+    Foundation for TASK-209/219/222/223. 13 tests.
+  - **TASK-209** — Dual-architecture (fat-binary) scan
+    (`crates/mythkernel/src/walker/dual_arch.rs` +
+    `crates/mythkernel/src/detect/fat_binary.rs`). Slice enumeration
+    for Mach-O Universal + PE ARM64X hybrid binaries; per-slice
+    hashing keyed on `(path, arch)`. 8 tests.
+  - **TASK-211** — Sparse-file aware hashing
+    (`crates/mythkernel/src/hasher_sparse.rs`). FIEMAP/F_LOG2PHYS_EXT
+    extent map + BLAKE3-identical hashing with zero-byte holes.
+    9 tests.
+  - **TASK-212** — Reparse-point / junction traversal policy
+    (`crates/mythkernel/src/walker/reparse.rs`). Typed `ReparseTag`
+    enum (Symlink / MountPoint / OneDrive / AppExecLink / WciLink /
+    Hsm / Dedup) + `ReparsePolicy` with per-volume overrides + class
+    (Local / Removable / Remote / Optical / Ram) defaults. 9 tests.
+  - **TASK-213** — APFS clone-aware scan
+    (`crates/mythkernel/src/walker/apfs_clones.rs`). Per-scan
+    `CloneGroups` registry; verdict inheritance within a single scan;
+    clean clones hash once. 9 tests.
+  - **TASK-214** — Btrfs / ZFS reflink-aware scan
+    (`crates/mythkernel/src/walker/reflink.rs`). `ExtentKey`
+    abstraction over both filesystems; ZFS off-by-default for
+    permission variability. 8 tests.
+  - **TASK-215** — Live snapshot scan abstraction
+    (`crates/mythkernel/src/walker/snapshot.rs`). VSS / APFS / Btrfs
+    backends with `live_to_snapshot` / `live_path_for` translation
+    and idempotent teardown. 9 tests.
+  - **TASK-218** — UPX in-place unpacker
+    (`crates/mythkernel/src/detect/upx_unpack.rs`). Pure-Rust UPX
+    header reader + NRV2B decoder following the published UPX
+    file-format spec. LZMA / NRV2D / NRV2E surface as
+    `UnsupportedMethod`. 10 tests.
+  - **TASK-219** — .NET IL extractor
+    (`crates/mythkernel/src/detect/dotnet_il.rs`). CLR header +
+    metadata-root + stream-directory reader + best-effort method
+    body extraction. 9 tests.
+  - **TASK-220** — Java bytecode parser
+    (`crates/mythkernel/src/detect/java_bytecode.rs`). In-tree
+    class-file parser (JVM spec § 4): constant pool, method table,
+    Code attribute extraction. Modified UTF-8 decoder. 10 tests.
+  - **TASK-221** — Android DEX / APK scan
+    (`crates/mythkernel/src/detect/dex.rs`). DEX header + string-id
+    table + ULEB128 reader + best-effort AXML
+    (`AndroidManifest.xml`) parser surfacing package + permissions.
+    10 tests.
+  - **TASK-222** — Mach-O code-signature parser
+    (`crates/mythkernel/src/detect/macho_sig.rs`). Walks
+    `LC_ENCRYPTION_INFO[_64]` + `LC_CODE_SIGNATURE`; parses the
+    embedded super-blob (CodeDirectory team-id + identifier,
+    entitlements digest). 10 tests.
+  - **TASK-223** — In-tree Authenticode validator
+    (`crates/mythkernel/src/detect/authenticode.rs`). PE security
+    directory parse + Authenticode SHA-256 over the PE excluding
+    checksum + cert table + best-effort ASN.1/DER CN extraction
+    for signer + issuer. 10 tests.
+  - **TASK-224** — Linux ELF hardening inventory
+    (`crates/mythkernel/src/detect/elf_hardening.rs`). NX / RELRO
+    (None/Partial/Full) / PIE / canary score 0..4 from program-header
+    and dynamic-table walks. 10 tests.
+
+  **Wave 4 — Power, stats, deltas, and remote awareness** (this release):
+  - **TASK-207** — Smart resumption after wake
+    (`crates/mythkernel/src/scheduler/wake.rs`). `WakeGate` state
+    machine; defers resume of paused scans until AC + idle ≥ 30 s.
+    9 tests.
+  - **TASK-208** — Battery-aware throttle modes
+    (`crates/mythkernel/src/throttle/battery.rs`). Tri-state preset
+    AcAggressive / BatteryGentle / BatteryOff; on-battery worker-count
+    clamp; suspend full + scheduled scans in BatteryOff. 10 tests.
+  - **TASK-226** — Statistical anomaly engine (per-machine prior)
+    (`crates/mythkernel/src/detect/anomaly.rs` +
+    `crates/mythkernel/src/store/baseline.rs`). Bayes prior over
+    `(extension, size_decile, entropy_bucket, hardening_score)`
+    cells; cold-start gate at < 10 prior clean scans; rare-cell
+    bump at < 5 observations. 9 + 9 tests.
+  - **TASK-231** — FastCDC selective rehash
+    (`crates/mythkernel/src/hasher_fastcdc.rs` +
+    `crates/mythkernel/src/store/chunks.rs`). Content-defined
+    chunking; per-file chunk store with file_id-scoped lookup. 8 + 9
+    tests.
+  - **TASK-234** — Remote-mount scan mode
+    (`crates/mythkernel/src/walker/remote.rs`). `RemoteScanConfig`
+    (workers=2, bandwidth=5 MB/s, fastcdc=off) + leaky-bucket
+    bandwidth cap + fstype-based remote classification. 10 tests.
+
+  **Release ceremony** — TASK-235 (this release): version bumps
+  (Cargo.toml workspace, tauri.conf.json → 0.7.20), launch checklist
+  (`docs/launch-checklists/v0.7.20.md`), updated CHANGELOG (this
+  section), updated README + SECURITY + Build-Prompts-Guide +
+  product-roadmap.
+
+  **License posture** — every foundation module is hand-rolled
+  against published specs (FastCDC paper, ECMA-335, JVM spec §4,
+  Android DEX format, NRV2B / UPX file format, ELF / PE / Mach-O
+  specs). No new GPL/AGPL/SSPL deps; `cargo deny check` stays clean.
+
+  **Engine integration deferred** — each module is foundation-only:
+  the data structures + algorithms + tests are landed but the
+  wiring into `scan.rs` / `engine.rs` is intentionally batched into
+  a follow-up integration commit so the diff stays reviewable. The
+  smoke-test items in `docs/launch-checklists/v0.7.20.md` flag
+  which features are foundation-only vs. fully wired.
+
 ### Added
 - **Phase 9 — macOS Real-time (NOTIFY) + Wave 2 (failover + biometric exemptions + launchd watchdog)** _(foundation 2026-05-27)_
 

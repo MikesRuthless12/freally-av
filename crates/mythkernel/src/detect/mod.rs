@@ -19,29 +19,44 @@ use std::fmt;
 use serde::{Deserialize, Serialize};
 
 pub mod active_findings;
+pub mod anomaly;
+pub mod authenticode;
 pub mod bloom;
 pub mod byovd;
 pub mod crc32_set_file;
 pub mod cuckoo;
 pub mod dev_publisher_allowlist;
+pub mod dex;
+pub mod dotnet_il;
 pub mod dual_key_gate;
 pub mod eicar;
+pub mod elf_hardening;
+pub mod entropy;
 pub mod ephemeral_allowlist;
+pub mod extension_policy;
+pub mod fat_binary;
 pub mod file_mutation;
 pub mod goodware_allowlist;
 pub mod hash_blacklist;
 pub mod hash_lookup_explain;
 pub mod hash_set_file;
+pub mod header_parse;
 pub mod heuristics;
 pub mod honeyfiles;
+pub mod java_bytecode;
+pub mod macho_sig;
 pub mod package_manager_allowlist;
+pub mod packer;
 pub mod partial_match;
 pub mod platform_store_allowlist;
 pub mod publisher;
 pub mod sbom_allowlist;
+pub mod stale_temp;
+pub mod upx_unpack;
 pub mod user_iocs;
 pub mod verdict_cache;
 pub mod yara_engine;
+pub mod zero_trust_download;
 
 /// What a detector is given for one file. The engine fills this in after the
 /// hasher runs but before any I/O on the file's contents — detectors that

@@ -43,11 +43,10 @@ impl UsbWatcher for MacosUsbWatcher {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(target_os = "macos")))]
 mod tests {
     use super::*;
 
-    #[cfg(not(target_os = "macos"))]
     #[test]
     fn watcher_off_macos_is_unsupported() {
         let mut w = MacosUsbWatcher::new();

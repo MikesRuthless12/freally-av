@@ -19,7 +19,7 @@ members = [
 exclude = ["scripts/gen-signing-key", "tools/feed-builder"]
 
 [workspace.package]
-version = "0.0.1"
+version = "0.7.20"
 edition = "2024"
 rust-version = "1.85"
 authors = ["Mike Weaver <mythodikalone@gmail.com>"]

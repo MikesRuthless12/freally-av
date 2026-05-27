@@ -11,15 +11,29 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
+pub mod apfs_clones;
+pub mod bomb_guard;
+pub mod dev_excludes;
+pub mod diff;
+pub mod dual_arch;
+pub mod hot_zones;
 pub mod incremental;
+pub mod loops;
+pub mod multi_root;
 pub mod multi_volume;
 pub mod ntfs;
 pub mod posix;
+pub mod reflink;
+pub mod remote;
+pub mod reparse;
+pub mod resume;
+pub mod snapshot;
 
 pub use incremental::IncrementalWalker;
 pub use multi_volume::MultiVolumeWalker;
 pub use ntfs::NtfsWalker;
 pub use posix::PosixWalker;
+pub use resume::ScanCursor;
 
 /// Options that govern a single walk.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]

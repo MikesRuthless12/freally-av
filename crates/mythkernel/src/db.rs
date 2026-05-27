@@ -24,6 +24,8 @@ const MIGRATIONS: &[(i64, &str)] = &[
         include_str!("../migrations/0006_ephemeral_allowlist.sql"),
     ),
     (7, include_str!("../migrations/0007_user_iocs.sql")),
+    (8, include_str!("../migrations/0008_scan_cursors.sql")),
+    (9, include_str!("../migrations/0009_file_state.sql")),
 ];
 
 #[derive(Debug, thiserror::Error)]
