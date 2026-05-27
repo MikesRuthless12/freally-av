@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 pub mod dev_excludes;
 pub mod diff;
 pub mod incremental;
+pub mod loops;
 pub mod multi_root;
 pub mod multi_volume;
 pub mod ntfs;
