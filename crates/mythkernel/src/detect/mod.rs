@@ -27,6 +27,7 @@ pub mod dual_key_gate;
 pub mod eicar;
 pub mod entropy;
 pub mod ephemeral_allowlist;
+pub mod extension_policy;
 pub mod file_mutation;
 pub mod goodware_allowlist;
 pub mod hash_blacklist;
@@ -39,9 +40,11 @@ pub mod partial_match;
 pub mod platform_store_allowlist;
 pub mod publisher;
 pub mod sbom_allowlist;
+pub mod stale_temp;
 pub mod user_iocs;
 pub mod verdict_cache;
 pub mod yara_engine;
+pub mod zero_trust_download;
 
 /// What a detector is given for one file. The engine fills this in after the
 /// hasher runs but before any I/O on the file's contents — detectors that
