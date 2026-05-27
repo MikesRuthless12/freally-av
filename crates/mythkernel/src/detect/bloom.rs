@@ -269,6 +269,105 @@ impl Builder {
     pub fn k_hashes(&self) -> u32 {
         self.k_hashes
     }
+    pub fn epoch_id(&self) -> u64 {
+        self.epoch_id
+    }
+    pub fn n_items(&self) -> u64 {
+        self.n_items
+    }
+    pub fn fpr_ppm(&self) -> u32 {
+        self.fpr_ppm
+    }
+
+    /// Probe the in-RAM filter for membership. Identical semantics to
+    /// [`BloomFile::contains`] but reads from `self.bits` instead of an
+    /// mmap'd payload; lets a caller both INSERT and QUERY without round-
+    /// tripping through the filesystem. Used by TASK-201's walked-set
+    /// cursor.
+    pub fn contains(&self, digest: &[u8]) -> Result<bool, BloomError> {
+        if digest.len() < 16 {
+            return Err(BloomError::DigestTooShort(digest.len()));
+        }
+        if self.m_bits == 0 {
+            return Ok(false);
+        }
+        let (h1, h2) = split_digest(digest);
+        let m = self.m_bits;
+        for i in 0..self.k_hashes {
+            let pos = h1.wrapping_add((i as u64).wrapping_mul(h2)) % m;
+            let byte_idx = (pos / 8) as usize;
+            let bit_idx = (pos % 8) as u8;
+            if (self.bits[byte_idx] & (1u8 << bit_idx)) == 0 {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+
+    /// Serialize the filter to a contiguous byte buffer in the same
+    /// header+payload layout as [`Builder::write_to`]. Pair with
+    /// [`Builder::from_bytes`] for round-trip. Used by TASK-201 to stash
+    /// the walked-set bloom as a SQLite BLOB.
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let mut out = Vec::with_capacity(HEADER_LEN + self.bits.len());
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0);
+        out.extend_from_slice(MAGIC);
+        out.extend_from_slice(&VERSION.to_le_bytes());
+        out.extend_from_slice(&0u32.to_le_bytes()); // reserved
+        out.extend_from_slice(&self.epoch_id.to_le_bytes());
+        out.extend_from_slice(&self.n_items.to_le_bytes());
+        out.extend_from_slice(&self.fpr_ppm.to_le_bytes());
+        out.extend_from_slice(&self.k_hashes.to_le_bytes());
+        out.extend_from_slice(&self.m_bits.to_le_bytes());
+        out.extend_from_slice(&now.to_le_bytes());
+        out.extend_from_slice(&[0u8; 16]); // reserved2
+        out.extend_from_slice(&self.bits);
+        out
+    }
+
+    /// Inverse of [`Builder::to_bytes`] — parse a serialised filter back
+    /// into a writable [`Builder`]. Validates the same invariants as the
+    /// mmap-backed loader.
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self, BloomError> {
+        if bytes.len() < HEADER_LEN {
+            return Err(BloomError::TooShort(bytes.len()));
+        }
+        if &bytes[0..8] != MAGIC {
+            return Err(BloomError::BadMagic);
+        }
+        let version = u32::from_le_bytes(bytes[8..12].try_into().expect("4 bytes"));
+        if version != VERSION {
+            return Err(BloomError::BadVersion(version));
+        }
+        let epoch_id = u64::from_le_bytes(bytes[16..24].try_into().expect("8 bytes"));
+        let n_items = u64::from_le_bytes(bytes[24..32].try_into().expect("8 bytes"));
+        let fpr_ppm = u32::from_le_bytes(bytes[32..36].try_into().expect("4 bytes"));
+        let k_hashes = u32::from_le_bytes(bytes[36..40].try_into().expect("4 bytes"));
+        let m_bits = u64::from_le_bytes(bytes[40..48].try_into().expect("8 bytes"));
+
+        let expected_payload_bytes = m_bits.div_ceil(8) as usize;
+        let payload_len_bytes = bytes.len() - HEADER_LEN;
+        if payload_len_bytes != expected_payload_bytes {
+            return Err(BloomError::LengthMismatch {
+                declared_bits: m_bits,
+                declared_bytes: expected_payload_bytes as u64,
+                actual_payload_bytes: payload_len_bytes,
+            });
+        }
+
+        let bits = bytes[HEADER_LEN..].to_vec();
+        Ok(Self {
+            epoch_id,
+            n_items,
+            fpr_ppm,
+            k_hashes,
+            m_bits,
+            bits,
+        })
+    }
 
     /// Write the filter to `path` atomically (`<path>.tmp` + rename).
     pub fn write_to<P: AsRef<Path>>(&self, path: P) -> Result<(), BloomError> {
@@ -512,5 +611,73 @@ mod tests {
         let short = [0u8; 8];
         let err = f.contains(&short).unwrap_err();
         assert!(matches!(err, BloomError::DigestTooShort(8)));
+    }
+
+    #[test]
+    fn builder_contains_matches_inserted_keys() {
+        // TASK-201 — Builder grew an in-RAM `contains` so a single Builder
+        // can be both the writer (walker thread) and the reader (resume
+        // path) without round-tripping through a temp file.
+        let mut b = Builder::new(500, 10_000, 7);
+        let inserted: Vec<[u8; 32]> = (0u32..200).map(sha256_seed).collect();
+        for d in &inserted {
+            b.insert(d);
+        }
+        for d in &inserted {
+            assert!(b.contains(d).unwrap(), "missed inserted digest");
+        }
+        // A disjoint key is much more likely to miss than to hit at this
+        // size; verify at least one such key actually misses (the FPR is
+        // bounded above by the 2.5% guard rail in the random-miss test).
+        let mut a_miss_observed = false;
+        for i in 0u32..200 {
+            if !b.contains(&sha256_seed(i + 100_000_000)).unwrap() {
+                a_miss_observed = true;
+                break;
+            }
+        }
+        assert!(a_miss_observed, "expected at least one negative probe");
+    }
+
+    #[test]
+    fn builder_to_bytes_roundtrip() {
+        let mut b = Builder::new(500, 10_000, 0xfeedbeef);
+        let inserted: Vec<[u8; 32]> = (0u32..120).map(sha256_seed).collect();
+        for d in &inserted {
+            b.insert(d);
+        }
+        let blob = b.to_bytes();
+        let restored = Builder::from_bytes(&blob).unwrap();
+        assert_eq!(restored.epoch_id(), b.epoch_id());
+        assert_eq!(restored.n_items(), b.n_items());
+        assert_eq!(restored.fpr_ppm(), b.fpr_ppm());
+        assert_eq!(restored.k_hashes(), b.k_hashes());
+        assert_eq!(restored.m_bits(), b.m_bits());
+        for d in &inserted {
+            assert!(
+                restored.contains(d).unwrap(),
+                "restored builder missed inserted digest"
+            );
+        }
+    }
+
+    #[test]
+    fn builder_from_bytes_rejects_bad_magic() {
+        let bad = vec![0u8; HEADER_LEN + 64];
+        assert!(matches!(
+            Builder::from_bytes(&bad),
+            Err(BloomError::BadMagic)
+        ));
+    }
+
+    #[test]
+    fn builder_from_bytes_rejects_truncated_blob() {
+        let b = Builder::new(50, 10_000, 1);
+        let blob = b.to_bytes();
+        let truncated = &blob[..blob.len() - 1];
+        assert!(matches!(
+            Builder::from_bytes(truncated),
+            Err(BloomError::LengthMismatch { .. })
+        ));
     }
 }

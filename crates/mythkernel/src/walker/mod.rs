@@ -15,11 +15,13 @@ pub mod incremental;
 pub mod multi_volume;
 pub mod ntfs;
 pub mod posix;
+pub mod resume;
 
 pub use incremental::IncrementalWalker;
 pub use multi_volume::MultiVolumeWalker;
 pub use ntfs::NtfsWalker;
 pub use posix::PosixWalker;
+pub use resume::ScanCursor;
 
 /// Options that govern a single walk.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
