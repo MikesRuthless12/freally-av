@@ -52,8 +52,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Try fanotify first; fall back gracefully.
+    // Clone the mode_label rather than moving it — FanotifyHandle /
+    // InotifyHandle hold an owned FD on Linux and implement `Drop`,
+    // so the field cannot be moved out (E0509). The handle's Drop
+    // closes the FD when this expression's scope ends, which is what
+    // we want for the capability probe; the real event loop opens
+    // its own FD once it's wired in the runtime-validation pass.
     let mode_label = match FanotifyHandle::open() {
-        Ok(h) => h.mode_label,
+        Ok(h) => h.mode_label.clone(),
         Err(FanotifyError::Unsupported) => {
             // On non-Linux hosts the binary is unusable; this path is
             // here so `cargo build` succeeds on Windows / macOS CI
@@ -62,7 +68,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "unsupported".to_string()
         }
         Err(FanotifyError::NeedsFallback) => match InotifyHandle::open() {
-            Ok(h) => h.mode_label,
+            Ok(h) => h.mode_label.clone(),
             Err(_) => match AuditHandle::open() {
                 Ok(h) => h.mode_label,
                 Err(_) => "no_realtime_surface".to_string(),
