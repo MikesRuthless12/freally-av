@@ -11,6 +11,7 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
+pub mod dev_excludes;
 pub mod diff;
 pub mod incremental;
 pub mod multi_root;
