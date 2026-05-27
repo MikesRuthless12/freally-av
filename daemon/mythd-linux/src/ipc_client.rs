@@ -56,11 +56,10 @@ impl IpcClient {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(target_os = "linux")))]
 mod tests {
     use super::*;
 
-    #[cfg(not(target_os = "linux"))]
     #[test]
     fn connect_off_linux_is_unsupported() {
         let err = IpcClient::connect("/run/mythd/mythd.sock").unwrap_err();

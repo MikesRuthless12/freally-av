@@ -15,73 +15,76 @@
 
 use std::path::Path;
 
-/// macOS process-table snapshot via `sysctl(KERN_PROC_ALL)`. The
-/// returned map is `parent_pid → [child_pid]`. Empty when the
-/// syscall fails (rare; corresponds to a permission error).
+/// macOS process-table snapshot via `proc_listpids` + `proc_pidinfo`
+/// (Apple's `<libproc.h>` API — the modern replacement for the
+/// `sysctl(KERN_PROC_ALL)` + `kinfo_proc` path which `libc` no longer
+/// exposes as of 0.2.186). The returned map is
+/// `parent_pid → [child_pid]`. Empty when either syscall fails.
 #[cfg(target_os = "macos")]
 fn children_map() -> std::collections::HashMap<i32, Vec<i32>> {
     use std::collections::HashMap;
-    // Two-phase sysctl call: first ask for the buffer size, then
-    // allocate + ask for the data. The kernel guarantees the buffer
-    // size is a multiple of `sizeof(struct kinfo_proc)` modulo a
-    // small slack so we re-query until the call succeeds.
-    let mut mib = [
-        libc::CTL_KERN as i32,
-        libc::KERN_PROC as i32,
-        libc::KERN_PROC_ALL as i32,
-        0,
-    ];
-    let mut size: libc::size_t = 0;
-    // SAFETY: sysctl with a NULL output buffer is well-defined and
-    // sets `size` to the required output length.
-    let rc = unsafe {
-        libc::sysctl(
-            mib.as_mut_ptr(),
-            mib.len() as u32,
-            std::ptr::null_mut(),
-            &mut size,
-            std::ptr::null_mut(),
+
+    // Apple's `<libproc.h>` constant — not yet exposed by `libc`.
+    const PROC_ALL_PIDS: u32 = 1;
+
+    // Phase 1 — ask the kernel how many bytes of PIDs it has.
+    // SAFETY: `proc_listpids` with `buffer == NULL` and `buffersize == 0`
+    // is well-defined per `<libproc.h>` — returns the buffer size needed.
+    let size_needed = unsafe { libc::proc_listpids(PROC_ALL_PIDS, 0, std::ptr::null_mut(), 0) };
+    if size_needed <= 0 {
+        return HashMap::new();
+    }
+
+    // Pad by 25% to absorb growth between calls.
+    let cap_bytes = (size_needed as usize) + (size_needed as usize) / 4;
+    let pid_size = std::mem::size_of::<i32>();
+    let cap_pids = cap_bytes.div_ceil(pid_size);
+    let mut pids: Vec<i32> = vec![0; cap_pids];
+
+    // Phase 2 — fill the buffer. Returns the number of bytes actually
+    // written; we re-derive the entry count from that.
+    // SAFETY: buffer is `cap_pids * pid_size` bytes; `buffersize` argument
+    // matches that exactly; output is i32 PIDs.
+    let got_bytes = unsafe {
+        libc::proc_listpids(
+            PROC_ALL_PIDS,
             0,
+            pids.as_mut_ptr() as *mut libc::c_void,
+            (pids.len() * pid_size) as i32,
         )
     };
-    if rc != 0 || size == 0 {
+    if got_bytes <= 0 {
         return HashMap::new();
     }
-    // Pad by 25% to absorb growth between the two calls.
-    let cap = size + size / 4;
-    let mut buf: Vec<u8> = vec![0u8; cap];
-    let mut got: libc::size_t = cap;
-    // SAFETY: sysctl writes exactly `got` bytes into `buf`. We
-    // re-bind `got` so the kernel can shrink it; we never read past
-    // `got` below.
-    let rc = unsafe {
-        libc::sysctl(
-            mib.as_mut_ptr(),
-            mib.len() as u32,
-            buf.as_mut_ptr() as *mut libc::c_void,
-            &mut got,
-            std::ptr::null_mut(),
-            0,
-        )
-    };
-    if rc != 0 {
-        return HashMap::new();
-    }
-    let entry_size = std::mem::size_of::<libc::kinfo_proc>();
-    if entry_size == 0 {
-        return HashMap::new();
-    }
-    let count = got / entry_size;
+    let count = (got_bytes as usize) / pid_size;
+
+    // Phase 3 — per-PID parent lookup via `proc_pidinfo(PROC_PIDTBSDINFO)`.
+    // `proc_bsdinfo::pbi_ppid` gives us the parent. Best-effort: a
+    // process that exits between Phase 2 and Phase 3 returns
+    // `got_info != bsd_size`; we drop those rows rather than fail.
+    let bsd_size = std::mem::size_of::<libc::proc_bsdinfo>() as i32;
     let mut children: HashMap<i32, Vec<i32>> = HashMap::new();
-    // SAFETY: buf was just populated by sysctl with `got` bytes; we
-    // walk it in `entry_size` strides, reading `count` `kinfo_proc`
-    // entries. Each entry's `kp_proc.p_pid` + `kp_eproc.e_ppid` are
-    // POD fields the kernel populates.
-    let ptr = buf.as_ptr() as *const libc::kinfo_proc;
-    for i in 0..count {
-        let entry = unsafe { &*ptr.add(i) };
-        let pid = entry.kp_proc.p_pid;
-        let ppid = entry.kp_eproc.e_ppid;
+    for &pid in pids.iter().take(count) {
+        if pid <= 0 {
+            continue; // pid 0 is the kernel; skip
+        }
+        // SAFETY: `proc_bsdinfo` is `#[repr(C)]` POD; zeroing it is a
+        // valid initial state. `proc_pidinfo` writes `bsd_size` bytes
+        // into it on success.
+        let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
+        let got_info = unsafe {
+            libc::proc_pidinfo(
+                pid,
+                libc::PROC_PIDTBSDINFO,
+                0,
+                &mut info as *mut _ as *mut libc::c_void,
+                bsd_size,
+            )
+        };
+        if got_info != bsd_size {
+            continue;
+        }
+        let ppid = info.pbi_ppid as i32;
         children.entry(ppid).or_default().push(pid);
     }
     children
@@ -90,10 +93,11 @@ fn children_map() -> std::collections::HashMap<i32, Vec<i32>> {
 /// Apply SIGSTOP to `pid` and every descendant. Best-effort — racing
 /// process exits are silently dropped (errno ESRCH).
 ///
-/// Implementation: walks the process table **once** via sysctl, then
-/// BFS from `pid` through the resulting `parent → [child]` map.
-/// Matches the Linux variant's O(N) shape so a process tree of any
-/// depth is bounded.
+/// Implementation: walks the process table **once** via
+/// `proc_listpids` + `proc_pidinfo` (`<libproc.h>`), then BFS from
+/// `pid` through the resulting `parent → [child]` map. Matches the
+/// Linux variant's O(N) shape so a process tree of any depth is
+/// bounded.
 #[cfg(target_os = "macos")]
 pub fn sigstop_process_tree(pid: i32) -> std::io::Result<usize> {
     use std::collections::{HashSet, VecDeque};
@@ -125,7 +129,7 @@ pub fn sigstop_process_tree(pid: i32) -> std::io::Result<usize> {
 pub fn sigstop_process_tree(_pid: i32) -> std::io::Result<usize> {
     Err(std::io::Error::new(
         std::io::ErrorKind::Unsupported,
-        "SIGSTOP via sysctl(KERN_PROC_ALL) only available on macOS",
+        "SIGSTOP via proc_listpids only available on macOS",
     ))
 }
 

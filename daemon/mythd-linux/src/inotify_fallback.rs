@@ -80,11 +80,10 @@ impl Drop for InotifyHandle {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(target_os = "linux")))]
 mod tests {
     use super::*;
 
-    #[cfg(not(target_os = "linux"))]
     #[test]
     fn open_returns_unsupported_off_linux() {
         let err = InotifyHandle::open().unwrap_err();
