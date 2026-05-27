@@ -265,7 +265,13 @@ mod macos_impl {
 
     pub fn walk(root: &Path, opts: WalkOpts) -> crossbeam_channel::Receiver<WalkEvent> {
         let (tx, rx) = crossbeam_channel::unbounded();
-        let root = root.to_path_buf();
+        // JournalSubscriber::open canonicalizes the root internally, which on
+        // macOS resolves /var/folders/... to /private/var/folders/... (since
+        // /var is a symlink). If we then filter events through `path_is_under_root`
+        // with the *non*-canonical root, every event gets rejected and the
+        // walker yields 0 files. Canonicalize up-front so the subscriber,
+        // the filter, and the PosixWalker fallback all see the same root.
+        let root = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
 
         std::thread::Builder::new()
             .name("mythkernel/macos-walker".into())
@@ -368,7 +374,15 @@ mod linux_impl {
 
     pub fn walk(root: &Path, opts: WalkOpts) -> crossbeam_channel::Receiver<WalkEvent> {
         let (tx, rx) = crossbeam_channel::unbounded();
-        let root = root.to_path_buf();
+        // JournalSubscriber::open canonicalizes the root internally. If the
+        // path passed in contains symlinks (uncommon on Linux /tmp but
+        // possible elsewhere — e.g. /var → /private/var on macOS-like
+        // setups, or test temp roots under symlinked mounts), the events
+        // emitted by bootstrap would carry the canonical path while the
+        // filter would test against the non-canonical root and reject
+        // everything. Canonicalize up-front so all three (subscriber,
+        // filter, PosixWalker fallback) see the same root.
+        let root = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
 
         std::thread::Builder::new()
             .name("mythkernel/linux-walker".into())

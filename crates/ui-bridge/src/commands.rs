@@ -121,6 +121,17 @@ pub fn validate_restore_target(path: &Path) -> Result<(), PathPolicyError> {
 
 fn path_is_system(canonical: &Path) -> bool {
     let s = canonical.to_string_lossy();
+    // macOS: /var is a symlink to /private/var and user tempdirs live
+    // under /private/var/folders/. Without an exemption the canonical
+    // tempdir matches the /private denylist prefix and the user can't
+    // even scan their own scratch space. The same applies to /private/tmp
+    // (canonical form of /tmp). Both areas are user-writable by design.
+    #[cfg(target_os = "macos")]
+    {
+        if s.starts_with("/private/var/folders/") || s.starts_with("/private/tmp/") {
+            return false;
+        }
+    }
     let s_lower = s.to_lowercase();
     SYSTEM_PATH_DENYLIST.iter().any(|prefix| {
         let p = prefix.to_lowercase();
