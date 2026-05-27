@@ -102,8 +102,11 @@ impl FanotifyHandle {
         // below; further hardening (FD_CLOEXEC race etc.) is
         // captured in TASK-073's review pass.
         let fd = unsafe {
+            // FAN_CLASS_CONTENT | FAN_CLOEXEC are already `c_uint` on
+            // Linux per the libc crate — no cast needed. O_RDONLY is
+            // `c_int` and DOES need the cast.
             libc::fanotify_init(
-                (libc::FAN_CLASS_CONTENT | libc::FAN_CLOEXEC) as u32,
+                libc::FAN_CLASS_CONTENT | libc::FAN_CLOEXEC,
                 libc::O_RDONLY as u32,
             )
         };

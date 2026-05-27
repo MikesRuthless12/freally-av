@@ -9,8 +9,6 @@
 //! No kernel driver, no Hyper-V escape — all communication is via the
 //! documented `\\wsl.localhost` path. Install path is opt-in per distro.
 
-use std::process::Command;
-
 pub use mythkernel::platform::wsl::{WslDistroRow, parse_wsl_list_text, parse_wsl_list_utf16le};
 
 /// Build the argv for `wsl.exe --list --verbose`. Returned instead of
@@ -47,7 +45,7 @@ pub fn distro_socket_path(distro: &str) -> String {
 /// the list of distros, or an empty list if `wsl.exe` is missing.
 #[cfg(target_os = "windows")]
 pub fn list_distros() -> Vec<WslDistroRow> {
-    let out = Command::new("wsl.exe")
+    let out = std::process::Command::new("wsl.exe")
         .arg("--list")
         .arg("--verbose")
         .output();
