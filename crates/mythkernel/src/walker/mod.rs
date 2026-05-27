@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 
 pub mod diff;
 pub mod incremental;
+pub mod multi_root;
 pub mod multi_volume;
 pub mod ntfs;
 pub mod posix;
