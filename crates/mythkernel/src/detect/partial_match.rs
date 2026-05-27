@@ -350,8 +350,8 @@ mod tests {
 
     fn mk_fp(seed: u8, sz: u64) -> PartialFingerprint {
         let mut prefix = [0u8; 32];
-        for i in 0..32 {
-            prefix[i] = seed.wrapping_add(i as u8).wrapping_mul(31);
+        for (i, byte) in prefix.iter_mut().enumerate() {
+            *byte = seed.wrapping_add(i as u8).wrapping_mul(31);
         }
         PartialFingerprint {
             prefix_blake3: prefix,

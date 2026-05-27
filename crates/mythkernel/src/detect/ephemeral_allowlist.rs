@@ -112,7 +112,6 @@ impl EphemeralAllowlistStore {
             "DELETE FROM ephemeral_allowlist WHERE expires_at_utc <= ?1",
             params![now],
         )
-        .map(|n| n as usize)
     }
 
     /// Look up whether `sha256_hex` is currently trusted. Honors

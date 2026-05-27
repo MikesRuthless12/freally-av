@@ -339,8 +339,8 @@ mod tests {
 
     fn mk_digest(seed: u8) -> [u8; 32] {
         let mut d = [0u8; 32];
-        for i in 0..32 {
-            d[i] = seed.wrapping_add(i as u8).wrapping_mul(31);
+        for (i, byte) in d.iter_mut().enumerate() {
+            *byte = seed.wrapping_add(i as u8).wrapping_mul(31);
         }
         d
     }
@@ -351,7 +351,7 @@ mod tests {
         let (m, k) = optimal_params(100_000_000, 10_000);
         let m_mb = m / 8 / 1_048_576;
         assert!(m_mb > 100 && m_mb < 150, "expected ~120 MB, got {m_mb} MB");
-        assert!(k >= 6 && k <= 8, "expected k≈7, got {k}");
+        assert!((6..=8).contains(&k), "expected k≈7, got {k}");
 
         // 1% FPR / 1k items → ~10k bits / k=7.
         let (m_small, k_small) = optimal_params(1_000, 10_000);

@@ -33,8 +33,10 @@
 //! ## Insert / lookup / delete
 //!
 //! Per Fan et al. (2014) "Cuckoo Filter: Practically Better Than Bloom":
-//!   * `i1 = hash(x) mod bucket_count`
-//!   * `i2 = i1 XOR hash(fingerprint(x)) mod bucket_count`
+//!
+//! * `i1 = hash(x) mod bucket_count`
+//! * `i2 = i1 XOR hash(fingerprint(x)) mod bucket_count`
+//!
 //! Insert tries i1, then i2; on bucket-full, kicks a random
 //! occupant and re-homes it (bounded retries). Lookup checks both
 //! buckets. Delete checks both buckets, zeros first match.
@@ -227,9 +229,7 @@ impl CuckooFilter {
                 .wrapping_mul(1_664_525)
                 .wrapping_add(1_013_904_223);
             let slot = self.slot(current_bucket, entry);
-            let evicted = self.buckets[slot];
-            self.buckets[slot] = current_fp;
-            current_fp = evicted;
+            std::mem::swap(&mut self.buckets[slot], &mut current_fp);
             let alt = self.bucket2(current_bucket, current_fp);
             if self.try_insert(alt, current_fp) {
                 self.n_items += 1;
@@ -560,7 +560,7 @@ mod tests {
         buf.extend_from_slice(&0u64.to_le_bytes());
         buf.extend_from_slice(&0i64.to_le_bytes());
         buf.extend_from_slice(&[0u8; 16]);
-        buf.extend(std::iter::repeat(0u8).take(8 * 4 * 2));
+        buf.extend(std::iter::repeat_n(0u8, 8 * 4 * 2));
         std::fs::write(&path, &buf).unwrap();
         let err = CuckooFilter::open(&path, None).unwrap_err();
         assert!(matches!(err, CuckooError::LengthMismatch { .. }));
