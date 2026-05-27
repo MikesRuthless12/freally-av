@@ -7,6 +7,9 @@
 #![allow(dead_code)]
 
 pub mod commands;
+/// Phase 9 Wave 2 — macOS-specific commands: per-app exemptions
+/// (TASK-253) + launchd heartbeat (TASK-254).
+pub mod commands_mac;
 /// Phase 8 Wave 2 — per-mount real-time toggle (TASK-238).
 pub mod commands_mount;
 /// Phase 8 Wave 2 — USB stack Tauri commands (TASK-242/244/249/250).

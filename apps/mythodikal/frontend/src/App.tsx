@@ -22,6 +22,8 @@ import UsbAllowlist from "@/pages/Settings/UsbAllowlist";
 import UsbPolicy from "@/pages/Settings/UsbPolicy";
 import UsbWrites from "@/pages/History/UsbWrites";
 import UsbDevices from "@/pages/UsbDevices";
+// Phase 9 Wave 2 — TASK-253 macOS exemptions page.
+import MacExemptions from "@/pages/Settings/MacExemptions";
 import { attachScanEvents } from "@/stores/scan";
 import { attachQuarantineEvents } from "@/stores/quarantine";
 import { attachShieldsEvents } from "@/stores/shields";
@@ -64,6 +66,7 @@ const App: Component = () => {
         <Route path="/settings" component={Settings} />
         <Route path="/settings/usb-allowlist" component={UsbAllowlist} />
         <Route path="/settings/usb-policy" component={UsbPolicy} />
+        <Route path="/settings/mac-exemptions" component={MacExemptions} />
       </Router>
     </Show>
   );

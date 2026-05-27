@@ -11,6 +11,42 @@ Each release section lists which `TASK-NNN` items from `docs/product-roadmap.md`
 ## [Unreleased]
 
 ### Added
+- **Phase 9 — macOS Real-time (NOTIFY) + Wave 2 (failover + biometric exemptions + launchd watchdog)** _(foundation 2026-05-27)_
+
+  All Phase 9 tasks landed across Wave 1 + Wave 2. Cross-platform compile via
+  cfg-gates; Security.framework / CoreServices / Endpoint Security paths
+  stay behind `cfg(target_os = "macos")` so `cargo build --workspace` and the
+  full test suite succeed on every host (this branch was built and validated
+  on a Windows 11 host). Per `docs/prd.md` § 1.5.4: NOTIFY-only on macOS,
+  no paid Apple Developer Program entitlement requested anywhere, no AUTH
+  path. Runtime validation on a macOS host lands in the per-OS CI matrix
+  and the v0.9.0 / v0.9.7 smoke tests.
+
+  **Wave 1 — FSEvents primary + ESF NOTIFY opportunistic (TASK-079..083, TASK-161):**
+  - **TASK-079** — `daemon/mythd-macos/src/fsevents.rs` + `crates/mythkernel/src/platform/mac/fsevents.rs`. Primary mac RT surface. NOTIFY-only. Daemon-side `FsEventsHandle` with `mode_label = "fsevents (observe)"`, four default watch roots (Documents / Desktop / Pictures / Downloads), normalized `FsEvent { path, created, modified, renamed, removed, inode, mtime_ns, size }`. mythkernel-side facade re-exports the vendored Sourcerer journal subscriber under the FSEvents name the rest of the codebase uses. 4 tests.
+  - **TASK-080** — `daemon/mythd-macos/src/esf_notify.rs` + `daemon/mythd-macos/Info.plist`. Opportunistic ESF NOTIFY system extension scaffold. `SUBSCRIPTION_MASK` covers `NOTIFY_{OPEN,EXEC,RENAME,CREATE,WRITE,CLOSE}`. **No `com.apple.developer.endpoint-security.client` entitlement key in `Info.plist`** — stock consumer macOS falls back to FSEvents only. `EsClientError::{NotPrivileged,NotEntitled,…}` enum surfaces the literal Apple OSStatus strings to the UI. `ShieldsGate` AtomicBool short-circuits every event when Shields=OFF. 5 tests.
+  - **TASK-081** — `crates/mythkernel/src/ipc/macesf.rs`. JSON-over-XPC bridge ("Codable JSON" for Swift parity). `IpcFrame { NotifyEvent, Heartbeat, ShieldsPush, ActiveFindingsPush }` — **no Verdict variant**, NOTIFY-only proven by an `on_wire.contains("verdict")` assertion. Byte-by-byte reader avoids `BufReader` read-ahead consuming bytes the next frame needs. `mtime_ns: i64` (not i128) so serde_json round-trips cleanly. 4 KiB payload cap. 6 tests.
+  - **TASK-082** — `apps/mythodikal/frontend/src/pages/Realtime.tsx` extended + `crates/ui-bridge/src/commands_mac.rs::mac_realtime_mode`. Surface mode (fsevents observe / fsevents+esf observe), no "AUTH" string anywhere. Mirrors Shields master switch (FR-160) at the top.
+  - **TASK-083** — v0.9.0 release entry.
+  - **TASK-161** — `daemon/mythd-macos/src/rules/honey.rs`. macOS variant of TASK-142. `sysctl(KERN_PROC_ALL)` snapshot → `parent → [child]` map → BFS SIGSTOP of writer's process tree. Cross-platform planner in `mythkernel::detect::honeyfiles` (TASK-142) reused. 3 tests.
+
+  **Wave 2 — failover + biometric exemptions + launchd watchdog (TASK-251..255):**
+  - **TASK-251** — macOS NetworkExtension content-filter: BLOCKED. Entitlement requires the paid Apple Developer Program. User-mode approximation (Little-Snitch-style PF-rule generator) deferred to later network-protection phases.
+  - **TASK-252** — `daemon/mythd-macos/src/esf_failover.rs`. Pure-Rust `Failover` struct dedupes FSEvents + ESF NOTIFY by `(inode, mtime_ns, size)` within a 50 ms window, prefers ESF when both arrive, falls back to FSEvents alone on `ES_NEW_CLIENT_RESULT_ERR_NOT_PRIVILEGED`. `EsfFeedState::{Active,Unavailable}` machine; caller-driven `expire(now)` so no timer thread. 8 unit tests cover every dedup + recovery + double-fire path.
+  - **TASK-253** — `crates/mythkernel/src/exempt/{mod,per_app}.rs` (new top-level module) + `daemon/mythd-macos/src/exemption_keychain.rs` + `apps/mythodikal/frontend/src/pages/Settings/MacExemptions.tsx` + `crates/ui-bridge/src/commands_mac.rs::{mac_exemption_list,add,remove}`. `PerAppExemption::new` **rejects empty bundle_id or team_id** (no pure path-based exemption — would let a renamed bundle masquerade). `ExemptionRegistry` uses `RwLock` for hot-path reads; replace/add/remove invalidate the cache. Keychain backend stub documents the `BiometryCurrentSet | Or | DevicePasscode` SecAccessControl recipe. UI form enforces 10-character team ID with `pattern="[A-Z0-9]{10}"`. 12 tests across kernel + ui-bridge.
+  - **TASK-254** — `daemon/mythd-macos/src/launchd.rs` + `crates/ui-bridge/src/commands_mac.rs::mac_heartbeat` + `apps/mythodikal/frontend/src/components/MacRealtimeHeartbeat.tsx`. launchd LaunchAgent plist renderer (deterministic — same input always produces same plist) + atomic `tmp + rename` heartbeat writer. `parse_heartbeat_with_now` derives `age_ms` and clamps negatives to zero. Chip tints green (≤ 5 s) / amber (5–30 s) / red (> 30 s); click expands pid + restart count + ISO timestamp. (UI command file landed as `commands_mac.rs` rather than `commands/mac_heartbeat.rs` to match the project's existing flat naming.) 9 tests.
+  - **TASK-255** — v0.9.7 release entry.
+
+  **Packaging adds:**
+  - `daemon/mythd-macos/Info.plist` — system extension descriptor with `NSSystemExtensionUsageDescription`, no ESF entitlement key.
+  - `packaging/macos/com.mythodikal.mythd.plist` — per-user LaunchAgent. `KeepAlive=true`, `RunAtLoad=true`, `ThrottleInterval=1`. Unsigned per § 1.5.3.
+
+  **Dependency adds:** none. The macOS-only paths (Security.framework /
+  EndpointSecurity / CoreServices / launchd) are documented but not yet
+  linked; the runtime-validation pass on a macOS host wires the actual
+  FFI calls. Workspace `cargo check` + `cargo clippy -D warnings` +
+  full `cargo test` succeed on Windows.
+
 - **Phase 8 — Linux Real-time + Wave 2 (eBPF + audit + per-mount + container + WSL) + Cross-Platform USB stack** _(foundation 2026-05-27)_
 
   All 24 Phase 8 tasks landed across waves 1 + 2. Bundled mega-commit at the

@@ -1,24 +1,48 @@
-// Real-time (TASK-075 + TASK-238 + TASK-240 Wave 2).
+// Real-time (TASK-075 + TASK-238 + TASK-240 Wave 2 + TASK-082/254 Wave 3).
 //
-// Three sections:
+// Sections:
 //
 //   1. Shields master switch — mirrors the sidebar `ShieldsBadge`
 //      (FR-160).
-//   2. Monitored mounts (TASK-238) — per-mountpoint on/off switch.
+//   2. macOS heartbeat chip (TASK-254) — green/amber/red liveness for
+//      the launchd-managed daemon. Hidden off macOS.
+//   3. macOS surface mode (TASK-082) — FSEvents observe / ESF notify.
+//      No "ESF AUTH" string anywhere — AUTH does not exist on macOS
+//      per § 1.5.4. Hidden off macOS.
+//   4. Monitored mounts (TASK-238) — per-mountpoint on/off switch.
 //      Daemon picks up the toggle on its next 5 s polling tick of
 //      `daemon/mythd-linux/src/mounts.rs::diff`.
-//   3. WSL distros (TASK-240) — only populated when running on Windows
+//   5. WSL distros (TASK-240) — only populated when running on Windows
 //      with `wsl.exe` present; otherwise silently hidden.
 
-import { For, Show, createResource, createSignal, type Component } from "solid-js";
+import { For, Show, createResource, createSignal, onMount, type Component } from "solid-js";
+import { A } from "@solidjs/router";
 import { invoke } from "@tauri-apps/api/core";
+import { platform as detectPlatform } from "@tauri-apps/plugin-os";
 import { setShields, shieldsState, shieldsStatusText } from "@/stores/shields";
+import { MacRealtimeHeartbeat } from "@/components/MacRealtimeHeartbeat";
 
 interface MountToggleRow {
   device: string;
   mountpoint: string;
   fs_type: string;
   enabled: boolean;
+}
+
+interface MacRealtimeMode {
+  /// Either "fsevents (observe)" or "fsevents+esf (observe)" — there
+  /// is no AUTH mode by design (§ 1.5.4).
+  mode: string;
+  esf_active: boolean;
+  esf_unavailable_reason: string | null;
+}
+
+async function fetchMacMode(): Promise<MacRealtimeMode | null> {
+  try {
+    return await invoke<MacRealtimeMode>("mac_realtime_mode");
+  } catch {
+    return null;
+  }
 }
 
 interface WslDistroRow {
@@ -47,6 +71,19 @@ const Realtime: Component = () => {
   const [mounts, { refetch: refetchMounts }] = createResource(fetchMounts);
   const [distros] = createResource(fetchWslDistros);
   const [pendingMp, setPendingMp] = createSignal<string | null>(null);
+  const [macMode, setMacMode] = createSignal<MacRealtimeMode | null>(null);
+  const [isMac, setIsMac] = createSignal(false);
+
+  onMount(async () => {
+    try {
+      setIsMac((await detectPlatform()) === "macos");
+    } catch {
+      setIsMac(false);
+    }
+    if (isMac()) {
+      setMacMode(await fetchMacMode());
+    }
+  });
 
   const toggleMount = async (row: MountToggleRow) => {
     setPendingMp(row.mountpoint);
@@ -113,6 +150,45 @@ const Realtime: Component = () => {
           </Show>
         </div>
       </section>
+
+      <Show when={isMac()}>
+        <MacRealtimeHeartbeat />
+      </Show>
+
+      <Show when={isMac() && macMode()}>
+        <section class="rounded-md border border-myth-line bg-myth-bg-1 p-4">
+          <h2 class="font-display text-lg text-myth-text-hi">macOS surface</h2>
+          <p class="mt-1 font-mono text-xs text-myth-text-md">
+            NOTIFY-only · TASK-082 · § 1.5.4
+          </p>
+          <dl class="mt-3 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 font-mono text-xs">
+            <dt class="text-myth-text-lo">mode</dt>
+            <dd class="text-myth-text-hi">{macMode()!.mode}</dd>
+            <dt class="text-myth-text-lo">esf</dt>
+            <dd
+              class={
+                macMode()!.esf_active ? "text-myth-ok" : "text-myth-text-md"
+              }
+            >
+              {macMode()!.esf_active ? "active" : "unavailable"}
+              <Show when={macMode()!.esf_unavailable_reason}>
+                {" · "}
+                <span class="text-myth-text-lo">
+                  {macMode()!.esf_unavailable_reason}
+                </span>
+              </Show>
+            </dd>
+          </dl>
+          <p class="mt-3 font-mono text-xs text-myth-text-md">
+            <A
+              href="/settings/mac-exemptions"
+              class="underline decoration-myth-line underline-offset-2 hover:decoration-myth-text-hi hover:text-myth-text-hi"
+            >
+              Manage per-app exemptions (Touch-ID required) →
+            </A>
+          </p>
+        </section>
+      </Show>
 
       <section class="rounded-md border border-myth-line bg-myth-bg-1 p-4">
         <h2 class="font-display text-lg text-myth-text-hi">Monitored mounts</h2>

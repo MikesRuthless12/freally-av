@@ -1978,6 +1978,12 @@ macro_rules! invoke_handler {
             $crate::commands_mount::realtime_mounts_list,
             $crate::commands_mount::set_mount_enabled,
             $crate::commands_mount::wsl_list_distros,
+            // Phase 9 — macOS surface (mode, exemptions, heartbeat).
+            $crate::commands_mac::mac_realtime_mode,
+            $crate::commands_mac::mac_exemption_list,
+            $crate::commands_mac::mac_exemption_add,
+            $crate::commands_mac::mac_exemption_remove,
+            $crate::commands_mac::mac_heartbeat,
             $($app_cmd),*
         ]
     };

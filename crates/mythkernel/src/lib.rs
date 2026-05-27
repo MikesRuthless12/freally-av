@@ -27,6 +27,10 @@ pub mod telemetry;
 pub mod throttle;
 
 pub mod detect;
+/// Phase 9 Wave 2 — per-app real-time exemption registry (TASK-253).
+/// macOS backend is Keychain-backed and biometric-gated; the
+/// cross-platform shape and in-memory registry live here.
+pub mod exempt;
 pub mod ipc;
 pub mod platform;
 pub mod realtime;
