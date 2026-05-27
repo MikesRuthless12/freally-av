@@ -131,9 +131,7 @@ impl ExemptionRegistry {
         // Idempotent: same (bundle, team, path_prefix) triple is a
         // no-op so the UI's add-button doesn't double-write.
         if !guard.iter().any(|x| {
-            x.bundle_id == e.bundle_id
-                && x.team_id == e.team_id
-                && x.path_prefix == e.path_prefix
+            x.bundle_id == e.bundle_id && x.team_id == e.team_id && x.path_prefix == e.path_prefix
         }) {
             guard.push(e);
         }
@@ -183,9 +181,7 @@ mod tests {
         // None is still accepted as "any path".
         assert!(PerAppExemption::new("com.x", "ABCDE12345", None).is_ok());
         // A non-empty prefix is accepted.
-        assert!(
-            PerAppExemption::new("com.x", "ABCDE12345", Some("/Users/me/".into())).is_ok()
-        );
+        assert!(PerAppExemption::new("com.x", "ABCDE12345", Some("/Users/me/".into())).is_ok());
     }
 
     #[test]
@@ -236,7 +232,9 @@ mod tests {
     fn registry_replace_drops_old() {
         let reg = ExemptionRegistry::new();
         reg.add(PerAppExemption::new("com.a", "AAAAA00001", None).unwrap());
-        reg.replace(vec![PerAppExemption::new("com.b", "BBBBB00002", None).unwrap()]);
+        reg.replace(vec![
+            PerAppExemption::new("com.b", "BBBBB00002", None).unwrap(),
+        ]);
         assert_eq!(reg.len(), 1);
         assert!(!reg.is_exempt("com.a", "AAAAA00001", "/x"));
         assert!(reg.is_exempt("com.b", "BBBBB00002", "/x"));

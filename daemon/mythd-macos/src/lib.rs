@@ -14,14 +14,14 @@
 
 #![allow(dead_code)]
 
-/// FSEvents listener (TASK-079) — primary mac real-time surface.
-pub mod fsevents;
-/// Opportunistic ESF NOTIFY system extension wrapper (TASK-080).
-pub mod esf_notify;
 /// FSEvents ↔ ESF NOTIFY failover (TASK-252).
 pub mod esf_failover;
+/// Opportunistic ESF NOTIFY system extension wrapper (TASK-080).
+pub mod esf_notify;
 /// Per-app real-time exemption store (Keychain-backed, TASK-253).
 pub mod exemption_keychain;
+/// FSEvents listener (TASK-079) — primary mac real-time surface.
+pub mod fsevents;
 /// launchd heartbeat / watchdog (TASK-254).
 pub mod launchd;
 pub mod rules;

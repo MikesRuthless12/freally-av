@@ -123,10 +123,7 @@ pub fn write_heartbeat(
     // PID-disambiguated tmp path so a transient old daemon overlapping
     // a launchd KeepAlive respawn doesn't race the shared tmp file
     // (review CR-2, 2026-05-27). Rename is still atomic per-process.
-    let tmp_path = dir.join(format!(
-        "{HEARTBEAT_FILENAME}.{}.tmp",
-        std::process::id()
-    ));
+    let tmp_path = dir.join(format!("{HEARTBEAT_FILENAME}.{}.tmp", std::process::id()));
     let body = serde_json::to_vec(&payload)?;
     {
         let mut f = std::fs::File::create(&tmp_path)?;

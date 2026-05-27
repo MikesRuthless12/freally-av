@@ -158,7 +158,10 @@ mod tests {
         assert_eq!(flags::ITEM_CREATED, kjf::kFSEventStreamEventFlagItemCreated);
         assert_eq!(flags::ITEM_REMOVED, kjf::kFSEventStreamEventFlagItemRemoved);
         assert_eq!(flags::ITEM_RENAMED, kjf::kFSEventStreamEventFlagItemRenamed);
-        assert_eq!(flags::ITEM_MODIFIED, kjf::kFSEventStreamEventFlagItemModified);
+        assert_eq!(
+            flags::ITEM_MODIFIED,
+            kjf::kFSEventStreamEventFlagItemModified
+        );
         assert_eq!(flags::ITEM_IS_FILE, kjf::kFSEventStreamEventFlagItemIsFile);
         assert_eq!(flags::ITEM_IS_DIR, kjf::kFSEventStreamEventFlagItemIsDir);
     }

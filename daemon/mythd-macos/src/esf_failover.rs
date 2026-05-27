@@ -113,8 +113,7 @@ impl Failover {
     /// (review CR-1, 2026-05-27).
     pub fn mark_esf_unavailable(&mut self, reason: impl Into<String>) {
         self.esf_state = EsfFeedState::Unavailable(reason.into());
-        let drained: Vec<NormalizedEvent> =
-            self.pending.drain().map(|(_, (ev, _))| ev).collect();
+        let drained: Vec<NormalizedEvent> = self.pending.drain().map(|(_, (ev, _))| ev).collect();
         self.output.extend(drained);
     }
 
@@ -207,7 +206,11 @@ mod tests {
             inode: ino,
             mtime_ns: 1_700_000_000_000_000_000_i64,
             size: 4096,
-            pid: if matches!(source, NotifySource::Esf) { 4321 } else { 0 },
+            pid: if matches!(source, NotifySource::Esf) {
+                4321
+            } else {
+                0
+            },
             ppid: 1,
             team_id: matches!(source, NotifySource::Esf).then(|| "ABCDE12345".into()),
             signing_id: matches!(source, NotifySource::Esf).then(|| "com.x".into()),

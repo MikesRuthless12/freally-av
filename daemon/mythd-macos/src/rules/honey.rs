@@ -182,7 +182,11 @@ mod tests {
             .collect();
         assert_eq!(
             names,
-            vec!["Documents".to_string(), "Desktop".to_string(), "Pictures".to_string()]
+            vec![
+                "Documents".to_string(),
+                "Desktop".to_string(),
+                "Pictures".to_string()
+            ]
         );
     }
 

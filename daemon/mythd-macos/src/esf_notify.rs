@@ -20,8 +20,8 @@
 //! [`crate::ipc_client::IpcClient`]'s `ShieldsPush` handler.
 
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// Event-type bits the extension subscribes to. Mirrors the
 /// `ES_EVENT_TYPE_NOTIFY_*` constants from `<EndpointSecurity/ESTypes.h>`.

@@ -119,9 +119,7 @@ pub async fn mac_realtime_mode() -> Result<MacRealtimeMode, String> {
         Ok(MacRealtimeMode {
             mode: "fsevents (observe)".to_string(),
             esf_active: false,
-            esf_unavailable_reason: Some(
-                "ES_NEW_CLIENT_RESULT_ERR_NOT_ENTITLED".to_string(),
-            ),
+            esf_unavailable_reason: Some("ES_NEW_CLIENT_RESULT_ERR_NOT_ENTITLED".to_string()),
         })
     }
     #[cfg(not(target_os = "macos"))]
