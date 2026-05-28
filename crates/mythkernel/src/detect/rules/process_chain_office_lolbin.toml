@@ -1,0 +1,37 @@
+# Seed rule for FR-130 process-tree anomaly: Office → LOLBin.
+# Fires when one of the Office (or PDF-reader / mail-client) processes
+# starts a known living-off-the-land binary. The classic delivery chain
+# is a maldoc that spawns certutil / mshta / powershell / regsvr32 /
+# bitsadmin out of WINWORD / EXCEL / POWERPNT / OUTLOOK / ACRORD32.
+
+[[rule]]
+id          = "behavior:process_chain_office_lolbin"
+description = "Office / PDF / mail process spawning a known LOLBin"
+event       = "process_start"
+severity    = "high"
+parent_exe_glob = [
+    "**/WINWORD.EXE",
+    "**/EXCEL.EXE",
+    "**/POWERPNT.EXE",
+    "**/OUTLOOK.EXE",
+    "**/MSACCESS.EXE",
+    "**/VISIO.EXE",
+    "**/ACRORD32.EXE",
+    "**/AcroRd32.exe",
+    "**/Acrobat.exe",
+    "**/Foxit*.exe",
+]
+child_exe_glob = [
+    "**/cmd.exe",
+    "**/powershell.exe",
+    "**/pwsh.exe",
+    "**/wscript.exe",
+    "**/cscript.exe",
+    "**/mshta.exe",
+    "**/certutil.exe",
+    "**/bitsadmin.exe",
+    "**/regsvr32.exe",
+    "**/rundll32.exe",
+    "**/curl.exe",
+    "**/wget.exe",
+]

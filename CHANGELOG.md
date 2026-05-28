@@ -8,7 +8,116 @@ Each release section lists which `TASK-NNN` items from `docs/product-roadmap.md`
 
 ---
 
-## [Unreleased]
+## [Unreleased] — Phase 10 Wave 1 ("Polish & Public Launch")
+
+### Added — Phase 10 Wave 1 foundations (TASK-084..151 + TASK-085a..d)
+
+17 implementation tasks shipped across 11 functional commits. 84 new
+unit tests; mythkernel lib goes from 720 → 804 tests, all green.
+Workspace clippy + fmt + cargo-deny check clean throughout.
+
+**Behavioral detection layer**
+
+- **TASK-084** — Ransomware-shape heuristics
+  (`crates/mythkernel/src/detect/heuristics.rs`). Per-pid temporal
+  aggregator with three rules: rapid-rename storm, mass-rewrite,
+  extension-churn. Per-OS thresholds (`Thresholds::linux/macos/windows`).
+  Caller-supplied `Instant` so tests stay deterministic. 8 tests.
+- **TASK-143** — Generic behavioral-rule DSL
+  (`crates/mythkernel/src/detect/behavior_dsl.rs` + 3 seed TOML rule
+  files under `detect/rules/`). Five AND-combined / OR-within-list
+  condition fields. Pure-Rust glob matcher; `RuleSet::extend_from`
+  override-by-id supports TASK-151's canary-rollout pattern. Seed
+  rules cover persistence-path writes, suspicious script-host args,
+  Office→LOLBin process chains. 7 tests.
+- **TASK-146** — LOLBin catalogue
+  (`crates/mythkernel/src/detect/lolbin.rs`). 13 curated entries
+  (certutil/mshta/bitsadmin/regsvr32/rundll32/powershell+pwsh/wmic/
+  msbuild/installutil/curl/wget/osascript) each carrying description +
+  category + MITRE ATT&CK id. Pairs with TASK-143's
+  `process_chain_office_lolbin.toml`. 5 tests.
+- **TASK-151** — A/B canary rule rollout
+  (`crates/mythkernel/src/detect/rollout.rs`). `RolloutStage::{Off,
+  Canary{percent}, Shadow{percent}, Live}`. Dependency-free djb2
+  bucketing over `install_id || ":" || rule_id`. 8 tests.
+
+**File / archive / scan layer**
+
+- **TASK-085** — Multi-format archive scanning
+  (`crates/mythkernel/src/walker/archives.rs`). 12 formats via pure-
+  Rust crates: ZIP / TAR / 7z + tar.gz/bz2/xz/zstd + gzip / bzip2 /
+  xz / zstd / lz4. RAR intentionally excluded (UnRAR license fails
+  free + commercial + no-constraints posture). BombGuard integration.
+  Workspace deps added: `tar 0.4`, `sevenz-rust2 0.18`, `flate2 1`,
+  `bzip2-rs 0.1`, `lzma-rs 0.3`, `zstd 0.13`, `lz4_flex 0.11` — all
+  MIT / Apache-2.0 / BSD-2/3. `cargo deny check` green. 10 tests.
+- **TASK-145** — UEFI / EFI System Partition scan foundation
+  (`crates/mythkernel/src/detect/uefi.rs`). Per-OS `enumerate_esp_roots`
+  (Linux `/proc/self/mountinfo` vfat; Windows mounted drive-letter
+  scan; macOS deferred per sealed-system-volume constraint).
+  `KNOWN_BOOTKIT_HASHES` table seeded with BlackLotus / ESPecter /
+  MosaicRegressor. 5 tests.
+
+**Persistence / supply-chain / network layer**
+
+- **TASK-144** — Persistence-mechanism inventory
+  (`crates/mythkernel/src/detect/persistence.rs` + migration
+  `0011_persistence_entries.sql`). 9 persistence kinds; file-based
+  enumerators ship for Windows Startup folders, macOS LaunchAgents +
+  LaunchDaemons, Linux autostart + systemd + crontab. Idempotent
+  upsert preserves `first_seen_at`. 6 tests.
+- **TASK-147** — Supply-chain package walker
+  (`crates/mythkernel/src/detect/supply_chain.rs`). 4 ecosystems:
+  npm (incl. scoped `@scope/*`), PyPI dist-info, Cargo .crate cache,
+  RubyGems .gemspec. OSV.dev-compatible ecosystem string keys. 7 tests.
+- **TASK-148** — Network IOC matcher
+  (`crates/mythkernel/src/detect/net_ioc.rs`). IPv4 + IPv6.
+  `ingest_text_ip_list` parses ThreatFox flat-file exports. 5 tests.
+- **TASK-149** — Persistence diff between two scans
+  (`crates/mythkernel/src/diff.rs`). Pure-SQL implementation against
+  the persistence table's `first_seen_at` / `last_seen_at`; configurable
+  removal grace window. 5 tests.
+
+**Polish + scaffolding**
+
+- **TASK-086** — Cron-like scheduler
+  (`crates/mythkernel/src/scheduler.rs` + migration
+  `0010_scheduled_scans.sql`). 4 recurrence kinds (Daily / Weekly /
+  Monthly / OneShot). UTC throughout. Idle gate. 16 tests.
+- **TASK-088 / TASK-150** — Diagnostic bundle + bug-report payload
+  (`crates/mythkernel/src/diagnostics.rs`). Zip bundle (manifest +
+  config + redacted recent logs). `BugReport` + GitHub-issue-body
+  rendering. Redactor walks JSON values at ~20 path-carrying keys.
+  10 tests.
+- **TASK-089** — Localisation scaffolding
+  (`apps/mythodikal/frontend/src/i18n/`). Tiny pure-TS Fluent subset
+  parser; Solid.js Provider + `useLocalization()` hook + ad-hoc
+  `translate()`. en-US.ftl with ~40 seed strings. Zero new npm deps.
+
+**Closed by supersession**
+
+- **TASK-087** — Auto-scan on USB mount. Already shipped by TASK-241
+  (Phase 8 Wave 2) as the broader cross-platform USB stack.
+
+**Engine foundations for archive UI tasks** (frontend retrofits land
+in closeout UI pass):
+
+- **TASK-085a** — Archive-scan toggle. `Config::Scanning::archives_enabled` +
+  `ScanOptions::include_archives` already exist.
+- **TASK-085b** — Filename-preserving path truncation. 100% frontend.
+- **TASK-085c** — Live archive-member surface. TASK-085 callback API
+  already surfaces `(member_name, &mut Read)` per member.
+- **TASK-085d** — Archive-member counter. `scans.archive_members_visited`
+  column already in migration `0001_initial.sql`.
+
+### Changed — CI matrix
+
+`.github/workflows/ci.yml` no longer includes `macos-13` — GitHub-
+hosted Intel macOS runners chronically queue without ever picking up
+the job (zero successful workflow runs in repo history before the
+removal). Intel macOS validation moves to maintainer-local rigs +
+release smoke test until a more reliable Intel CI surface is
+available within the zero-cost constraint.
 
 ## [0.7.20] — Phase 7C Engine Enhancement — _(shipped 2026-05-27)_
 

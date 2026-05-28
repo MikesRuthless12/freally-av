@@ -57,13 +57,25 @@ clap = { version = "4", features = ["derive", "env"] }
 walkdir = "2"
 rayon = "1"
 crossbeam-channel = "0.5"
-# Phase 6 — archive scanning. zip 4.x is the latest stable line (8.x
-# is a recent breaking-change refactor; pinning to 4 keeps the API
-# surface we wrote against while still getting the security fixes
-# from the 3→4 hardening pass). RAR/7Z would require sevenz_rust +
-# unrar separately; deferred to a follow-up since zip covers the
-# dominant archive format malware ships in.
+# Multi-format archive scanning. zip 4.x is the original Phase 6 entry
+# (8.x is a recent breaking-change refactor; pinning to 4 keeps the API
+# surface we wrote against while still getting the security fixes from
+# the 3→4 hardening pass). Phase 10 TASK-085 extends the surface to the
+# full set of formats malware ships in. All crates picked are
+# MIT / Apache-2.0 / BSD-2/3 / Zlib — fully on the `deny.toml` allow-list
+# so the engine + bundled product remain redistributable in commercial
+# closed binaries at zero cost to the maintainer or end user. RAR is
+# **intentionally excluded** — UnRAR's source license restricts derived
+# works (no creating RAR-compatible packers) which fails the project's
+# "free + commercial, no constraints" posture per docs/prd.md § 1.5.
 zip = { version = "4", default-features = false, features = ["deflate"] }
+tar = "0.4"
+sevenz-rust2 = { version = "0.18", default-features = false }
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+bzip2-rs = "0.1"
+lzma-rs = "0.3"
+zstd = { version = "0.13", default-features = false }
+lz4_flex = { version = "0.11", default-features = false, features = ["std", "frame"] }
 # Pure-Rust YARA. MIT-licensed, commercial-OK. No libyara C dep —
 # `yara-x` is the official Rust port (VirusTotal). Powers the
 # pattern-based detector with public rule packs like

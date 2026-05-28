@@ -8,6 +8,8 @@
 pub mod archive_scan;
 pub mod config;
 pub mod db;
+pub mod diagnostics;
+pub mod diff;
 pub mod engine;
 pub mod error;
 pub mod eta;
