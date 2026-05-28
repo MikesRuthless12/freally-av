@@ -6,6 +6,10 @@
 #![allow(dead_code)]
 
 pub mod archive_scan;
+/// Phase 10 Wave 2 — browser forensics (TASK-256..270). Read-only
+/// extension / download-history / cookie / cache / cert-store / autofill
+/// readers across Chrome / Edge / Brave / Arc / Firefox / Safari.
+pub mod browser;
 pub mod config;
 pub mod db;
 pub mod diagnostics;
