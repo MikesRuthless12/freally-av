@@ -17,6 +17,10 @@ pub mod bomb_guard;
 pub mod dev_excludes;
 pub mod diff;
 pub mod dual_arch;
+/// Phase 10 Wave 3 — `.gitignore`-aware scanning toggle
+/// (TASK-313). Pattern parser + filter; walker integration
+/// lands as a follow-up via `WalkOpts::honor_gitignore`.
+pub mod gitignore_filter;
 pub mod hot_zones;
 pub mod incremental;
 pub mod loops;

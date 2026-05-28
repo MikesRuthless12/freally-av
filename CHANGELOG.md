@@ -8,7 +8,78 @@ Each release section lists which `TASK-NNN` items from `docs/product-roadmap.md`
 
 ---
 
-## [Unreleased] — Phase 10 Wave 1 ("Polish & Public Launch")
+## [Unreleased] — Phase 10 Waves 1–3 ("Polish & Public Launch")
+
+### Added — Phase 10 Wave 3 foundations (TASK-301..326)
+
+26 implementation tasks landed as pure-logic foundations across
+`crates/mythkernel/src/process_integrity/` and a new
+`crates/mythkernel/src/supply_chain/` module. 128 new unit tests
+(80 supply-chain + 42 process-integrity + 6 gitignore-filter), all
+green. mythkernel lib clippy clean.
+
+**Per-process forensic surface (process_integrity)**
+
+- **TASK-301** — `net_counters.rs`. `NetCounterSnapshot` + `rate()`
+  with pid-mismatch / zero-interval / counter-decrease guards.
+- **TASK-302** — `io_counters.rs`. `IoCounterSnapshot` +
+  `evaluate()` heavy-writer rule; default 10 GiB/24h threshold;
+  `is_system_writer()` allowlist for `mds_stores` / `journald` /
+  `svchost` / `SearchIndexer` / `WerFault`.
+- **TASK-303** — `ancestry.rs`. `AncestryCache::resolve()` snapshots
+  the PPID chain at first observation so pid reuse can't rewrite
+  it; cycle-guarded; depth-capped at 64.
+- **TASK-304** — `env_audit.rs`. 8 `EnvAuditKind` variants —
+  `LD_PRELOAD` / `LD_AUDIT` / `DYLD_INSERT_LIBRARIES` / two more
+  `DYLD_*` / `PYTHONPATH` (user-writable temp/downloads only) /
+  `PERL5OPT` / `RUBYOPT`.
+- **TASK-305** — `dll_search_order.rs`. `evaluate()` skips
+  `KnownDLLs` + `System32` / `SysWow64`; raises a hijack finding
+  when load path prefixes the process CWD.
+
+**Supply-chain & developer ecosystem (supply_chain)**
+
+- **TASK-306..309** — Per-ecosystem package walkers: `npm`
+  (`node_modules` recursive, scoped + nested), `cargo` (registry
+  cache + `Cargo.lock` streaming parser), `gem` / `composer` /
+  `maven`, and `pypi` (`*.dist-info/METADATA`).
+- **TASK-310, TASK-311** — `editor_ext.rs`. VS Code +
+  JetBrains plugin enumeration; `BUNDLED_PUBLISHER_ALLOWLIST`
+  + per-user allowlist; `Allowlisted | UnverifiedPublisher`.
+- **TASK-312** — `git_hooks.rs`. `core.fsmonitor` /
+  `core.hooksPath` / `init.templateDir` in `/tmp` / `/var/tmp` /
+  `~/Downloads` plus executable / sample hook surfacing.
+- **TASK-313** — `walker/gitignore_filter.rs`. Pure-Rust pattern
+  matcher (no `ignore` dep added) covering blank/`#` comments,
+  anchored `/`, directory-only trailing `/`, `!` negation, `*`,
+  `?`, `**`. Walker tie-in via `WalkOpts.honor_gitignore` lands
+  next pass.
+- **TASK-314** — `npm_scripts.rs`. `preview_one` + `preview_tree`
+  for `preinstall` / `install` / `postinstall` strings.
+- **TASK-315** — `pipe_guard.rs`. `analyze()` parses
+  `curl|sh` / `wget|bash` / `sudo curl ... | sudo bash` shapes.
+- **TASK-316..318** — `container.rs` / `compose.rs` / `kube.rs`.
+  Engine detection + image-list size parser; 5 compose finding
+  kinds (`UnpinnedImageTag`, `PrivilegedContainer`,
+  `DockerSockMount`, `SysAdminCapability`, `HostNetworkMode`);
+  kubeconfig plaintext token / password / embedded cert +
+  world-readable mode rule.
+- **TASK-319, TASK-320** — `direnv.rs` + `ssh_config.rs`.
+  `.envrc` pipe-to-shell / `eval $(curl)` / `source_url` / tmp-
+  path-export with allowlist gating; SSH `ProxyCommand` /
+  `ProxyJump` user-writable-path rules per `Host` / `Match` block.
+- **TASK-321, TASK-322** — `sbom.rs` + `sbom_diff.rs`. CycloneDX
+  1.5 + SPDX 2.3 JSON emit, deterministic ordering via BTreeMap;
+  diff routes same-name version bumps to `version_changed`
+  instead of (added, removed) noise.
+- **TASK-323** — `remote_dev_listener.rs`. Non-loopback bind
+  detector for `code-server` / `gateway` / `remote-dev-server.sh`
+  / `vscode-server`.
+- **TASK-324, TASK-325** — `registry_override.rs` +
+  `pypirc.rs`. `PlaintextHttp` / `UnknownHost` host classifier
+  with a small npm + PyPI allowlist; `UploadToken` /
+  `StaleUploadToken` (90-day mtime threshold).
+- **TASK-326** — v0.10.40 release marker.
 
 ### Added — Phase 10 Wave 1 foundations (TASK-084..151 + TASK-085a..d)
 

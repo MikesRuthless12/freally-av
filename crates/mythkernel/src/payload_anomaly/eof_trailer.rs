@@ -383,7 +383,7 @@ mod tests {
     fn pdf_with_trailing_payload_is_detected() {
         let mut pdf = Vec::from(*b"%PDF-1.4\n");
         pdf.extend_from_slice(b"%%EOF\n");
-        pdf.extend(std::iter::repeat(0u8).take(2000));
+        pdf.extend(std::iter::repeat_n(0u8, 2000));
         let f = evaluate(&pdf).unwrap();
         assert_eq!(f.format, "pdf");
         assert_eq!(f.verdict, TrailerVerdict::TrailerSuspect);

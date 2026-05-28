@@ -62,6 +62,15 @@ pub mod registry_scan;
 pub mod scan;
 pub mod scheduler;
 pub mod store;
+/// Phase 10 Wave 3 — supply-chain & developer-ecosystem coverage
+/// (TASK-306..325). Per-ecosystem package walkers (npm / cargo /
+/// gem / composer / maven / pypi), editor-extension scanner +
+/// publisher allowlist, git-hook config detector, `curl | sh`
+/// interceptor primitive, container / compose / kube analyzers,
+/// `direnv` / SSH `Match` scanners, SBOM emit + diff,
+/// VS-Code-Server / JetBrains-Gateway listener detector,
+/// registry-override and `.pypirc` token-leak rules.
+pub mod supply_chain;
 pub mod sysload;
 pub mod telemetry;
 pub mod throttle;
