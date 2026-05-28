@@ -145,7 +145,12 @@ pub fn run() {
         builder = builder.manage(SchedulerSlot(std::sync::Mutex::new(Some(h))));
     }
     builder
-        .invoke_handler(tauri::generate_handler![
+        // Tauri v2: only ONE `.invoke_handler()` call per builder —
+        // a second call replaces the first. Both the app-level commands
+        // (defined locally below) and the ui-bridge commands are
+        // wired through `invoke_handler!(...)` so they land in one
+        // `generate_handler!` invocation.
+        .invoke_handler(invoke_handler!(
             engine_install_update,
             autostart_get,
             autostart_set,
@@ -153,11 +158,11 @@ pub fn run() {
             tray_set_scanning,
             tray_set_update_available,
             tray_quick_scan_default_path,
+            host_os,
             window_show_main,
             window_hide_main,
             app_quit,
-        ])
-        .invoke_handler(invoke_handler!())
+        ))
         .run(tauri::generate_context!())
         .expect("error while running Mythodikal Anti-Virus");
 }
@@ -262,6 +267,24 @@ fn tray_quick_scan_default_path() -> Result<String, String> {
     let home = dirs::home_dir()
         .ok_or_else(|| "could not resolve current user's home directory".to_string())?;
     Ok(home.to_string_lossy().to_string())
+}
+
+/// Return the host OS family the renderer is running on (Phase 9 Wave 2).
+/// The macOS-only Real-time chips (`MacRealtimeHeartbeat`, the Real-time
+/// page's macOS section) call this once on mount to decide whether to
+/// render or stay invisible. Avoids pulling `tauri-plugin-os` for a
+/// single static lookup that `cfg!` already encodes at build time.
+#[tauri::command]
+fn host_os() -> &'static str {
+    if cfg!(target_os = "macos") {
+        "macos"
+    } else if cfg!(target_os = "windows") {
+        "windows"
+    } else if cfg!(target_os = "linux") {
+        "linux"
+    } else {
+        "unknown"
+    }
 }
 
 // ============================================================================

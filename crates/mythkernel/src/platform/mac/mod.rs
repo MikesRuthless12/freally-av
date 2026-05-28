@@ -10,3 +10,7 @@ pub mod codesign;
 /// fast bootstrap walks; the real-time subscribe stream backs the Phase 9
 /// macOS real-time daemon.
 pub mod journal;
+
+/// Phase 9 facade — exposes the journal subscriber under the FSEvents
+/// name the rest of the codebase + UI string set uses (TASK-079).
+pub mod fsevents;

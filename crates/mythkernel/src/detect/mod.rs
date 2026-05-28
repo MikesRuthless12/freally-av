@@ -18,6 +18,7 @@ use std::fmt;
 
 use serde::{Deserialize, Serialize};
 
+pub mod active_findings;
 pub mod anomaly;
 pub mod authenticode;
 pub mod bloom;
@@ -41,6 +42,7 @@ pub mod hash_lookup_explain;
 pub mod hash_set_file;
 pub mod header_parse;
 pub mod heuristics;
+pub mod honeyfiles;
 pub mod java_bytecode;
 pub mod macho_sig;
 pub mod package_manager_allowlist;

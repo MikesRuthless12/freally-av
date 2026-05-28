@@ -1746,7 +1746,7 @@ pub async fn shields_set(
 // Helpers
 // ============================================================================
 
-fn stringify<E: std::fmt::Display>(e: E) -> String {
+pub(crate) fn stringify<E: std::fmt::Display>(e: E) -> String {
     e.to_string()
 }
 
@@ -1904,12 +1904,26 @@ pub fn build_pipeline_from_feeds(data_dir: &std::path::Path) -> DetectionPipelin
     DetectionPipeline::new(detectors)
 }
 
-/// Single-call helper to wire every Phase-3 command into a `tauri::Builder`.
-/// The app uses this in `lib.rs::run` so we don't have to maintain two
-/// lists.
+/// Single-call helper to wire every Phase-3 + Phase 8 command into a
+/// `tauri::Builder`. The app uses this in `lib.rs::run` so we don't
+/// have to maintain two lists.
+///
+/// **Tauri v2 quirk:** `.invoke_handler()` can only be called **once**
+/// per builder — a second call replaces the first. App-level commands
+/// (defined in `apps/mythodikal/src-tauri/src/lib.rs`) are passed in
+/// as extra arguments so we land in one generate_handler! call.
+///
+/// Usage:
+/// ```ignore
+/// builder.invoke_handler(ui_bridge::invoke_handler!(
+///     engine_install_update,
+///     autostart_get,
+///     /* …app-level commands… */
+/// ));
+/// ```
 #[macro_export]
 macro_rules! invoke_handler {
-    () => {
+    ($($app_cmd:path),* $(,)?) => {
         ::tauri::generate_handler![
             $crate::commands::scan_start,
             $crate::commands::scan_status,
@@ -1952,6 +1966,25 @@ macro_rules! invoke_handler {
             $crate::commands::quick_scan_paths,
             $crate::commands::first_run_get,
             $crate::commands::first_run_set,
+            // Phase 8 Wave 2 — USB stack + per-mount toggle.
+            $crate::commands_usb::usb_allowlist_list,
+            $crate::commands_usb::usb_allowlist_add,
+            $crate::commands_usb::usb_allowlist_remove,
+            $crate::commands_usb::usb_power_only_list,
+            $crate::commands_usb::usb_power_only_enable,
+            $crate::commands_usb::usb_power_only_disable,
+            $crate::commands_usb::usb_write_events,
+            $crate::commands_usb::usb_devices,
+            $crate::commands_mount::realtime_mounts_list,
+            $crate::commands_mount::set_mount_enabled,
+            $crate::commands_mount::wsl_list_distros,
+            // Phase 9 — macOS surface (mode, exemptions, heartbeat).
+            $crate::commands_mac::mac_realtime_mode,
+            $crate::commands_mac::mac_exemption_list,
+            $crate::commands_mac::mac_exemption_add,
+            $crate::commands_mac::mac_exemption_remove,
+            $crate::commands_mac::mac_heartbeat,
+            $($app_cmd),*
         ]
     };
 }

@@ -5,6 +5,13 @@ members = [
     "crates/ui-bridge",
     "crates/mythctl",
     "apps/mythodikal/src-tauri",
+    # Phase 8 — per-OS real-time daemons. Each crate's syscall-heavy
+    # surface (fanotify on Linux, IOKit on macOS, SetupDi/RegisterDeviceNotification
+    # on Windows) is cfg-gated to its target so the workspace
+    # `cargo check` / `cargo build` succeeds on every host.
+    "daemon/mythd-linux",
+    "daemon/mythd-macos",
+    "daemon/mythd-windows",
 ]
 # `scripts/gen-signing-key` is a one-shot Tauri Updater minisign keypair
 # generator (TASK-044). It's intentionally outside the workspace so its
@@ -119,6 +126,19 @@ rand = "0.8"
 # no default features so we get a minimal cross-platform CPU + memory
 # reader and skip Windows DiskInfo etc. that we don't need yet.
 sysinfo = { version = "0.32", default-features = false, features = ["system"] }
+
+# Phase 8 — length-prefixed CBOR for the engine ↔ daemon IPC frame
+# (TASK-074 linfan, with parallel use in TASK-081 macesf and TASK-097
+# winflt). `ciborium` is the de facto pure-Rust CBOR codec used by
+# `coap-rs` / `webauthn-rs`; MIT-licensed, no transitive C dep.
+ciborium = "0.2"
+
+# Phase 8 — `libc` is already pulled in on Linux/macOS via mythkernel's
+# target-conditional deps, but it's surfaced here so the daemon crates
+# can lock to the same version without re-declaring the version in each
+# Cargo.toml. The crates only depend on `libc` for fanotify syscalls
+# (Linux) and signal control (cross-Unix).
+libc = "0.2"
 
 [profile.release]
 opt-level = 3

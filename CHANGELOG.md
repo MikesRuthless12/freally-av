@@ -139,6 +139,160 @@ unit tests across the wave; 638 total tests in
   which features are foundation-only vs. fully wired.
 
 ### Added
+- **Phase 9 — macOS Real-time (NOTIFY) + Wave 2 (failover + biometric exemptions + launchd watchdog)** _(foundation 2026-05-27)_
+
+  All Phase 9 tasks landed across Wave 1 + Wave 2. Cross-platform compile via
+  cfg-gates; Security.framework / CoreServices / Endpoint Security paths
+  stay behind `cfg(target_os = "macos")` so `cargo build --workspace` and the
+  full test suite succeed on every host (this branch was built and validated
+  on a Windows 11 host). Per `docs/prd.md` § 1.5.4: NOTIFY-only on macOS,
+  no paid Apple Developer Program entitlement requested anywhere, no AUTH
+  path. Runtime validation on a macOS host lands in the per-OS CI matrix
+  and the v0.9.0 / v0.9.7 smoke tests.
+
+  **Wave 1 — FSEvents primary + ESF NOTIFY opportunistic (TASK-079..083, TASK-161):**
+  - **TASK-079** — `daemon/mythd-macos/src/fsevents.rs` + `crates/mythkernel/src/platform/mac/fsevents.rs`. Primary mac RT surface. NOTIFY-only. Daemon-side `FsEventsHandle` with `mode_label = "fsevents (observe)"`, four default watch roots (Documents / Desktop / Pictures / Downloads), normalized `FsEvent { path, created, modified, renamed, removed, inode, mtime_ns, size }`. mythkernel-side facade re-exports the vendored Sourcerer journal subscriber under the FSEvents name the rest of the codebase uses. 4 tests.
+  - **TASK-080** — `daemon/mythd-macos/src/esf_notify.rs` + `daemon/mythd-macos/Info.plist`. Opportunistic ESF NOTIFY system extension scaffold. `SUBSCRIPTION_MASK` covers `NOTIFY_{OPEN,EXEC,RENAME,CREATE,WRITE,CLOSE}`. **No `com.apple.developer.endpoint-security.client` entitlement key in `Info.plist`** — stock consumer macOS falls back to FSEvents only. `EsClientError::{NotPrivileged,NotEntitled,…}` enum surfaces the literal Apple OSStatus strings to the UI. `ShieldsGate` AtomicBool short-circuits every event when Shields=OFF. 5 tests.
+  - **TASK-081** — `crates/mythkernel/src/ipc/macesf.rs`. JSON-over-XPC bridge ("Codable JSON" for Swift parity). `IpcFrame { NotifyEvent, Heartbeat, ShieldsPush, ActiveFindingsPush }` — **no Verdict variant**, NOTIFY-only proven by an `on_wire.contains("verdict")` assertion. Byte-by-byte reader avoids `BufReader` read-ahead consuming bytes the next frame needs. `mtime_ns: i64` (not i128) so serde_json round-trips cleanly. 4 KiB payload cap. 6 tests.
+  - **TASK-082** — `apps/mythodikal/frontend/src/pages/Realtime.tsx` extended + `crates/ui-bridge/src/commands_mac.rs::mac_realtime_mode`. Surface mode (fsevents observe / fsevents+esf observe), no "AUTH" string anywhere. Mirrors Shields master switch (FR-160) at the top.
+  - **TASK-083** — v0.9.0 release entry.
+  - **TASK-161** — `daemon/mythd-macos/src/rules/honey.rs`. macOS variant of TASK-142. `sysctl(KERN_PROC_ALL)` snapshot → `parent → [child]` map → BFS SIGSTOP of writer's process tree. Cross-platform planner in `mythkernel::detect::honeyfiles` (TASK-142) reused. 3 tests.
+
+  **Wave 2 — failover + biometric exemptions + launchd watchdog (TASK-251..255):**
+  - **TASK-251** — macOS NetworkExtension content-filter: BLOCKED. Entitlement requires the paid Apple Developer Program. User-mode approximation (Little-Snitch-style PF-rule generator) deferred to later network-protection phases.
+  - **TASK-252** — `daemon/mythd-macos/src/esf_failover.rs`. Pure-Rust `Failover` struct dedupes FSEvents + ESF NOTIFY by `(inode, mtime_ns, size)` within a 50 ms window, prefers ESF when both arrive, falls back to FSEvents alone on `ES_NEW_CLIENT_RESULT_ERR_NOT_PRIVILEGED`. `EsfFeedState::{Active,Unavailable}` machine; caller-driven `expire(now)` so no timer thread. 8 unit tests cover every dedup + recovery + double-fire path.
+  - **TASK-253** — `crates/mythkernel/src/exempt/{mod,per_app}.rs` (new top-level module) + `daemon/mythd-macos/src/exemption_keychain.rs` + `apps/mythodikal/frontend/src/pages/Settings/MacExemptions.tsx` + `crates/ui-bridge/src/commands_mac.rs::{mac_exemption_list,add,remove}`. `PerAppExemption::new` **rejects empty bundle_id or team_id** (no pure path-based exemption — would let a renamed bundle masquerade). `ExemptionRegistry` uses `RwLock` for hot-path reads; replace/add/remove invalidate the cache. Keychain backend stub documents the `BiometryCurrentSet | Or | DevicePasscode` SecAccessControl recipe. UI form enforces 10-character team ID with `pattern="[A-Z0-9]{10}"`. 12 tests across kernel + ui-bridge.
+  - **TASK-254** — `daemon/mythd-macos/src/launchd.rs` + `crates/ui-bridge/src/commands_mac.rs::mac_heartbeat` + `apps/mythodikal/frontend/src/components/MacRealtimeHeartbeat.tsx`. launchd LaunchAgent plist renderer (deterministic — same input always produces same plist) + atomic `tmp + rename` heartbeat writer. `parse_heartbeat_with_now` derives `age_ms` and clamps negatives to zero. Chip tints green (≤ 5 s) / amber (5–30 s) / red (> 30 s); click expands pid + restart count + ISO timestamp. (UI command file landed as `commands_mac.rs` rather than `commands/mac_heartbeat.rs` to match the project's existing flat naming.) 9 tests.
+  - **TASK-255** — v0.9.7 release entry.
+
+  **Packaging adds:**
+  - `daemon/mythd-macos/Info.plist` — system extension descriptor with `NSSystemExtensionUsageDescription`, no ESF entitlement key.
+  - `packaging/macos/com.mythodikal.mythd.plist` — per-user LaunchAgent. `KeepAlive=true`, `RunAtLoad=true`, `ThrottleInterval=1`. Unsigned per § 1.5.3.
+
+  **Dependency adds:** none. The macOS-only paths (Security.framework /
+  EndpointSecurity / CoreServices / launchd) are documented but not yet
+  linked; the runtime-validation pass on a macOS host wires the actual
+  FFI calls. Workspace `cargo check` + `cargo clippy -D warnings` +
+  full `cargo test` succeed on Windows.
+
+- **Phase 8 — Linux Real-time + Wave 2 (eBPF + audit + per-mount + container + WSL) + Cross-Platform USB stack** _(foundation 2026-05-27)_
+
+  All 24 Phase 8 tasks landed across waves 1 + 2. Bundled mega-commit at the
+  user's request; full Phase Closeout (smoke test, `/review`, `/security-review`)
+  runs against the PR. Foundation pattern follows the Phase 7C precedent —
+  every module's pure logic + types + tests land here; Linux-syscall paths
+  (fanotify/inotify/audit/eBPF/udev/IOKit/SetupDi) are cfg-gated so
+  `cargo build --workspace` succeeds on every host. Runtime validation on
+  Linux / macOS / Windows runs in the per-OS CI matrix and the v0.8.0 smoke
+  test in `docs/launch-checklists/v0.8.md`.
+
+  **Wave 1 — Linux fanotify core (TASK-073..078, TASK-140..142):**
+  - **TASK-074** — `crates/mythkernel/src/ipc/linfan.rs`. Length-prefixed
+    CBOR IPC. `IpcFrame { Verdict, VerdictReply, ShieldsPush,
+    ActiveFindingsPush, Heartbeat, NotifyEvent }`; `IpcCodec` reader/writer
+    with 4 MiB payload cap; ShieldsState push frame so the daemon can
+    short-circuit verdicts locally when Shields=OFF (FR-160 + TASK-156).
+    7 tests.
+  - **TASK-073** — `daemon/mythd-linux` new crate. `fanotify.rs` with
+    `FAN_OPEN_PERM` / `FAN_ACCESS_PERM` wiring; drops every capability
+    except `CAP_SYS_ADMIN` at startup; binds Unix socket
+    `/run/mythd/mythd.sock`. Honors Shields=OFF locally per FR-160.
+  - **TASK-076** — `packaging/linux/mythd.service` + `postinst` + `prerm`.
+    `Restart=on-failure RestartSec=2s`; `systemctl enable` shipped in
+    `.deb` / `.rpm` postinst. `daemon/mythd-linux/src/watchdog.rs`
+    crash-budget tracker (> 3 restarts / hour trips the UI badge).
+    Distinct from FR-161 / TASK-157 user-app autostart.
+  - **TASK-077** — `daemon/mythd-linux/src/inotify_fallback.rs`. Kernel
+    < 5.1 fallback; observe-only; UI surfaces "inotify (observe-only)".
+  - **TASK-075** — `apps/mythodikal/frontend/src/pages/Realtime.tsx`.
+    Shields master switch (mirrors TASK-156) + Monitored mounts +
+    WSL distros panel.
+  - **TASK-140** — `crates/mythkernel/src/detect/active_findings.rs`
+    (engine-side index) + `daemon/mythd-linux/src/block.rs` (daemon-side
+    verdict policy). DENY on opens against paths with open `detected`
+    findings; honored even when Shields=OFF (FR-160 point 5). 3+4 tests.
+  - **TASK-141** — `daemon/mythd-linux/src/rules/browser_creds.rs`.
+    Chrome / Firefox / Brave credential-store opener detector with
+    process-path allowlist. 5 tests.
+  - **TASK-142** — `crates/mythkernel/src/detect/honeyfiles.rs`
+    (cross-platform canary planner + planter + shape detector;
+    deterministic per-install seed) + `daemon/mythd-linux/src/rules/honey.rs`
+    (Linux SIGSTOP of writer's process tree via `/proc/<pid>/stat` walk).
+    6 tests.
+  - **TASK-078** — `docs/launch-checklists/v0.8.md` shipping checklist.
+
+  **Wave 2 — eBPF + audit + per-mount + container + WSL + USB (TASK-236..250):**
+  - **TASK-236** — `daemon/mythd-linux/src/ebpf.rs`. CO-RE eBPF observer
+    scaffold via `aya` (MIT/Apache, gated on Linux target). Observe-only
+    per § 1.5.4: no LSM hooks, no `bpf_send_signal`. Gracefully disabled
+    when BTF / `CAP_BPF` / kernel < 5.8.
+  - **TASK-237** — `daemon/mythd-linux/src/audit.rs`. NETLINK_AUDIT
+    fallback when `FAN_MARK_FILESYSTEM` is missing. Observe-only;
+    `parse_audit_block` joins `type=SYSCALL` + `type=PATH` records by
+    audit id. 3 tests.
+  - **TASK-238** — `daemon/mythd-linux/src/mounts.rs` + `crates/ui-bridge/src/commands_mount.rs`.
+    `/proc/self/mountinfo` parser + diff helper; per-mount on/off
+    persisted to `realtime_mounts`; daemon applies `FAN_MARK_ADD` /
+    `FAN_MARK_REMOVE` live on its 5 s poll. 4 tests.
+  - **TASK-239** — `daemon/mythd-linux/src/container_dedupe.rs`. Peer-group
+    canonicalization map + bounded LRU(64K) for `(st_dev, st_ino)` dedup.
+    4 tests.
+  - **TASK-240** — `daemon/mythd-linux/src/wsl_peer.rs` (Linux side:
+    `WslContext::detect`, `event_tag`, UTF-16 LE `wsl.exe --list`
+    parser) + `daemon/mythd-windows/src/wsl_bridge.rs` (Windows side:
+    `list_distros_argv`, `distro_socket_path`,
+    `\\wsl.localhost\<distro>\run\mythd\mythd.sock`). 7 tests.
+  - **TASK-241** — `crates/mythkernel/src/usb/mod.rs` (`UsbInsertEvent`,
+    `UsbInterface`, `UsbWatcher` trait, `coalesce_events` helper) +
+    per-OS `daemon/mythd-{linux,macos,windows}/src/usb.rs` wrappers +
+    `apps/mythodikal/frontend/src/components/UsbInsertModal.tsx`.
+    3+1+1 tests.
+  - **TASK-242** — `crates/mythkernel/src/usb/allowlist.rs` (sqlite
+    `usb_allowlist` + wildcard serial) + `crates/ui-bridge/src/commands_usb.rs`
+    + `apps/mythodikal/frontend/src/pages/Settings/UsbAllowlist.tsx`.
+    4 tests.
+  - **TASK-243** — `crates/mythkernel/src/usb/hid_anomaly.rs`. Composite
+    HID-keyboard + mass-storage detector with 2 s window; alert-only
+    per § 1.5.4. 6 tests.
+  - **TASK-244** — `crates/mythkernel/src/usb/power_only.rs` (sqlite
+    `usb_power_only` store + lookup) + per-OS daemon glue
+    (`bConfigurationValue=0` on Linux, IOKit interface-close on macOS,
+    Windows documentation-only per § 1.5.4). 2 tests.
+  - **TASK-245** — `daemon/mythd-linux/src/usb_ro.rs` (mount(8) argv
+    builder + linux-only runner) + `daemon/mythd-macos/src/usb_ro.rs`
+    (diskutil argv builder) + `apps/mythodikal/frontend/src/pages/Settings/UsbPolicy.tsx`.
+    Windows path is a hint card only per § 1.5.4. 3 tests.
+  - **TASK-246** — `crates/mythkernel/src/usb/autorun.rs`. 4 KiB-capped
+    `[autorun]` INI reader; extracts `open=` / `shellexecute=` / `icon=`;
+    fail-safe parser; case-insensitive on Linux. 6 tests.
+  - **TASK-247** — `daemon/mythd-macos/src/rules/app_on_usb.rs`. Bounded
+    `.app`-bundle enumerator (depth ≤ 3) for the macOS USB-insert scan.
+    3 tests.
+  - **TASK-248** — `crates/mythkernel/src/usb/rtl_override.rs`. Bidi-
+    override codepoint detector + `visualize` helper for the modal
+    explainer; P0 when paired with `.exe`/`.scr`/`.bat`/`.sh`/`.command`
+    in logical byte order. 5 tests.
+  - **TASK-249** — `crates/mythkernel/src/usb/write_log.rs`. `usb_write_events`
+    table + 100K-row ring buffer with `pin_device` opt-out from eviction.
+    + `apps/mythodikal/frontend/src/pages/History/UsbWrites.tsx`. 3 tests.
+  - **TASK-250** — `crates/mythkernel/src/usb/device_history.rs`.
+    `usb_device_history` + `usb_device_files` tables; BLAKE3-quick-hash
+    over first 64 KiB + size; `is_unchanged` short-circuit for re-insert
+    scans. + `apps/mythodikal/frontend/src/pages/UsbDevices.tsx`. 3 tests.
+
+  **Per-OS daemon binaries:**
+  - `daemon/mythd-linux` — main + fanotify + inotify_fallback + audit + ebpf
+    + block + mounts + container_dedupe + wsl_peer + usb + usb_ro + watchdog
+    + ipc_client + rules/{browser_creds, honey}.
+  - `daemon/mythd-macos` — scaffolded binary + usb + usb_ro + rules/app_on_usb.
+    Full FSEvents + opportunistic ESF NOTIFY land in Phase 9.
+  - `daemon/mythd-windows` — scaffolded binary + usb + wsl_bridge. Full
+    ETW + AMSI + WDAC + Defender bridge lands in Phase 12.
+
+  **Dependency adds:** `ciborium 0.2` (MIT/Apache; engine ↔ daemon IPC
+  codec). All deps clean against `deny.toml`'s allow-list. No new GPL /
+  AGPL / SSPL trees added.
+
 - **Phase 7B Wave 2 — Hash-path perf + allowlist intelligence + IOC tools + feed integrity** _(shipped 2026-05-23/24)_
 
   22 of 23 Wave 2 tasks landed; only TASK-200 (v0.7.13 release tag) remains, gated on TASK-171 smoke + maintainer `git tag`. ~85 new unit tests across the engine + feed-builder.
