@@ -107,7 +107,7 @@ fn host_kind(raw: &[u8]) -> Option<Host> {
     }
     if raw.len() >= 4 {
         let head: [u8; 4] = [raw[0], raw[1], raw[2], raw[3]];
-        if MACHO_MAGICS.iter().any(|m| *m == head) {
+        if MACHO_MAGICS.contains(&head) {
             return Some(Host::MachO);
         }
     }

@@ -27,7 +27,9 @@ pub struct AutorunFinding {
     pub directive: String,
 }
 
-const RISKY_EXTENSIONS: &[&str] = &[".exe", ".bat", ".cmd", ".scr", ".com", ".lnk", ".vbs", ".ps1"];
+const RISKY_EXTENSIONS: &[&str] = &[
+    ".exe", ".bat", ".cmd", ".scr", ".com", ".lnk", ".vbs", ".ps1",
+];
 
 /// Parse an autorun.inf text and check the root listing for the
 /// referenced payload. Returns `None` when no `open` /
@@ -59,7 +61,10 @@ pub fn detect_autorun(autorun_inf: &str, root_listing: &[String]) -> Option<Auto
     if !RISKY_EXTENSIONS.iter().any(|ext| lc.ends_with(ext)) {
         return None;
     }
-    let lc_listing: Vec<String> = root_listing.iter().map(|e| e.to_ascii_lowercase()).collect();
+    let lc_listing: Vec<String> = root_listing
+        .iter()
+        .map(|e| e.to_ascii_lowercase())
+        .collect();
     let payload_present = lc_listing.iter().any(|e| e == &lc);
     Some(AutorunFinding {
         referenced_payload: payload,

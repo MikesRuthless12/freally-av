@@ -32,10 +32,10 @@ pub mod regions;
 pub mod shellcode;
 pub mod yara_sweep;
 
-pub use macho_load::{is_macho_in_memory, MachOInMemoryFinding};
-pub use reflective::{detect_reflective_dll, ReflectiveFinding};
-pub use regions::{is_suspicious_region, MemoryProtection, MemoryRegion, SuspiciousRegionFinding};
-pub use shellcode::{scan_shellcode_shapes, ShellcodeShape, ShellcodeShapeFinding};
+pub use macho_load::{MachOInMemoryFinding, is_macho_in_memory};
+pub use reflective::{ReflectiveFinding, detect_reflective_dll};
+pub use regions::{MemoryProtection, MemoryRegion, SuspiciousRegionFinding, is_suspicious_region};
+pub use shellcode::{ShellcodeShape, ShellcodeShapeFinding, scan_shellcode_shapes};
 pub use yara_sweep::{YaraRegionRequest, YaraRegionRequestKind};
 
 /// Identifier the daemon uses to attribute findings back to a

@@ -27,7 +27,7 @@ pub mod crypto;
 pub mod excel;
 pub mod vba;
 
-pub use cfb::{parse_cfb, CfbDirectoryEntry, CfbObjectType};
-pub use crypto::{detect_encryption, OfficeEncryption};
-pub use excel::{scan_formulas, XlFormulaFinding, XlSuspiciousFn};
-pub use vba::{scan_vba_modules, VbaAutoExecFinding, VbaTrigger};
+pub use cfb::{CfbDirectoryEntry, CfbObjectType, parse_cfb};
+pub use crypto::{OfficeEncryption, detect_encryption};
+pub use excel::{XlFormulaFinding, XlSuspiciousFn, scan_formulas};
+pub use vba::{VbaAutoExecFinding, VbaTrigger, scan_vba_modules};

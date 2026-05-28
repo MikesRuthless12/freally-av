@@ -68,7 +68,10 @@ const SIGS: &[(ShellcodeShape, &[u8])] = &[
         ShellcodeShape::MetasploitReverseHttps,
         &[0xFC, 0xE8, 0x89, 0x00, 0x00, 0x00],
     ),
-    (ShellcodeShape::Sc64Loader, &[0x48, 0x31, 0xC9, 0x48, 0x81, 0xE9]),
+    (
+        ShellcodeShape::Sc64Loader,
+        &[0x48, 0x31, 0xC9, 0x48, 0x81, 0xE9],
+    ),
 ];
 
 const NOP_SLED_THRESHOLD: usize = 32;
@@ -132,9 +135,7 @@ mod tests {
 
     #[test]
     fn detects_getpc_stub() {
-        let bytes = [
-            0x00u8, 0x00, 0xE8, 0x00, 0x00, 0x00, 0x00, 0x58, 0x90, 0x90,
-        ];
+        let bytes = [0x00u8, 0x00, 0xE8, 0x00, 0x00, 0x00, 0x00, 0x58, 0x90, 0x90];
         let findings = scan_shellcode_shapes(&bytes);
         assert!(findings.iter().any(|f| f.shape == ShellcodeShape::GetPc));
     }
@@ -143,9 +144,11 @@ mod tests {
     fn detects_metasploit_reverse_tcp_prefix() {
         let bytes = [0xFCu8, 0xE8, 0x82, 0x00, 0x00, 0x00, 0x60, 0x89, 0xE5];
         let findings = scan_shellcode_shapes(&bytes);
-        assert!(findings
-            .iter()
-            .any(|f| f.shape == ShellcodeShape::MetasploitReverseTcp));
+        assert!(
+            findings
+                .iter()
+                .any(|f| f.shape == ShellcodeShape::MetasploitReverseTcp)
+        );
     }
 
     #[test]
@@ -169,9 +172,11 @@ mod tests {
         let mut bytes = vec![0u8; 8];
         bytes.extend_from_slice(&[0x66, 0x81, 0xCA, 0xFF, 0x0F]);
         let findings = scan_shellcode_shapes(&bytes);
-        assert!(findings
-            .iter()
-            .any(|f| f.shape == ShellcodeShape::EggHunter));
+        assert!(
+            findings
+                .iter()
+                .any(|f| f.shape == ShellcodeShape::EggHunter)
+        );
     }
 
     #[test]

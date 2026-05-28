@@ -16,7 +16,7 @@
 use serde::{Deserialize, Serialize};
 
 /// User-configurable detonation rule.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DetonationPolicy {
     /// Never offer detonation — engine emits informational
@@ -24,16 +24,11 @@ pub enum DetonationPolicy {
     NeverOffer,
     /// Offer the modal sheet but require an explicit per-file
     /// click. This is the default for the free tier.
+    #[default]
     OfferOnP1,
     /// Offer for P1 and P2 findings (more aggressive — donor /
     /// pro setting).
     OfferOnP1OrP2,
-}
-
-impl Default for DetonationPolicy {
-    fn default() -> Self {
-        DetonationPolicy::OfferOnP1
-    }
 }
 
 /// Decision emitted by [`should_offer_detonation`].
@@ -50,10 +45,7 @@ pub enum DetonationDecision {
 /// representation is `0 = P0` (informational) … `3 = P3`
 /// (critical). The function is total: every (policy, severity)
 /// pair returns a defined decision.
-pub fn should_offer_detonation(
-    policy: DetonationPolicy,
-    severity: u8,
-) -> DetonationDecision {
+pub fn should_offer_detonation(policy: DetonationPolicy, severity: u8) -> DetonationDecision {
     match policy {
         DetonationPolicy::NeverOffer => DetonationDecision::Suppress,
         DetonationPolicy::OfferOnP1 => {

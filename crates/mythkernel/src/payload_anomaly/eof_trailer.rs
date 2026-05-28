@@ -6,12 +6,11 @@
 //! sometimes a smuggled payload. This module classifies each
 //! supported container into one of three states:
 //!
-//!   * `Clean`            — no trailer
-//!   * `TrailerBenign`    — trailer is short (< 64 bytes) and
-//!                          stays inside an ignorable region
-//!   * `TrailerSuspect`   — trailer is large or contains
-//!                          another file-format magic (PE,
-//!                          ZIP, OLE, etc.)
+//!   * `Clean` — no trailer
+//!   * `TrailerBenign` — trailer is short (< 64 bytes) and
+//!     stays inside an ignorable region
+//!   * `TrailerSuspect` — trailer is large or contains another
+//!     file-format magic (PE, ZIP, OLE, etc.)
 //!
 //! Supported formats:
 //!
@@ -39,15 +38,15 @@ pub struct TrailerFinding {
 }
 
 const APPENDED_MAGICS: &[&[u8]] = &[
-    b"MZ",                                  // PE
-    b"\x7FELF",                             // ELF
-    &[0xCF, 0xFA, 0xED, 0xFE],              // Mach-O 64
-    &[0xFE, 0xED, 0xFA, 0xCE],              // Mach-O 32 BE
-    &[0xCA, 0xFE, 0xBA, 0xBE],              // Mach-O fat
-    b"PK\x03\x04",                          // ZIP
-    &[0xD0, 0xCF, 0x11, 0xE0],              // OLE CFB
-    &[0x37, 0x7A, 0xBC, 0xAF, 0x27, 0x1C],  // 7z
-    b"%PDF-",                               // PDF
+    b"MZ",                                 // PE
+    b"\x7FELF",                            // ELF
+    &[0xCF, 0xFA, 0xED, 0xFE],             // Mach-O 64
+    &[0xFE, 0xED, 0xFA, 0xCE],             // Mach-O 32 BE
+    &[0xCA, 0xFE, 0xBA, 0xBE],             // Mach-O fat
+    b"PK\x03\x04",                         // ZIP
+    &[0xD0, 0xCF, 0x11, 0xE0],             // OLE CFB
+    &[0x37, 0x7A, 0xBC, 0xAF, 0x27, 0x1C], // 7z
+    b"%PDF-",                              // PDF
 ];
 
 pub fn evaluate(raw: &[u8]) -> Option<TrailerFinding> {
@@ -72,9 +71,7 @@ fn classify(format: &'static str, raw: &[u8], eof_at: usize) -> TrailerFinding {
         TrailerVerdict::Clean
     } else {
         let after = &raw[eof_at..];
-        if has_appended_magic(after) || trailer_bytes >= 1024 {
-            TrailerVerdict::TrailerSuspect
-        } else if trailer_bytes >= 64 {
+        if has_appended_magic(after) || trailer_bytes >= 64 {
             TrailerVerdict::TrailerSuspect
         } else {
             TrailerVerdict::TrailerBenign

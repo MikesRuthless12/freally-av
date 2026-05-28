@@ -14,12 +14,12 @@
 //! [`evaluate_lsb_chi_square`] returns the chi-square statistic
 //! plus a coarse [`StegoBand`]:
 //!
-//!   * `Clean`     — chi-square stays well under the threshold;
-//!                   no payload likely
-//!   * `Suspect`   — chi-square in the warning band; manual
-//!                   review recommended
-//!   * `Likely`    — chi-square crosses the lower bound for
-//!                   "LSB plane resembles uniform random"
+//!   * `Clean` — chi-square stays well under the threshold;
+//!     no payload likely
+//!   * `Suspect` — chi-square in the warning band; manual
+//!     review recommended
+//!   * `Likely` — chi-square crosses the lower bound for
+//!     "LSB plane resembles uniform random"
 //!
 //! Tunable for false-positive minimisation by the caller.
 
@@ -111,8 +111,7 @@ mod tests {
 
     #[test]
     fn all_one_pixels_are_clean() {
-        let f =
-            evaluate_lsb_chi_square(&[0xFFu8; 4096], &StegoThresholds::default()).unwrap();
+        let f = evaluate_lsb_chi_square(&[0xFFu8; 4096], &StegoThresholds::default()).unwrap();
         assert_eq!(f.band, StegoBand::Clean);
         assert_eq!(f.lsb_one_fraction, 1.0);
     }

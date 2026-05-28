@@ -114,13 +114,7 @@ mod tests {
     fn default_cap_is_three() {
         let g = ArchiveDepthGuard::root();
         assert_eq!(g.descend().unwrap().depth(), 1);
-        let g3 = g
-            .descend()
-            .unwrap()
-            .descend()
-            .unwrap()
-            .descend()
-            .unwrap();
+        let g3 = g.descend().unwrap().descend().unwrap().descend().unwrap();
         assert_eq!(g3.depth(), 3);
         assert!(g3.descend().is_err());
     }

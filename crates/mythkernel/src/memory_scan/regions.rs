@@ -67,8 +67,7 @@ pub enum SuspiciousReason {
     ExecutableFromUnusualExtension,
 }
 
-const RECOGNISED_EXEC_EXTENSIONS: &[&str] =
-    &[".exe", ".dll", ".so", ".dylib", ".node", ".bundle"];
+const RECOGNISED_EXEC_EXTENSIONS: &[&str] = &[".exe", ".dll", ".so", ".dylib", ".node", ".bundle"];
 
 /// Recognise versioned shared-library names like `libc.so.6`
 /// or `libfoo.dylib.1.0` that don't end in the bare extension.

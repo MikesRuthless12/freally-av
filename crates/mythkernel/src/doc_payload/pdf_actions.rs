@@ -7,7 +7,7 @@
 //!   * `/Launch` — launches an external program
 //!   * `/OpenAction` — fires on document open
 //!   * `/AA` — additional-actions dictionary (mouse-over, form
-//!             focus, page-open …)
+//!     focus, page-open …)
 //!
 //! Detection is presence-based: the parser doesn't follow
 //! indirect-object refs, so a hit means "the document contains
@@ -101,8 +101,7 @@ fn is_name_terminator(raw: &[u8], pos: usize) -> bool {
         return true; // EOF terminates
     }
     let b = raw[pos];
-    b.is_ascii_whitespace()
-        || matches!(b, b'/' | b'[' | b'(' | b'<' | b']' | b'>' | b'{' | b'}')
+    b.is_ascii_whitespace() || matches!(b, b'/' | b'[' | b'(' | b'<' | b']' | b'>' | b'{' | b'}')
 }
 
 fn find_subslice(haystack: &[u8], needle: &[u8]) -> Option<usize> {

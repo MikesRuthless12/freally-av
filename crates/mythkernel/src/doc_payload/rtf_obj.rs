@@ -51,12 +51,13 @@ pub fn scan(raw: &[u8]) -> Vec<RtfObjectFinding> {
         let window_start = abs.saturating_sub(512);
         let window_end = (payload_start + 512).min(text.len());
         let window = &text[window_start..window_end];
-        let auto_update =
-            window.contains("\\objupdate") || window.contains("\\objautlink");
+        let auto_update = window.contains("\\objupdate") || window.contains("\\objautlink");
 
         // Decode hex stream. The hex spans from `payload_start`
         // until the matching `}` that closes the object group.
-        let close_rel = text[payload_start..].find('}').unwrap_or(text.len() - payload_start);
+        let close_rel = text[payload_start..]
+            .find('}')
+            .unwrap_or(text.len() - payload_start);
         let hex_block = &text[payload_start..payload_start + close_rel];
         let decoded = decode_hex_stream(hex_block.as_bytes());
         let is_ole_compound = decoded.starts_with(&[0xD0, 0xCF, 0x11, 0xE0]);
@@ -108,7 +109,8 @@ mod tests {
 
     #[test]
     fn detects_objdata_with_ole_magic() {
-        let rtf = b"{\\rtf1\\ansi\n{\\object\\objemb\\objupdate{\\*\\objdata d0cf11e0a1b11ae10000\n}}}";
+        let rtf =
+            b"{\\rtf1\\ansi\n{\\object\\objemb\\objupdate{\\*\\objdata d0cf11e0a1b11ae10000\n}}}";
         let findings = scan(rtf);
         assert_eq!(findings.len(), 1);
         assert!(findings[0].is_ole_compound);
@@ -133,8 +135,7 @@ mod tests {
 
     #[test]
     fn auto_update_flag_is_set_only_when_marker_present() {
-        let rtf_no_update =
-            b"{\\rtf1\\ansi{\\object\\objemb{\\*\\objdata 4D5A9000}}}";
+        let rtf_no_update = b"{\\rtf1\\ansi{\\object\\objemb{\\*\\objdata 4D5A9000}}}";
         let findings = scan(rtf_no_update);
         assert_eq!(findings.len(), 1);
         assert!(!findings[0].auto_update);

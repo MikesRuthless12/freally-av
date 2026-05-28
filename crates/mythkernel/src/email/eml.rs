@@ -184,9 +184,7 @@ fn find_subslice(haystack: &[u8], needle: &[u8]) -> Option<usize> {
     if needle.is_empty() || needle.len() > haystack.len() {
         return None;
     }
-    haystack
-        .windows(needle.len())
-        .position(|w| w == needle)
+    haystack.windows(needle.len()).position(|w| w == needle)
 }
 
 fn parse_headers(block: &[u8]) -> Vec<(String, String)> {
@@ -253,7 +251,7 @@ pub fn param(line: &str, name: &str) -> Option<String> {
             let end = stripped.find('"')?;
             stripped[..end].to_string()
         } else {
-            rest.split(|c: char| c == ';' || c == '\r' || c == '\n')
+            rest.split([';', '\r', '\n'])
                 .next()
                 .unwrap_or("")
                 .trim()
@@ -524,9 +522,6 @@ mod tests {
             param("multipart/mixed; boundary=plain", "boundary"),
             Some("plain".to_string())
         );
-        assert_eq!(
-            param("multipart/mixed; foo=bar", "boundary"),
-            None
-        );
+        assert_eq!(param("multipart/mixed; foo=bar", "boundary"), None);
     }
 }

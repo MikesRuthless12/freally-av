@@ -96,8 +96,12 @@ pub fn parse_cfb(raw: &[u8]) -> Option<Vec<CfbDirectoryEntry>> {
             STGTY_ROOT => CfbObjectType::Root,
             _ => CfbObjectType::Other,
         };
-        let start_sector =
-            u32::from_le_bytes([entry_bytes[116], entry_bytes[117], entry_bytes[118], entry_bytes[119]]);
+        let start_sector = u32::from_le_bytes([
+            entry_bytes[116],
+            entry_bytes[117],
+            entry_bytes[118],
+            entry_bytes[119],
+        ]);
         let stream_size = u64::from_le_bytes([
             entry_bytes[120],
             entry_bytes[121],
@@ -202,10 +206,7 @@ mod tests {
         assert!(names.contains(&"Root Entry"));
         assert!(names.contains(&"EncryptionInfo"));
         assert!(names.contains(&"EncryptedPackage"));
-        let enc_info = entries
-            .iter()
-            .find(|e| e.name == "EncryptionInfo")
-            .unwrap();
+        let enc_info = entries.iter().find(|e| e.name == "EncryptionInfo").unwrap();
         assert_eq!(enc_info.object_type, CfbObjectType::Stream);
         assert_eq!(enc_info.stream_size, 1024);
     }
@@ -227,12 +228,16 @@ mod tests {
             ("ThisDocument", CfbObjectType::Stream, 2048),
         ]);
         let entries = parse_cfb(&blob).expect("CFB parses");
-        assert!(entries
-            .iter()
-            .any(|e| e.name == "VBA" && e.object_type == CfbObjectType::Storage));
-        assert!(entries
-            .iter()
-            .any(|e| e.name == "ThisDocument" && e.object_type == CfbObjectType::Stream));
+        assert!(
+            entries
+                .iter()
+                .any(|e| e.name == "VBA" && e.object_type == CfbObjectType::Storage)
+        );
+        assert!(
+            entries
+                .iter()
+                .any(|e| e.name == "ThisDocument" && e.object_type == CfbObjectType::Stream)
+        );
     }
 
     #[test]

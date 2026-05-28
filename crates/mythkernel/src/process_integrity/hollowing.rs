@@ -62,36 +62,20 @@ mod tests {
 
     #[test]
     fn matching_hashes_yield_no_finding() {
-        let r = detect_hollowing(
-            "C:\\Windows\\notepad.exe",
-            "deadbeef",
-            "DEADBEEF",
-            false,
-        );
+        let r = detect_hollowing("C:\\Windows\\notepad.exe", "deadbeef", "DEADBEEF", false);
         assert!(r.is_none());
     }
 
     #[test]
     fn mismatch_fires_with_section_hash_mismatch_reason() {
-        let f = detect_hollowing(
-            "C:\\Windows\\notepad.exe",
-            "deadbeef",
-            "feedface",
-            false,
-        )
-        .unwrap();
+        let f =
+            detect_hollowing("C:\\Windows\\notepad.exe", "deadbeef", "feedface", false).unwrap();
         assert_eq!(f.reason, HollowingReason::SectionHashMismatch);
     }
 
     #[test]
     fn relocated_flag_promotes_reason() {
-        let f = detect_hollowing(
-            "C:\\Windows\\notepad.exe",
-            "deadbeef",
-            "feedface",
-            true,
-        )
-        .unwrap();
+        let f = detect_hollowing("C:\\Windows\\notepad.exe", "deadbeef", "feedface", true).unwrap();
         assert_eq!(f.reason, HollowingReason::SectionHashMismatchAndRelocated);
     }
 

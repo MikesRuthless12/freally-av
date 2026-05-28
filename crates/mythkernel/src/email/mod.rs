@@ -36,6 +36,6 @@ pub mod eml;
 pub mod mbox;
 pub mod msg;
 
-pub use eml::{parse_eml, EmlAttachment, EmlMessage, MimePart};
+pub use eml::{EmlAttachment, EmlMessage, MimePart, parse_eml};
 pub use mbox::parse_mbox;
 pub use msg::parse_msg_streams;

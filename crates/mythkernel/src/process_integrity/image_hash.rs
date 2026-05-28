@@ -7,12 +7,11 @@
 //!
 //! Three states:
 //!
-//!   * `Match`            — same hash; no finding
-//!   * `UnknownPath`      — daemon snapshotted a path the
-//!                          catalogue doesn't know about
-//!   * `Mismatch`         — known path, hash differs — the
-//!                          image on disk was replaced after
-//!                          install
+//!   * `Match` — same hash; no finding
+//!   * `UnknownPath` — daemon snapshotted a path the
+//!     catalogue doesn't know about
+//!   * `Mismatch` — known path, hash differs — the image on
+//!     disk was replaced after install
 
 use serde::{Deserialize, Serialize};
 

@@ -7,7 +7,7 @@
 //!   * `LinkTargetIDList` — the IDList target path
 //!   * `LinkInfo` — local + network volume path
 //!   * `StringData` — Name, Relative path, Working Dir,
-//!                    Command-line Arguments, Icon Location
+//!     Command-line Arguments, Icon Location
 //!
 //! Returns a [`LnkInfo`] populated to the depth the input
 //! allowed. Used by the [`super::super::browser::driveby`]
@@ -104,9 +104,12 @@ pub fn parse(raw: &[u8]) -> Option<LnkInfo> {
         if cursor + 4 > raw.len() {
             return Some(info);
         }
-        let link_info_size =
-            u32::from_le_bytes([raw[cursor], raw[cursor + 1], raw[cursor + 2], raw[cursor + 3]])
-                as usize;
+        let link_info_size = u32::from_le_bytes([
+            raw[cursor],
+            raw[cursor + 1],
+            raw[cursor + 2],
+            raw[cursor + 3],
+        ]) as usize;
         cursor += link_info_size;
     }
 
@@ -168,12 +171,7 @@ fn read_string_data(raw: &[u8], at: usize, unicode: bool) -> Option<(String, usi
 mod tests {
     use super::*;
 
-    fn synth(
-        flags: u32,
-        attributes: u32,
-        unicode: bool,
-        strings: &[(u32, &str)],
-    ) -> Vec<u8> {
+    fn synth(flags: u32, attributes: u32, unicode: bool, strings: &[(u32, &str)]) -> Vec<u8> {
         // 0x4C header + minimal body. We skip LinkTargetIDList
         // and LinkInfo by clearing their flags before serializing,
         // then re-OR the requested flags + StringData blocks.
@@ -216,10 +214,7 @@ mod tests {
             0x0000_0024,
             0x20,
             true,
-            &[
-                (0x0000_0004, "shortcut name"),
-                (0x0000_0020, "/c calc.exe"),
-            ],
+            &[(0x0000_0004, "shortcut name"), (0x0000_0020, "/c calc.exe")],
         );
         let info = parse(&blob).expect("parses");
         assert_eq!(info.name.as_deref(), Some("shortcut name"));
@@ -232,10 +227,7 @@ mod tests {
             0x0000_0018,
             0x20,
             true,
-            &[
-                (0x0000_0008, "..\\target.exe"),
-                (0x0000_0010, "%TEMP%"),
-            ],
+            &[(0x0000_0008, "..\\target.exe"), (0x0000_0010, "%TEMP%")],
         );
         let info = parse(&blob).expect("parses");
         assert_eq!(info.relative_path.as_deref(), Some("..\\target.exe"));
@@ -249,10 +241,7 @@ mod tests {
             0x0000_0024,
             0x20,
             false,
-            &[
-                (0x0000_0004, "ansi-name"),
-                (0x0000_0020, "abc"),
-            ],
+            &[(0x0000_0004, "ansi-name"), (0x0000_0020, "abc")],
         );
         let info = parse(&blob).expect("parses");
         assert!(!info.is_unicode());

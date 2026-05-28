@@ -23,6 +23,6 @@ pub mod thread_hijack;
 
 pub use autopsy::{AutopsyEntry, AutopsyLog, ExitReason};
 pub use core_dump::{CoreDumpYaraRequest, CoreDumpYaraVerdict};
-pub use hollowing::{detect_hollowing, HollowingFinding, HollowingReason};
-pub use image_hash::{evaluate_image_hash, ImageHashFinding, ImageHashStatus};
-pub use thread_hijack::{detect_hijacked_thread, ThreadHijackFinding};
+pub use hollowing::{HollowingFinding, HollowingReason, detect_hollowing};
+pub use image_hash::{ImageHashFinding, ImageHashStatus, evaluate_image_hash};
+pub use thread_hijack::{ThreadHijackFinding, detect_hijacked_thread};

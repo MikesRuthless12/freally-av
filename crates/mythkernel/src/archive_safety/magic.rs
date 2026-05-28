@@ -83,7 +83,7 @@ pub fn detect_archive_kind(head: &[u8]) -> Option<ExtendedArchiveKind> {
     if head.len() >= 8 && &head[0..8] == b"MSWIM\0\0\0" {
         return Some(ExtendedArchiveKind::Wim);
     }
-    if head.len() >= 6 && &head[0..6] == &[0x37, 0x7A, 0xBC, 0xAF, 0x27, 0x1C] {
+    if head.len() >= 6 && head[0..6] == [0x37, 0x7A, 0xBC, 0xAF, 0x27, 0x1C] {
         return Some(ExtendedArchiveKind::SevenZ);
     }
     if head.len() >= 7 && head[0..6] == [0x52, 0x61, 0x72, 0x21, 0x1A, 0x07] {

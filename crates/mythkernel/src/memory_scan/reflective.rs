@@ -124,9 +124,7 @@ mod tests {
     #[test]
     fn mapped_file_clears_finding() {
         let bytes = synth_pe(0);
-        assert!(
-            detect_reflective_dll(&bytes, true, Some("C:\\ok.dll"), false).is_none()
-        );
+        assert!(detect_reflective_dll(&bytes, true, Some("C:\\ok.dll"), false).is_none());
     }
 
     #[test]

@@ -10,7 +10,7 @@
 //! the *start of a line*, so a quoted body line `>From ` doesn't
 //! produce a false split.
 
-use super::eml::{parse_eml, EmlMessage};
+use super::eml::{EmlMessage, parse_eml};
 
 /// Split an `.mbox` file into individual [`EmlMessage`] entries.
 /// Malformed entries are still emitted with whatever the per-message
