@@ -17,6 +17,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::util::bytes::find_subslice;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PdfActionKind {
@@ -102,13 +104,6 @@ fn is_name_terminator(raw: &[u8], pos: usize) -> bool {
     }
     let b = raw[pos];
     b.is_ascii_whitespace() || matches!(b, b'/' | b'[' | b'(' | b'<' | b']' | b'>' | b'{' | b'}')
-}
-
-fn find_subslice(haystack: &[u8], needle: &[u8]) -> Option<usize> {
-    if needle.is_empty() || needle.len() > haystack.len() {
-        return None;
-    }
-    haystack.windows(needle.len()).position(|w| w == needle)
 }
 
 fn extract_context(raw: &[u8], offset: usize, needle_len: usize) -> String {

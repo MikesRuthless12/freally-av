@@ -139,6 +139,22 @@ pub fn is_apple_dmg_trailer(tail_512: &[u8]) -> bool {
     &tail_512[..4] == b"koly"
 }
 
+/// Identify an archive container using both head and tail bytes.
+///
+/// DMG detection requires reading the tail (the `koly` trailer
+/// sits at offset `end - 512`), so callers that have both halves
+/// of the file should prefer this over [`detect_archive_kind`].
+/// The head-only path still wins for every other container.
+pub fn detect_archive_kind_with_tail(head: &[u8], tail_512: &[u8]) -> Option<ExtendedArchiveKind> {
+    if let Some(kind) = detect_archive_kind(head) {
+        return Some(kind);
+    }
+    if is_apple_dmg_trailer(tail_512) {
+        return Some(ExtendedArchiveKind::AppleDmg);
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -219,5 +235,30 @@ mod tests {
         assert!(is_apple_dmg_trailer(&tail));
         let plain = [0u8; 512];
         assert!(!is_apple_dmg_trailer(&plain));
+    }
+
+    #[test]
+    fn detect_with_tail_promotes_apple_dmg_when_head_blank() {
+        let head = [0u8; 1024];
+        let mut tail = vec![0u8; 512];
+        tail[..4].copy_from_slice(b"koly");
+        assert_eq!(
+            detect_archive_kind_with_tail(&head, &tail),
+            Some(ExtendedArchiveKind::AppleDmg)
+        );
+    }
+
+    #[test]
+    fn detect_with_tail_prefers_head_match_when_both_present() {
+        // Crafted blob: head says ZIP, tail has koly trailer.
+        // Head wins (real-world: AppleDmg containers don't carry
+        // ZIP magic in head bytes).
+        let head = b"PK\x03\x04ignore";
+        let mut tail = vec![0u8; 512];
+        tail[..4].copy_from_slice(b"koly");
+        assert_eq!(
+            detect_archive_kind_with_tail(head, &tail),
+            Some(ExtendedArchiveKind::Zip)
+        );
     }
 }

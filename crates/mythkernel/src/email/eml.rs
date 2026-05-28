@@ -18,6 +18,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::util::bytes::find_subslice;
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EmlMessage {
     pub from: Option<String>,
@@ -180,13 +182,6 @@ fn split_header_body(raw: &[u8]) -> (&[u8], &[u8]) {
     (raw, &[])
 }
 
-fn find_subslice(haystack: &[u8], needle: &[u8]) -> Option<usize> {
-    if needle.is_empty() || needle.len() > haystack.len() {
-        return None;
-    }
-    haystack.windows(needle.len()).position(|w| w == needle)
-}
-
 fn parse_headers(block: &[u8]) -> Vec<(String, String)> {
     let mut out: Vec<(String, String)> = Vec::new();
     let text = String::from_utf8_lossy(block);
@@ -273,9 +268,21 @@ fn split_multipart(body: &[u8], boundary: &str) -> Vec<Vec<u8>> {
         starts.push(idx + rel);
         idx = idx + rel + needle.len();
     }
+    // Append a sentinel at text.len() so the final part is
+    // emitted even when the canonical `--boundary--` closing
+    // marker is missing (truncated / malformed MIME). The
+    // module contract is "always return what we could read"
+    // — silently dropping the last attachment is a real-world
+    // false-negative trigger.
+    if !starts.is_empty() {
+        starts.push(text.len());
+    }
     for window in starts.windows(2) {
         let begin = window[0] + needle.len();
         let end = window[1];
+        if begin > end || end > text.len() {
+            continue;
+        }
         let chunk = trim_part(&text[begin..end]);
         if !chunk.is_empty() {
             parts.push(chunk.to_vec());
@@ -305,47 +312,25 @@ fn decode_transfer(body: &[u8], encoding: &str) -> Vec<u8> {
 }
 
 fn decode_base64_loose(body: &[u8]) -> Vec<u8> {
-    let mut cleaned = String::with_capacity(body.len());
-    for &b in body {
-        let c = b as char;
-        if c.is_ascii_alphanumeric() || c == '+' || c == '/' || c == '=' {
-            cleaned.push(c);
-        }
+    // Strip whitespace + non-alphabet bytes so MIME folding / CRLF
+    // gaps don't trip the strict decoder, then hand off to the
+    // workspace `base64` crate (already a dep via the engine-bundle
+    // signature path).
+    let mut cleaned: Vec<u8> = body
+        .iter()
+        .copied()
+        .filter(|&b| b.is_ascii_alphanumeric() || b == b'+' || b == b'/' || b == b'=')
+        .collect();
+    // Some MIME generators emit non-padded base64. Drop padding
+    // before handing to the URL-safe variant so we don't fail
+    // when the input is missing trailing `=`.
+    while cleaned.last() == Some(&b'=') {
+        cleaned.pop();
     }
-    // RFC 2045 base64 alphabet, manual decode (no `base64` crate dep
-    // boundary here — keeps this module standalone).
-    let mut out = Vec::with_capacity(cleaned.len() * 3 / 4);
-    let bytes = cleaned.as_bytes();
-    let mut i = 0;
-    while i + 4 <= bytes.len() {
-        let chunk = &bytes[i..i + 4];
-        let b0 = b64_val(chunk[0]);
-        let b1 = b64_val(chunk[1]);
-        let b2 = b64_val(chunk[2]);
-        let b3 = b64_val(chunk[3]);
-        if let (Some(b0), Some(b1)) = (b0, b1) {
-            out.push((b0 << 2) | (b1 >> 4));
-            if let Some(b2) = b2 {
-                out.push((b1 << 4) | (b2 >> 2));
-                if let Some(b3) = b3 {
-                    out.push((b2 << 6) | b3);
-                }
-            }
-        }
-        i += 4;
-    }
-    out
-}
-
-fn b64_val(b: u8) -> Option<u8> {
-    match b {
-        b'A'..=b'Z' => Some(b - b'A'),
-        b'a'..=b'z' => Some(b - b'a' + 26),
-        b'0'..=b'9' => Some(b - b'0' + 52),
-        b'+' => Some(62),
-        b'/' => Some(63),
-        _ => None,
-    }
+    use base64::Engine;
+    base64::engine::general_purpose::STANDARD_NO_PAD
+        .decode(&cleaned)
+        .unwrap_or_default()
 }
 
 fn decode_quoted_printable(body: &[u8]) -> Vec<u8> {
@@ -477,6 +462,30 @@ mod tests {
         let msg = parse_eml(raw);
         assert_eq!(msg.parts.len(), 1);
         assert!(String::from_utf8_lossy(&msg.parts[0].body).starts_with("Hello world!"));
+    }
+
+    #[test]
+    fn multipart_without_closing_boundary_still_emits_final_part() {
+        // Adversarial / truncated MIME: only the opening
+        // `--BB` markers, no `--BB--` terminator. The final
+        // part must still be parsed — otherwise the attacker
+        // can smuggle an attachment past the scanner just by
+        // truncating the trailer.
+        let raw = b"From: a@b\r\n\
+                    Content-Type: multipart/mixed; boundary=BB\r\n\
+                    \r\n\
+                    --BB\r\n\
+                    Content-Type: text/plain\r\n\r\n\
+                    cover text\r\n\
+                    --BB\r\n\
+                    Content-Type: application/octet-stream; name=\"payload.bin\"\r\n\
+                    Content-Disposition: attachment; filename=\"payload.bin\"\r\n\
+                    Content-Transfer-Encoding: base64\r\n\r\n\
+                    TXl0aG9kaWthbAo=\r\n";
+        let msg = parse_eml(raw);
+        assert_eq!(msg.attachments.len(), 1, "final part must not be dropped");
+        assert_eq!(msg.attachments[0].filename.as_deref(), Some("payload.bin"));
+        assert_eq!(&msg.attachments[0].decoded_bytes, b"Mythodikal\n");
     }
 
     #[test]

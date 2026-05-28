@@ -10,9 +10,8 @@
 //!     Command-line Arguments, Icon Location
 //!
 //! Returns a [`LnkInfo`] populated to the depth the input
-//! allowed. Used by the [`super::super::browser::driveby`]
-//! detector and the upcoming LNK working-dir anomaly check
-//! (TASK-289).
+//! allowed. Consumed by
+//! [`crate::payload_anomaly::lnk_anomaly`] (TASK-289).
 
 use serde::{Deserialize, Serialize};
 

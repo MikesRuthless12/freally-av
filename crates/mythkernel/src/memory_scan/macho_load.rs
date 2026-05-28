@@ -48,7 +48,14 @@ pub fn is_macho_in_memory(
         return None;
     }
     let limit = bytes.len().min(1024);
-    for off in 0..limit.saturating_sub(4) {
+    // Walk every 4-byte window inclusive of the last legal one
+    // (`off + 4 <= limit`). The previous `0..limit-4` excluded
+    // `off = limit - 4`, missing magic at the final window —
+    // e.g. a 4-byte buffer carrying just a Mach-O magic.
+    if limit < 4 {
+        return None;
+    }
+    for off in 0..=limit - 4 {
         if let Some(magic) = match_magic(&bytes[off..off + 4]) {
             return Some(MachOInMemoryFinding {
                 offset_in_region: off,
@@ -112,6 +119,34 @@ mod tests {
         buf[256..260].copy_from_slice(&[0xCF, 0xFA, 0xED, 0xFE]);
         let f = is_macho_in_memory(&buf, true).unwrap();
         assert_eq!(f.offset_in_region, 256);
+    }
+
+    #[test]
+    fn detects_magic_at_exactly_four_byte_buffer() {
+        // The previous off-by-one (`0..limit-4`) excluded
+        // `off = 0` when limit = 4 and returned None.
+        let buf = [0xCFu8, 0xFA, 0xED, 0xFE];
+        let f = is_macho_in_memory(&buf, true).expect("detected");
+        assert_eq!(f.offset_in_region, 0);
+        assert_eq!(f.magic, MachOMagic::Thin64Le);
+    }
+
+    #[test]
+    fn detects_magic_at_final_window_of_larger_buffer() {
+        // Magic sits at offset (limit - 4); previously skipped.
+        let mut buf = vec![0u8; 1024];
+        let off = 1024 - 4;
+        buf[off..off + 4].copy_from_slice(&[0xCF, 0xFA, 0xED, 0xFE]);
+        let f = is_macho_in_memory(&buf, true).expect("detected");
+        assert_eq!(f.offset_in_region, off);
+    }
+
+    #[test]
+    fn buffer_too_short_for_any_magic_returns_none() {
+        for len in 0..4usize {
+            let buf = vec![0u8; len];
+            assert!(is_macho_in_memory(&buf, true).is_none(), "len={len}");
+        }
     }
 
     #[test]

@@ -16,6 +16,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::util::bytes::find_subslice;
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PdfStreamInfo {
     /// Byte offset of the literal `stream` token.
@@ -110,36 +112,66 @@ fn extract_filters(raw: &[u8], stream_token_at: usize) -> Vec<String> {
         lower = lower + rel + b"endobj".len();
     }
     let slice = &raw[lower..stream_token_at];
-    let lc = String::from_utf8_lossy(slice);
-    // Find last `/Filter` token in this window.
-    let Some(filter_pos) = lc.rfind("/Filter") else {
+    // PDF dictionary keys are ASCII; walk the byte slice directly
+    // instead of cloning into a `String` (4 KiB × N streams).
+    let Some(filter_pos) = slice
+        .windows(b"/Filter".len())
+        .rposition(|w| w == b"/Filter")
+    else {
         return Vec::new();
     };
-    let after = &lc[filter_pos + 7..];
-    let trimmed = after.trim_start();
-    if trimmed.starts_with('[') {
+    let after = &slice[filter_pos + b"/Filter".len()..];
+    let trimmed = trim_ascii_start(after);
+    if let Some(after_bracket) = trimmed.strip_prefix(b"[") {
         // Array form: `[ /FlateDecode /ASCIIHexDecode ]`.
-        let close = trimmed.find(']').unwrap_or(trimmed.len());
-        return trimmed[1..close]
-            .split_whitespace()
-            .filter(|s| s.starts_with('/'))
-            .map(|s| s.trim_start_matches('/').to_string())
-            .collect();
+        let close = after_bracket
+            .iter()
+            .position(|&b| b == b']')
+            .unwrap_or(after_bracket.len());
+        return parse_filter_names(&after_bracket[..close]);
     }
-    if let Some(name) = trimmed.strip_prefix('/') {
-        let end = name
-            .find(|c: char| c.is_whitespace() || matches!(c, '/' | '>' | '['))
-            .unwrap_or(name.len());
-        return vec![name[..end].to_string()];
+    if let Some(after_slash) = trimmed.strip_prefix(b"/") {
+        let end = after_slash
+            .iter()
+            .position(|&b| b.is_ascii_whitespace() || matches!(b, b'/' | b'>' | b'['))
+            .unwrap_or(after_slash.len());
+        return vec![String::from_utf8_lossy(&after_slash[..end]).into_owned()];
     }
     Vec::new()
 }
 
-fn find_subslice(haystack: &[u8], needle: &[u8]) -> Option<usize> {
-    if needle.is_empty() || needle.len() > haystack.len() {
-        return None;
+fn trim_ascii_start(bytes: &[u8]) -> &[u8] {
+    let mut i = 0;
+    while i < bytes.len() && bytes[i].is_ascii_whitespace() {
+        i += 1;
     }
-    haystack.windows(needle.len()).position(|w| w == needle)
+    &bytes[i..]
+}
+
+fn parse_filter_names(bytes: &[u8]) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < bytes.len() {
+        while i < bytes.len() && bytes[i].is_ascii_whitespace() {
+            i += 1;
+        }
+        if i >= bytes.len() || bytes[i] != b'/' {
+            // Skip token without leading slash.
+            while i < bytes.len() && !bytes[i].is_ascii_whitespace() {
+                i += 1;
+            }
+            continue;
+        }
+        i += 1; // skip '/'
+        let start = i;
+        while i < bytes.len() && !bytes[i].is_ascii_whitespace() && bytes[i] != b'/' {
+            i += 1;
+        }
+        if start < i {
+            out.push(String::from_utf8_lossy(&bytes[start..i]).into_owned());
+        }
+    }
+    out
 }
 
 /// Detect chained-filter obfuscation. Returns `true` when any

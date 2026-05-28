@@ -16,6 +16,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::magic::ExtendedArchiveKind;
+use crate::util::bytes::find_subslice;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -112,13 +113,6 @@ fn host_kind(raw: &[u8]) -> Option<Host> {
         }
     }
     None
-}
-
-fn find_subslice(haystack: &[u8], needle: &[u8]) -> Option<usize> {
-    if needle.is_empty() || needle.len() > haystack.len() {
-        return None;
-    }
-    haystack.windows(needle.len()).position(|w| w == needle)
 }
 
 #[cfg(test)]

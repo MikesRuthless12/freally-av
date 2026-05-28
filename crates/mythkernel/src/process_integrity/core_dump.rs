@@ -6,21 +6,29 @@
 //! notices the new dump via the existing FS-event ring and
 //! enqueues a [`CoreDumpYaraRequest`] for the engine to run
 //! the standard ruleset over the dump bytes. A
-//! [`CoreDumpYaraVerdict`] is emitted back through IPC.
+//! [`CoreDumpYaraVerdict`] is emitted back through the
+//! daemon-internal channel.
 //!
-//! Foundation lands the IPC shapes; the actual yara-x scan
-//! reuses the existing detect::yara_engine entry point at
-//! closeout.
+//! ## IPC framing
+//!
+//! These types are *not* yet variants of
+//! [`crate::ipc::linfan::IpcFrame`]. They are the canonical
+//! daemon-internal request/reply shapes; an IpcFrame variant
+//! lands at closeout when the per-OS daemon hooks are wired.
 
 use serde::{Deserialize, Serialize};
+
+use crate::memory_scan::Pid;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CoreDumpYaraRequest {
     /// Absolute path to the on-disk core file.
     pub dump_path: String,
     /// `pid` recorded at crash time (may be `None` when the
-    /// dump didn't preserve it).
-    pub original_pid: Option<u32>,
+    /// dump didn't preserve it). Reuses [`crate::memory_scan::Pid`]
+    /// so process identifiers carry the same newtype across both
+    /// memory-scan and process-integrity subsystems.
+    pub original_pid: Option<Pid>,
     /// Optional: image path the dead process was running.
     pub image_path: Option<String>,
     pub dump_unix_s: i64,
@@ -57,7 +65,7 @@ mod tests {
     fn request_round_trips_through_serde_json() {
         let req = CoreDumpYaraRequest {
             dump_path: "/var/crash/core.12345".to_string(),
-            original_pid: Some(12345),
+            original_pid: Some(Pid(12345)),
             image_path: Some("/usr/bin/firefox".to_string()),
             dump_unix_s: 1716840000,
         };

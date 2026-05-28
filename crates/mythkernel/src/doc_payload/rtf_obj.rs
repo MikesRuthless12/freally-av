@@ -17,6 +17,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::util::bytes::find_subslice;
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RtfObjectFinding {
     /// Byte offset of `\objdata` inside the RTF stream.
@@ -38,28 +40,35 @@ pub fn scan(raw: &[u8]) -> Vec<RtfObjectFinding> {
     if !is_rtf(raw) {
         return Vec::new();
     }
-    let text = String::from_utf8_lossy(raw);
+    // RTF is ASCII-7 by spec — walk the raw byte slice directly
+    // instead of cloning the whole buffer through
+    // String::from_utf8_lossy. For a 50 MB attachment this saves
+    // ~50 MB of allocation per scan.
+    let needle = b"\\objdata";
     let mut out = Vec::new();
-    let mut search_from = 0;
-    while let Some(rel) = text[search_from..].find("\\objdata") {
+    let mut search_from = 0usize;
+    while let Some(rel) = find_subslice(&raw[search_from..], needle) {
         let abs = search_from + rel;
-        let payload_start = abs + "\\objdata".len();
+        let payload_start = abs + needle.len();
+        if payload_start > raw.len() {
+            break;
+        }
         // Look ahead for auto-update / autolink markers within
         // the enclosing object group (up to 512 bytes of slack
         // to either side covers virtually every legitimate
         // case).
         let window_start = abs.saturating_sub(512);
-        let window_end = (payload_start + 512).min(text.len());
-        let window = &text[window_start..window_end];
-        let auto_update = window.contains("\\objupdate") || window.contains("\\objautlink");
+        let window_end = payload_start.saturating_add(512).min(raw.len());
+        let window = &raw[window_start..window_end];
+        let auto_update = find_subslice(window, b"\\objupdate").is_some()
+            || find_subslice(window, b"\\objautlink").is_some();
 
         // Decode hex stream. The hex spans from `payload_start`
         // until the matching `}` that closes the object group.
-        let close_rel = text[payload_start..]
-            .find('}')
-            .unwrap_or(text.len() - payload_start);
-        let hex_block = &text[payload_start..payload_start + close_rel];
-        let decoded = decode_hex_stream(hex_block.as_bytes());
+        let tail = &raw[payload_start..];
+        let close_rel = tail.iter().position(|&b| b == b'}').unwrap_or(tail.len());
+        let hex_block = &raw[payload_start..payload_start + close_rel];
+        let decoded = decode_hex_stream(hex_block);
         let is_ole_compound = decoded.starts_with(&[0xD0, 0xCF, 0x11, 0xE0]);
 
         out.push(RtfObjectFinding {
@@ -141,6 +150,36 @@ mod tests {
         assert!(!findings[0].auto_update);
         // Decoded `4D5A9000` should be the MZ header bytes.
         assert_eq!(&findings[0].decoded[..4], &[0x4D, 0x5A, 0x90, 0x00]);
+    }
+
+    #[test]
+    fn truncated_rtf_ending_in_objdata_doesnt_panic() {
+        // `\objdata` sits at EOF (payload_start == text.len()).
+        // Before the fix, the subsequent slice could panic on
+        // a buffer that ends partway through the token. The
+        // important property here is "doesn't panic" — whether
+        // an empty finding is emitted is not contractual.
+        let rtf = b"{\\rtf1\\objdata";
+        let _ = scan(rtf);
+        // Also exercise the case where the buffer ends partway
+        // through `\objdata` itself — the find() returns None
+        // for an incomplete token, so no finding.
+        let rtf_partial = b"{\\rtf1\\objda";
+        assert!(scan(rtf_partial).is_empty());
+    }
+
+    #[test]
+    fn objdata_at_exact_eof_doesnt_panic() {
+        // payload_start == text.len() — slice is empty (legal),
+        // find returns None, close_rel = 0.
+        let mut rtf = Vec::from(*b"{\\rtf1{\\object\\objemb{\\*\\objdata");
+        let findings = scan(&rtf);
+        // No `}` — decoded is empty, no panic. May or may not
+        // emit a finding; either way must not panic.
+        let _ = findings;
+        rtf.extend_from_slice(b"AB}");
+        let findings2 = scan(&rtf);
+        assert_eq!(findings2.len(), 1);
     }
 
     #[test]

@@ -72,7 +72,13 @@ pub fn parse_cfb(raw: &[u8]) -> Option<Vec<CfbDirectoryEntry>> {
         return None;
     }
 
-    let dir_offset = (first_dir_sector + 1) * sector_size;
+    // Checked arithmetic — `first_dir_sector` is attacker-controlled. On
+    // 32-bit `usize` targets, unchecked `(first_dir_sector + 1) * sector_size`
+    // can wrap to a small value that bypasses the bounds check and reads
+    // 'directory entries' from the file header.
+    let dir_offset = first_dir_sector
+        .checked_add(1)
+        .and_then(|x| x.checked_mul(sector_size))?;
     if dir_offset >= raw.len() {
         return None;
     }
@@ -238,6 +244,26 @@ mod tests {
                 .iter()
                 .any(|e| e.name == "ThisDocument" && e.object_type == CfbObjectType::Stream)
         );
+    }
+
+    #[test]
+    fn malicious_first_dir_sector_doesnt_overflow_usize() {
+        // Synthesise a header with an attacker-supplied
+        // first_dir_sector that, on a 32-bit usize target, would
+        // wrap `(first_dir_sector + 1) * sector_size` to a small
+        // value bypassing the bounds check. checked_add /
+        // checked_mul must catch it and return None.
+        let mut blob = vec![0u8; 1024];
+        blob[..8].copy_from_slice(&CFB_SIGNATURE);
+        blob[30..32].copy_from_slice(&9u16.to_le_bytes());
+        // first_dir_sector = u32::MAX - 1 (the FREESECT sentinel
+        // is MAX itself; this is just under it so the early-return
+        // doesn't fire). On 32-bit usize, (MAX-1).checked_add(1)
+        // returns Some(MAX) then checked_mul(sector_size) overflows
+        // → None. On 64-bit usize, the multiplied offset exceeds
+        // raw.len() → still None.
+        blob[48..52].copy_from_slice(&(u32::MAX - 1).to_le_bytes());
+        assert!(parse_cfb(&blob).is_none());
     }
 
     #[test]

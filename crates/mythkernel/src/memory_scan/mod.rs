@@ -39,8 +39,11 @@ pub use shellcode::{ShellcodeShape, ShellcodeShapeFinding, scan_shellcode_shapes
 pub use yara_sweep::{YaraRegionRequest, YaraRegionRequestKind};
 
 /// Identifier the daemon uses to attribute findings back to a
-/// process.
+/// process. `#[serde(transparent)]` so the wire form is the bare
+/// u32 — IPC consumers (and external dump-correlator scripts)
+/// see a plain integer, not a tagged struct.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
 pub struct Pid(pub u32);
 
 impl Pid {

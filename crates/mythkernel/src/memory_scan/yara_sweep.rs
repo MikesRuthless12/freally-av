@@ -4,8 +4,15 @@
 //! enqueues these and the engine's existing
 //! [`crate::detect::yara_engine`] consumes them. Actual
 //! `yara-x` integration reuses the production scan path and
-//! lands at Phase 10 closeout, so this module just owns the
-//! type that gets serialised across the IPC boundary.
+//! lands at Phase 10 closeout.
+//!
+//! ## IPC framing
+//!
+//! This struct is *not* a wire-protocol contract yet. When
+//! [`crate::ipc::linfan::IpcFrame`] gains a memory-scan variant
+//! at closeout, that variant will either carry a
+//! `YaraRegionRequest` or a refined shape derived from it; this
+//! file is the canonical daemon-internal type until then.
 
 use serde::{Deserialize, Serialize};
 

@@ -29,7 +29,7 @@ pub mod sfx;
 
 pub use bomb_guard::{BombFinding, BombGuardConfig, is_zip_bomb_ratio};
 pub use detonate::{DetonationDecision, DetonationPolicy};
-pub use magic::{ExtendedArchiveKind, detect_archive_kind};
+pub use magic::{ExtendedArchiveKind, detect_archive_kind, detect_archive_kind_with_tail};
 pub use password::{PasswordFinding, is_encrypted_zip_entry};
 pub use recursion::{ArchiveDepthGuard, DepthExceededError};
 pub use sfx::{SfxFinding, SfxKind, detect_sfx};

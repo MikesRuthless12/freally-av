@@ -65,6 +65,10 @@ pub mod store;
 pub mod sysload;
 pub mod telemetry;
 pub mod throttle;
+/// Phase 10 Wave 2 — internal byte-level helpers shared by the new
+/// parsers (find_subslice / rfind_subslice). Deduplicates the
+/// `windows().position(...)` pattern that piled up across five files.
+pub mod util;
 
 pub mod detect;
 /// Phase 9 Wave 2 — per-app real-time exemption registry (TASK-253).

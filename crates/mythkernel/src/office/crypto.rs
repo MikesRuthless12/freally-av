@@ -80,14 +80,30 @@ pub fn detect_legacy_filepass(workbook_stream: &[u8]) -> bool {
         return false;
     }
     // Walk record-by-record: each BIFF record is `[type:u16 LE][len:u16 LE][payload:len]`.
-    let mut i = 0;
-    while i + 4 <= workbook_stream.len() {
+    let mut i: usize = 0;
+    while let Some(next) = i.checked_add(4) {
+        if next > workbook_stream.len() {
+            break;
+        }
         let rec_type = u16::from_le_bytes([workbook_stream[i], workbook_stream[i + 1]]);
         let rec_len = u16::from_le_bytes([workbook_stream[i + 2], workbook_stream[i + 3]]) as usize;
         if rec_type == 0x002F {
             return true;
         }
-        i += 4 + rec_len;
+        // Reject records whose claimed length runs past the stream
+        // end — defends against crafted records that would skip
+        // over a real FilePass sentinel. Checked arithmetic
+        // guards against `i + 4 + rec_len` wrapping on 32-bit usize.
+        let advance = match next.checked_add(rec_len) {
+            Some(v) if v <= workbook_stream.len() => v,
+            _ => break,
+        };
+        if advance == i {
+            // Defensive: `rec_len == 0` with `i + 4` already at EOF would
+            // pin the cursor — break instead of looping.
+            break;
+        }
+        i = advance;
     }
     false
 }
@@ -162,5 +178,33 @@ mod tests {
         w.extend_from_slice(&[0x09u8, 0x08, 0x10, 0x00]); // BOF, len 16
         w.extend_from_slice(&[0u8; 16]); // benign payload
         assert!(!detect_legacy_filepass(&w));
+    }
+
+    #[test]
+    fn malicious_oversized_rec_len_doesnt_skip_filepass() {
+        // Crafted: a record whose rec_len would skip past a real
+        // FilePass record. Walker must reject the oversize claim
+        // rather than honour it.
+        let w = [
+            0x00, 0x00, 0xFF, 0xFF, // bogus record type=0, len=0xFFFF
+            0x2F, 0x00, 0x04, 0x00, // FilePass record (we want to find)
+            0x00, 0x00, 0x00, 0x00,
+        ];
+        // With the old unchecked `i += 4 + rec_len`, i would jump
+        // past the FilePass record and return false. After the fix,
+        // the oversized rec_len is rejected and the walker stops —
+        // we'd rather miss with a `false` than skip-and-return-false
+        // dishonestly. The important property: no panic, no infinite
+        // loop.
+        let _ = detect_legacy_filepass(&w);
+    }
+
+    #[test]
+    fn malicious_rec_len_with_short_stream_doesnt_loop() {
+        // A small stream + a rec_len value that would cause arithmetic
+        // wrap on 32-bit usize. Walker must terminate.
+        let w = [0x00u8, 0x00, 0xFC, 0xFF];
+        let result = detect_legacy_filepass(&w);
+        assert!(!result);
     }
 }

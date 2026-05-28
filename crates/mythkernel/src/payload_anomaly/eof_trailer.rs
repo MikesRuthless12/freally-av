@@ -116,25 +116,129 @@ fn png_eof(raw: &[u8]) -> Option<usize> {
 }
 
 fn jpeg_eof(raw: &[u8]) -> Option<usize> {
-    if raw.len() < 2 || raw[0] != 0xFF || raw[1] != 0xD8 {
+    if raw.len() < 4 || raw[0] != 0xFF || raw[1] != 0xD8 {
         return None;
     }
-    // Walk backwards for the last FF D9 — that's the canonical EOI.
-    for i in (1..raw.len()).rev() {
-        if raw[i] == 0xD9 && raw[i - 1] == 0xFF {
-            return Some(i + 1);
+    // Walk JPEG segments FORWARD respecting their lengths to
+    // find the real EOI. A naive `rposition` over the whole file
+    // would let an appended payload's `FF D9` masquerade as the
+    // real EOI — `FF D9` is statistically common in PE / ZIP /
+    // deflate bytes.
+    let mut i = 2usize;
+    while i + 1 < raw.len() {
+        if raw[i] != 0xFF {
+            return None;
+        }
+        // Skip FF-padding between markers.
+        while i + 1 < raw.len() && raw[i + 1] == 0xFF {
+            i += 1;
+        }
+        if i + 1 >= raw.len() {
+            return None;
+        }
+        let marker = raw[i + 1];
+        match marker {
+            0xD9 => return Some(i + 2), // EOI
+            // Standalone markers (no payload).
+            0xD8 | 0x01 | 0xD0..=0xD7 => {
+                i += 2;
+            }
+            0xDA => {
+                // SOS — variable-length, then entropy-coded data.
+                if i + 4 > raw.len() {
+                    return None;
+                }
+                let seg_len = u16::from_be_bytes([raw[i + 2], raw[i + 3]]) as usize;
+                if seg_len < 2 || i.checked_add(2 + seg_len)? > raw.len() {
+                    return None;
+                }
+                i += 2 + seg_len;
+                // Walk entropy data for next non-stuffed, non-restart
+                // marker.
+                while i + 1 < raw.len() {
+                    if raw[i] == 0xFF {
+                        let next = raw[i + 1];
+                        if next != 0x00 && next != 0xFF && !(0xD0..=0xD7).contains(&next) {
+                            break;
+                        }
+                    }
+                    i += 1;
+                }
+            }
+            _ => {
+                // Generic variable-length marker.
+                if i + 4 > raw.len() {
+                    return None;
+                }
+                let seg_len = u16::from_be_bytes([raw[i + 2], raw[i + 3]]) as usize;
+                if seg_len < 2 || i.checked_add(2 + seg_len)? > raw.len() {
+                    return None;
+                }
+                i += 2 + seg_len;
+            }
         }
     }
     None
 }
 
 fn gif_eof(raw: &[u8]) -> Option<usize> {
-    if raw.len() < 6 || (&raw[..6] != b"GIF87a" && &raw[..6] != b"GIF89a") {
+    if raw.len() < 13 || (&raw[..6] != b"GIF87a" && &raw[..6] != b"GIF89a") {
         return None;
     }
-    // Trailer byte 0x3B sits at the end of the GIF stream.
-    let pos = raw.iter().rposition(|&b| b == 0x3B)?;
-    Some(pos + 1)
+    // Walk GIF blocks FORWARD. A naive `rposition` for byte 0x3B
+    // would happily pick up a 0x3B inside any appended payload —
+    // 1-in-256 bytes match.
+    let packed = raw[10];
+    let has_gct = packed & 0x80 != 0;
+    let gct_size = if has_gct {
+        3 * (1usize << ((packed & 0x07) + 1))
+    } else {
+        0
+    };
+    let mut i = 13usize.checked_add(gct_size)?;
+    while i < raw.len() {
+        match raw[i] {
+            0x3B => return Some(i + 1), // Trailer.
+            0x21 => {
+                // Extension: `21 <label> <sub-blocks>`.
+                i = i.checked_add(2)?;
+                i = walk_subblocks(raw, i)?;
+            }
+            0x2C => {
+                // Image descriptor: 10 bytes + optional LCT + LZW
+                // code-size byte + sub-blocks.
+                if i + 10 > raw.len() {
+                    return None;
+                }
+                let img_packed = raw[i + 9];
+                let has_lct = img_packed & 0x80 != 0;
+                let lct_size = if has_lct {
+                    3 * (1usize << ((img_packed & 0x07) + 1))
+                } else {
+                    0
+                };
+                i = i.checked_add(10)?.checked_add(lct_size)?;
+                if i >= raw.len() {
+                    return None;
+                }
+                i = i.checked_add(1)?; // LZW min code size byte.
+                i = walk_subblocks(raw, i)?;
+            }
+            _ => return None,
+        }
+    }
+    None
+}
+
+fn walk_subblocks(raw: &[u8], mut i: usize) -> Option<usize> {
+    while i < raw.len() {
+        let bs = raw[i] as usize;
+        if bs == 0 {
+            return Some(i + 1);
+        }
+        i = i.checked_add(1)?.checked_add(bs)?;
+    }
+    None
 }
 
 fn pdf_eof(raw: &[u8]) -> Option<usize> {
@@ -206,15 +310,73 @@ mod tests {
         assert_eq!(f.verdict, TrailerVerdict::TrailerSuspect);
     }
 
+    fn minimal_gif89a() -> Vec<u8> {
+        // 1×1 GIF89a: signature + screen desc + 2C image desc
+        // + 1 LZW sub-block + trailer.
+        let mut gif = Vec::new();
+        gif.extend_from_slice(b"GIF89a");
+        gif.extend_from_slice(&[0x01, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00]); // screen
+        gif.push(0x2C); // image separator
+        gif.extend_from_slice(&[0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00]); // image desc
+        gif.push(0x02); // LZW min code size
+        gif.push(0x02); // sub-block length
+        gif.extend_from_slice(&[0x44, 0x01]); // sub-block bytes
+        gif.push(0x00); // sub-block terminator
+        gif.push(0x3B); // trailer
+        gif
+    }
+
     #[test]
     fn gif_trailer_is_detected() {
-        let mut gif = Vec::from(*b"GIF89a");
-        gif.extend(std::iter::repeat(0u8).take(100));
-        gif.push(0x3B);
+        let mut gif = minimal_gif89a();
         gif.extend_from_slice(b"appended-content");
         let f = evaluate(&gif).unwrap();
         assert_eq!(f.format, "gif");
         assert_eq!(f.verdict, TrailerVerdict::TrailerBenign);
+    }
+
+    #[test]
+    fn gif_with_3b_in_trailer_doesnt_get_false_negative() {
+        // A naive `rposition(b == 0x3B)` walker would treat the
+        // 0x3B inside the appended payload as the trailer and
+        // shift `trailer_bytes` to 1, downgrading the verdict.
+        let mut gif = minimal_gif89a();
+        // Append a 200-byte payload containing several 0x3B
+        // bytes plus an appended PE magic.
+        let mut payload = vec![0u8; 200];
+        payload[10] = 0x3B;
+        payload[50] = 0x3B;
+        payload[100] = 0x3B;
+        payload[..2].copy_from_slice(b"MZ");
+        gif.extend_from_slice(&payload);
+        let f = evaluate(&gif).unwrap();
+        assert_eq!(f.format, "gif");
+        assert_eq!(f.verdict, TrailerVerdict::TrailerSuspect);
+    }
+
+    #[test]
+    fn jpeg_with_ffd9_in_trailer_doesnt_get_false_negative() {
+        // Minimal degenerate JPEG (SOI + EOI), then append
+        // a payload that contains another `FF D9` byte pair.
+        // A naive backward scan would pick up the trailing
+        // FF D9 as the real EOI.
+        let mut jpg = vec![0xFFu8, 0xD8, 0xFF, 0xD9];
+        let mut payload = vec![0u8; 200];
+        // Bury `FF D9` deep in the appended trailer.
+        payload[..4].copy_from_slice(b"PK\x03\x04");
+        payload[100] = 0xFF;
+        payload[101] = 0xD9;
+        jpg.extend_from_slice(&payload);
+        let f = evaluate(&jpg).unwrap();
+        assert_eq!(f.format, "jpeg");
+        // Trailer must include the appended PK magic, not get
+        // truncated at the bogus FF D9.
+        assert_eq!(f.verdict, TrailerVerdict::TrailerSuspect);
+        assert!(
+            f.trailer_bytes >= 200,
+            "got trailer_bytes={}",
+            f.trailer_bytes
+        );
     }
 
     #[test]
