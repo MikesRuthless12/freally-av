@@ -25,6 +25,11 @@ pub mod email;
 /// directory walker + VBA auto-exec + Excel suspicious-formula +
 /// MS-OFFCRYPTO encrypted-doc fingerprint.
 pub mod office;
+/// Phase 10 Wave 2 — per-process memory-sweep foundations
+/// (TASK-291..295). YARA region request shape + suspicious-region
+/// heuristic + shellcode shape detector + reflective-DLL detector
+/// + Mach-O in-memory load detector.
+pub mod memory_scan;
 /// Phase 10 Wave 2 — cross-cutting payload anomaly detectors
 /// (TASK-286..290): image stego LSB heuristic, hidden-data-after-
 /// EOF, ISO autorun.inf, LNK working-dir anomaly, Office remote-
