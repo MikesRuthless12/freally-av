@@ -54,6 +54,7 @@ pub mod platform_store_allowlist;
 pub mod publisher;
 pub mod sbom_allowlist;
 pub mod stale_temp;
+pub mod uefi;
 pub mod upx_unpack;
 pub mod user_iocs;
 pub mod verdict_cache;
