@@ -39,6 +39,33 @@ pub struct DownloadRecord {
     pub total_bytes: i64,
 }
 
+impl DownloadRecord {
+    /// Quoted-for-log rendering of `target_path`. The path is
+    /// attacker-influenced (the user clicked the link, but the
+    /// website chose the suggested filename). Splicing it into
+    /// a log line raw could embed control characters / ANSI
+    /// escapes / newlines that confuse downstream tooling.
+    pub fn safe_target_path_for_log(&self) -> String {
+        crate::util::shell::quote_for_log(&self.target_path.to_string_lossy())
+    }
+
+    /// Last component of `target_path` run through
+    /// [`crate::util::paths::safe_filename`]. Use this when
+    /// re-quarantining the download (writing the bytes under a
+    /// daemon-controlled root) — the raw `target_path` may
+    /// contain `..` segments / NUL / Windows-reserved chars
+    /// the browser tolerated but our quarantine directory must
+    /// not.
+    pub fn safe_filename_component(&self) -> String {
+        let raw = self
+            .target_path
+            .file_name()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        crate::util::paths::safe_filename(&raw)
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum DownloadReaderError {
     #[error("io: {0}")]
@@ -191,6 +218,58 @@ pub fn join_to_findings(
 mod tests {
     use super::*;
     use rusqlite::Connection;
+
+    #[test]
+    fn safe_target_path_for_log_escapes_newlines() {
+        let rec = DownloadRecord {
+            browser: crate::browser::BrowserFamily::Chrome,
+            target_path: PathBuf::from("C:\\Users\\bob\\Downloads\\evil\nshim.exe"),
+            sha256_hex: None,
+            initial_url: None,
+            final_url: None,
+            start_unix_s: 0,
+            end_unix_s: 0,
+            total_bytes: 0,
+        };
+        let s = rec.safe_target_path_for_log();
+        assert!(s.contains("\\n"));
+        assert!(s.starts_with('"') && s.ends_with('"'));
+    }
+
+    #[test]
+    fn safe_filename_component_strips_traversal() {
+        let rec = DownloadRecord {
+            browser: crate::browser::BrowserFamily::Chrome,
+            target_path: PathBuf::from("/tmp/../../../etc/passwd"),
+            sha256_hex: None,
+            initial_url: None,
+            final_url: None,
+            start_unix_s: 0,
+            end_unix_s: 0,
+            total_bytes: 0,
+        };
+        // file_name() returns "passwd"; safe_filename keeps it as-is
+        // (no separators, no reserved name, not empty).
+        assert_eq!(rec.safe_filename_component(), "passwd");
+    }
+
+    #[test]
+    fn safe_filename_component_substitutes_reserved_name() {
+        let rec = DownloadRecord {
+            browser: crate::browser::BrowserFamily::Chrome,
+            target_path: PathBuf::from("/tmp/CON.txt"),
+            sha256_hex: None,
+            initial_url: None,
+            final_url: None,
+            start_unix_s: 0,
+            end_unix_s: 0,
+            total_bytes: 0,
+        };
+        assert_eq!(
+            rec.safe_filename_component(),
+            crate::util::paths::SAFE_DEFAULT_NAME
+        );
+    }
 
     fn make_chromium_schema(conn: &Connection) {
         conn.execute_batch(

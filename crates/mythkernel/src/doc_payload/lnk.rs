@@ -34,6 +34,29 @@ pub struct LnkInfo {
 }
 
 impl LnkInfo {
+    /// Quoted-for-log rendering of `command_arguments`. The raw
+    /// value comes from a `.lnk` `StringData::Arguments` block
+    /// the attacker authored — never splice it raw into a log
+    /// line (control chars / ANSI sequences) and never pass it
+    /// to a shell. Use [`crate::util::shell::poisoned_for_exec`]
+    /// if the value must reach any exec-shaped surface so
+    /// accidental invocation fails loud.
+    pub fn safe_command_arguments_for_log(&self) -> String {
+        match self.command_arguments.as_deref() {
+            Some(s) => crate::util::shell::quote_for_log(s),
+            None => "\"\"".to_string(),
+        }
+    }
+
+    /// Quoted-for-log rendering of `working_dir`. Carrier is the
+    /// LNK `WorkingDir` StringData block — attacker-controlled.
+    pub fn safe_working_dir_for_log(&self) -> String {
+        match self.working_dir.as_deref() {
+            Some(s) => crate::util::shell::quote_for_log(s),
+            None => "\"\"".to_string(),
+        }
+    }
+
     /// `true` when `HasLinkTargetIDList` (bit 0) is set.
     pub fn has_target_idlist(&self) -> bool {
         self.link_flags & 0x0000_0001 != 0
@@ -246,6 +269,30 @@ mod tests {
         assert!(!info.is_unicode());
         assert_eq!(info.name.as_deref(), Some("ansi-name"));
         assert_eq!(info.command_arguments.as_deref(), Some("abc"));
+    }
+
+    #[test]
+    fn safe_log_accessors_neutralise_shell_metachars() {
+        let info = LnkInfo {
+            link_flags: 0x0000_0020,
+            command_arguments: Some("; rm -rf / ; #\necho pwned".to_string()),
+            working_dir: Some("%TEMP%\n".to_string()),
+            ..Default::default()
+        };
+        let args = info.safe_command_arguments_for_log();
+        assert!(args.contains("\\n"));
+        // The output is wrapped in double quotes, so no shell
+        // metacharacter sits in argv splicing position.
+        assert!(args.starts_with('"') && args.ends_with('"'));
+        let wd = info.safe_working_dir_for_log();
+        assert!(wd.contains("\\n"));
+    }
+
+    #[test]
+    fn safe_log_accessors_empty_when_absent() {
+        let info = LnkInfo::default();
+        assert_eq!(info.safe_command_arguments_for_log(), "\"\"");
+        assert_eq!(info.safe_working_dir_for_log(), "\"\"");
     }
 
     #[test]

@@ -46,6 +46,25 @@ pub struct EmlAttachment {
     pub decoded_bytes: Vec<u8>,
 }
 
+impl EmlAttachment {
+    /// Forensic raw `filename` may carry path separators / NUL /
+    /// Windows-reserved chars / parent-dir traversal. This
+    /// accessor returns the value run through
+    /// [`crate::util::paths::safe_filename`] for callers that
+    /// will write the bytes to disk under a quarantine /
+    /// extract root.
+    ///
+    /// The raw `filename` field is preserved unchanged — the
+    /// analyst-facing UI shows the literal value, the
+    /// filesystem code uses this method.
+    pub fn safe_filename(&self) -> String {
+        match self.filename.as_deref() {
+            Some(raw) => crate::util::paths::safe_filename(raw),
+            None => crate::util::paths::SAFE_DEFAULT_NAME.to_string(),
+        }
+    }
+}
+
 /// Parse a single `.eml` message. Always returns a populated
 /// [`EmlMessage`] even when parts of the input are malformed — the
 /// scan row needs partial output more than a hard error.
@@ -462,6 +481,37 @@ mod tests {
         let msg = parse_eml(raw);
         assert_eq!(msg.parts.len(), 1);
         assert!(String::from_utf8_lossy(&msg.parts[0].body).starts_with("Hello world!"));
+    }
+
+    #[test]
+    fn safe_filename_neutralises_traversal_attempt() {
+        let a = EmlAttachment {
+            filename: Some("../../../etc/passwd".to_string()),
+            content_type: "application/octet-stream".to_string(),
+            decoded_bytes: vec![],
+        };
+        // safe_filename strips slashes; the leading dots collapse.
+        assert_eq!(a.safe_filename(), "etcpasswd");
+    }
+
+    #[test]
+    fn safe_filename_defaults_when_filename_missing() {
+        let a = EmlAttachment {
+            filename: None,
+            content_type: "application/octet-stream".to_string(),
+            decoded_bytes: vec![],
+        };
+        assert_eq!(a.safe_filename(), crate::util::paths::SAFE_DEFAULT_NAME);
+    }
+
+    #[test]
+    fn safe_filename_rejects_reserved_windows_name() {
+        let a = EmlAttachment {
+            filename: Some("CON.txt".to_string()),
+            content_type: "text/plain".to_string(),
+            decoded_bytes: vec![],
+        };
+        assert_eq!(a.safe_filename(), crate::util::paths::SAFE_DEFAULT_NAME);
     }
 
     #[test]
