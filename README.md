@@ -93,7 +93,7 @@ The roadmap targets stable **v0.19.84**, sequenced across 16 phases. Current pha
 | 7C | Engine Enhancement: resumable scans + diff rescan + multi-root parallel + adaptive/battery/wake throttle + sparse/clone/reflink/snapshot correctness + PE/ELF/Mach-O/.NET-IL/Java/DEX/Authenticode parsers + entropy + UPX unpacker + stale-temp auto-quarantine + per-extension/hot-zone/zero-trust policy + FastCDC selective rehash + mmap large-file hash + remote-mount slow-mode | v0.7.x | ✅ Foundation-complete 2026-05-27 (v0.7.20 tag, TASK-235) |
 | 8 | Linux Real-time (fanotify daemon) + Wave 2 USB stack | v0.8.x | 🟢 Foundation 2026-05-27 — all 24 tasks (TASK-073..078, TASK-140..142, TASK-236..250); tag gated on the v0.8.0 launch checklist Linux-runtime smoke |
 | 9 | macOS Real-time (FSEvents + opportunistic ESF NOTIFY) + Wave 2 (failover, biometric exemptions, launchd watchdog) | v0.9.x | 🟢 Foundation 2026-05-27 — all 10 implemented tasks (TASK-079..083, TASK-161, TASK-252..255); TASK-251 BLOCKED (NetworkExtension needs paid Apple Dev Program); tag gated on the v0.9.0/v0.9.7 launch checklist macOS-runtime smoke |
-| 10 | Polish & Public Launch | v0.10.x | Pending |
+| 10 | Polish & Public Launch (Wave 1) | v0.10.x | 🟢 Foundation 2026-05-27 — all 17 implementation tasks (TASK-084..151 + TASK-085a..d); engine 720→804 tests; tag gated on the v0.10.0 launch checklist + frontend UI retrofit pass |
 | 11 | macOS Real-time Enhancement (NOTIFY + XProtect-Style Cleanup) | v0.11.x – v0.12.x | Pending |
 | 12 | Windows Real-time Enforcement Stack (ETW + AMSI + WDAC) | v0.13.x – v0.15.x | Pending |
 | 13 | Donor / Pro Tier (optional, deferred) | v0.16.x – v0.17.x | Pending |
