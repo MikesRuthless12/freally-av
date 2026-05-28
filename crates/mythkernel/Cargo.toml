@@ -29,6 +29,14 @@ walkdir = { workspace = true }
 rayon = { workspace = true }
 crossbeam-channel = { workspace = true }
 zip = { workspace = true }
+# TASK-085 — multi-format archive scanning. Pure-Rust crates only.
+tar = { workspace = true }
+sevenz-rust2 = { workspace = true }
+flate2 = { workspace = true }
+bzip2-rs = { workspace = true }
+lzma-rs = { workspace = true }
+zstd = { workspace = true }
+lz4_flex = { workspace = true }
 yara-x = { workspace = true }
 futures = { workspace = true }
 blake3 = { workspace = true }

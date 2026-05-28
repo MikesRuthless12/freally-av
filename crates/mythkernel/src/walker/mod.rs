@@ -12,6 +12,7 @@ use std::path::PathBuf;
 use serde::{Deserialize, Serialize};
 
 pub mod apfs_clones;
+pub mod archives;
 pub mod bomb_guard;
 pub mod dev_excludes;
 pub mod diff;
