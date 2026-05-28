@@ -25,6 +25,10 @@ pub mod email;
 /// directory walker + VBA auto-exec + Excel suspicious-formula +
 /// MS-OFFCRYPTO encrypted-doc fingerprint.
 pub mod office;
+/// Phase 10 Wave 2 — process-integrity detectors (TASK-296..300):
+/// process-hollowing, hijacked-thread, image-hash integrity,
+/// killed-process autopsy ring-buffer, core-dump YARA request shape.
+pub mod process_integrity;
 /// Phase 10 Wave 2 — per-process memory-sweep foundations
 /// (TASK-291..295). YARA region request shape + suspicious-region
 /// heuristic + shellcode shape detector + reflective-DLL detector
