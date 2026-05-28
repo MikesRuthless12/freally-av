@@ -21,6 +21,7 @@ use serde::{Deserialize, Serialize};
 pub mod active_findings;
 pub mod anomaly;
 pub mod authenticode;
+pub mod behavior_dsl;
 pub mod bloom;
 pub mod byovd;
 pub mod crc32_set_file;

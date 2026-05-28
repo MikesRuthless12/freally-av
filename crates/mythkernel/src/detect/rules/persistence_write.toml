@@ -1,0 +1,38 @@
+# Seed rule for FR-130 persistence-path writes.
+# Fires when a process writes under one of the canonical autostart
+# surfaces (Windows Run keys, macOS LaunchAgents / LaunchDaemons /
+# Login Items, Linux systemd user units / autostart desktop entries,
+# crontab spool dirs). The DSL is path-glob only — false positives are
+# acceptable as P1 alerts; the analyst gets a row, the engine doesn't
+# block.
+
+[[rule]]
+id          = "behavior:persistence_write"
+description = "Write to a known autostart / persistence surface"
+event       = "file_write"
+severity    = "high"
+path_glob   = [
+    # Windows Run / RunOnce hives
+    "**/Run/*",
+    "**/RunOnce/*",
+    "**/Run/**",
+    "**/RunOnce/**",
+    # Windows Startup folders
+    "**/Microsoft/Windows/Start Menu/Programs/Startup/**",
+    # macOS LaunchAgents / LaunchDaemons
+    "**/Library/LaunchAgents/**",
+    "**/Library/LaunchDaemons/**",
+    # macOS legacy login items
+    "**/Library/Application Support/com.apple.backgroundtaskmanagementagent/**",
+    # Linux systemd user units + autostart desktop entries
+    "**/.config/systemd/user/**",
+    "**/.config/autostart/**",
+    "**/.local/share/systemd/user/**",
+    # Linux crontab spool
+    "/var/spool/cron/**",
+    "/etc/cron.d/**",
+    "/etc/cron.hourly/**",
+    "/etc/cron.daily/**",
+    "/etc/cron.weekly/**",
+    "/etc/cron.monthly/**",
+]

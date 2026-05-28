@@ -1,0 +1,29 @@
+# Seed rule for FR-130 suspicious script-host arguments.
+# Fires when a known script host launches with an argument shape that
+# matches a high-precision malware-delivery pattern (PowerShell encoded
+# commands, mshta with a remote URL, wscript with a one-liner that
+# downloads, certutil's URL-cache decode trick, bitsadmin transfers).
+
+[[rule]]
+id          = "behavior:script_host_suspicious"
+description = "Suspicious script-host invocation pattern"
+event       = "process_start"
+severity    = "high"
+cmdline_substring = [
+    "-encodedcommand",
+    "iex (new-object net.webclient)",
+    "invoke-webrequest",
+    "downloadstring(",
+    "downloadfile(",
+    "mshta http",
+    "mshta https",
+    "mshta javascript:",
+    "mshta vbscript:",
+    "certutil -urlcache",
+    "certutil.exe -urlcache",
+    "certutil -decode",
+    "bitsadmin /transfer",
+    "rundll32 javascript:",
+    "regsvr32 /s /u /i:http",
+    "regsvr32 /s /u /i:https",
+]
