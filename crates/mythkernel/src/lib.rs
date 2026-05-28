@@ -13,6 +13,13 @@ pub mod browser;
 pub mod config;
 pub mod db;
 pub mod diagnostics;
+/// Phase 10 Wave 2 — email forensics (TASK-271). In-tree `.eml` /
+/// `.mbox` / `.msg` parsers + MIME multipart + base64/quoted-printable.
+pub mod email;
+/// Phase 10 Wave 2 — Office forensics (TASK-272..275). CFB/OLE
+/// directory walker + VBA auto-exec + Excel suspicious-formula +
+/// MS-OFFCRYPTO encrypted-doc fingerprint.
+pub mod office;
 pub mod diff;
 pub mod engine;
 pub mod error;
