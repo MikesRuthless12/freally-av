@@ -95,21 +95,37 @@ impl BundleOptions {
     }
 }
 
-/// Static metadata baked into every bundle's `manifest.json`.
+/// Static metadata baked into every bundle's `manifest.json`. Fields are
+/// owned `String` rather than `&'static str` so the struct can round-trip
+/// through serde Deserialize (needed by the bug-report rendering path
+/// where a maintainer reviews a JSON body the user already saved).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Manifest {
     /// UTC unix seconds when the bundle was built.
     pub generated_at_utc: i64,
-    /// Engine version (`env!("CARGO_PKG_VERSION")` at compile time).
-    pub engine_version: &'static str,
-    /// OS family. `target_os` at compile time so a Linux binary always
-    /// reports `linux` even if it's running under WSL.
-    pub os: &'static str,
+    /// Engine version (`env!("CARGO_PKG_VERSION")` at the time of build).
+    pub engine_version: String,
+    /// OS family.
+    pub os: String,
     /// Architecture (`x86_64`, `aarch64`, …).
-    pub arch: &'static str,
+    pub arch: String,
     /// Bundle-format version. Bump if the on-disk shape changes so a
     /// future maintainer-side parser can stay backward-compatible.
     pub bundle_format_version: u32,
+}
+
+/// Build a Manifest stamped with this build's static metadata.
+pub fn current_manifest() -> Manifest {
+    Manifest {
+        generated_at_utc: SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0),
+        engine_version: env!("CARGO_PKG_VERSION").to_string(),
+        os: std::env::consts::OS.to_string(),
+        arch: std::env::consts::ARCH.to_string(),
+        bundle_format_version: BUNDLE_FORMAT_VERSION,
+    }
 }
 
 pub const BUNDLE_FORMAT_VERSION: u32 = 1;
@@ -136,16 +152,7 @@ pub fn build_bundle(out_path: &Path, opts: &BundleOptions) -> Result<(), DiagErr
 
     // 1. manifest.json — fixed, tiny, comes first so a maintainer can
     // tell at a glance what they're looking at.
-    let manifest = Manifest {
-        generated_at_utc: SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|d| d.as_secs() as i64)
-            .unwrap_or(0),
-        engine_version: env!("CARGO_PKG_VERSION"),
-        os: std::env::consts::OS,
-        arch: std::env::consts::ARCH,
-        bundle_format_version: BUNDLE_FORMAT_VERSION,
-    };
+    let manifest = current_manifest();
     zip.start_file("manifest.json", zopts)?;
     zip.write_all(serde_json::to_string_pretty(&manifest)?.as_bytes())?;
 
@@ -261,6 +268,81 @@ fn redact_path_carrier(v: &mut serde_json::Value) {
     }
 }
 
+/// One opt-in bug report the user reviews before submitting (TASK-150).
+/// The frontend modal renders the JSON body (editable) and presents
+/// the two submit targets — a GitHub-issue-draft URL or a
+/// self-hosted dropbox URL the user controls.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct BugReport {
+    /// User-supplied free-text describing the issue.
+    pub user_description: String,
+    /// Static host metadata — same shape as [`Manifest`] so a maintainer
+    /// can correlate against a separate diagnostic bundle.
+    pub manifest: Manifest,
+    /// Up to N most-recent log lines from the rolling appender, **already
+    /// redacted** via [`redact_log_line`]. The redactor strips path-
+    /// carrying field values before they reach this struct, so the JSON
+    /// body the user reviews never contains a scan path.
+    pub recent_log_lines: Vec<String>,
+}
+
+/// Build a [`BugReport`] from the engine's current state. Caller passes
+/// the user description from the modal + a reference to the engine's
+/// log directory + a cap on the number of log lines to include.
+pub fn build_bug_report(
+    user_description: String,
+    log_dir: &Path,
+    line_cap: usize,
+) -> Result<BugReport, DiagError> {
+    let manifest = current_manifest();
+    let mut recent_log_lines = Vec::new();
+    if log_dir.exists() {
+        let mut log_files = collect_recent_logs(log_dir, 1)?;
+        log_files.sort();
+        for path in log_files {
+            let body = std::fs::read_to_string(&path)?;
+            for line in body.lines().rev().take(line_cap) {
+                recent_log_lines.push(redact_log_line(line));
+            }
+        }
+    }
+    recent_log_lines.reverse();
+    Ok(BugReport {
+        user_description,
+        manifest,
+        recent_log_lines,
+    })
+}
+
+/// Render `report` as a GitHub-issue-draft body. Caller posts this to
+/// the issue-new URL with `?body=`. The shape matches the existing
+/// `docs/launch-checklists/*.md` issue template so a maintainer sees
+/// the same fields they're used to triaging.
+pub fn render_github_issue_body(report: &BugReport) -> String {
+    let mut out = String::new();
+    out.push_str("## Description\n\n");
+    out.push_str(report.user_description.trim());
+    out.push_str("\n\n## Environment\n\n");
+    out.push_str(&format!(
+        "- Engine version: `{}`\n",
+        report.manifest.engine_version
+    ));
+    out.push_str(&format!("- OS: `{}`\n", report.manifest.os));
+    out.push_str(&format!("- Arch: `{}`\n", report.manifest.arch));
+    out.push_str(&format!(
+        "- Generated at (unix): `{}`\n",
+        report.manifest.generated_at_utc
+    ));
+    out.push_str("\n## Recent logs (redacted)\n\n");
+    out.push_str("```\n");
+    for line in &report.recent_log_lines {
+        out.push_str(line);
+        out.push('\n');
+    }
+    out.push_str("```\n");
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -370,6 +452,51 @@ mod tests {
         }
         let chosen = collect_recent_logs(dir.path(), 3).unwrap();
         assert_eq!(chosen.len(), 3);
+    }
+
+    #[test]
+    fn bug_report_redacts_path_fields_from_logs() {
+        let dir = tempdir().unwrap();
+        let log = dir.path().join("mythodikal.log.2026-05-27");
+        std::fs::write(
+            &log,
+            "{\"event\":\"clean\",\"file\":\"/Users/me/secret.txt\"}\n",
+        )
+        .unwrap();
+        let report = build_bug_report("repro: ran X then Y".into(), dir.path(), 100).unwrap();
+        assert!(report.user_description.contains("repro"));
+        assert!(
+            !report
+                .recent_log_lines
+                .iter()
+                .any(|l| l.contains("secret.txt"))
+        );
+        assert!(
+            report
+                .recent_log_lines
+                .iter()
+                .any(|l| l.contains("<REDACTED>"))
+        );
+    }
+
+    #[test]
+    fn github_issue_body_contains_description_and_env() {
+        let report = BugReport {
+            user_description: "Crash on scan start".into(),
+            manifest: Manifest {
+                generated_at_utc: 1_700_000_000,
+                engine_version: "0.7.20".to_string(),
+                os: "windows".to_string(),
+                arch: "x86_64".to_string(),
+                bundle_format_version: 1,
+            },
+            recent_log_lines: vec!["one line".into()],
+        };
+        let body = render_github_issue_body(&report);
+        assert!(body.contains("Crash on scan start"));
+        assert!(body.contains("0.7.20"));
+        assert!(body.contains("windows"));
+        assert!(body.contains("one line"));
     }
 
     #[test]
