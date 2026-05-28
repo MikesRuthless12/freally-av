@@ -22,7 +22,7 @@
     <string>com.mythodikal.mythd</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/usr/local/bin/mythd</string>
+        <string>/usr/local/bin/mythd-macos</string>
     </array>
     <key>RunAtLoad</key>
     <true/>

@@ -10,8 +10,12 @@ homepage.workspace = true
 description = "Mythodikal Anti-Virus Linux real-time daemon"
 publish = false
 
+# Per-OS binary name so all three daemons can build under `cargo
+# build --workspace` without colliding on a shared output path.
+# The systemd unit / launchd plist references the per-OS name
+# directly; no rename-at-install step required.
 [[bin]]
-name = "mythd"
+name = "mythd-linux"
 path = "src/main.rs"
 
 [lib]

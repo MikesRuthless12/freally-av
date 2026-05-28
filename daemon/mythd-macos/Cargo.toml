@@ -10,8 +10,11 @@ homepage.workspace = true
 description = "Mythodikal Anti-Virus macOS real-time daemon (NOTIFY-only)"
 publish = false
 
+# Per-OS binary name so all three daemons can build under `cargo
+# build --workspace` without colliding on a shared output path.
+# The launchd plist references the per-OS name directly.
 [[bin]]
-name = "mythd"
+name = "mythd-macos"
 path = "src/main.rs"
 
 [lib]
