@@ -6,15 +6,17 @@
 // adds **zero npm dependencies** — Fluent's full machinery (plural
 // rules, term references, BiDi isolates) is overkill for the v0.10
 // release and would require pinning @fluent/bundle + langneg + a
-// CLDR data file. The parser here handles the subset of Fluent syntax
-// we actually use today: `id = value` lines, `{ $arg }` interpolation,
-// and `{ $count -> [zero] … [one] … *[other] … }` selector blocks.
+// CLDR data file.
 //
-// When the locale set grows past one (TASK-089 ships en-US only — FR
-// for other locales lives in follow-up PRs), the right move is to swap
-// this stub for `@fluent/bundle` + `@fluent/langneg`. The public
-// API — `useLocalization().t(id, fallback?, args?)` — is stable so the
-// retrofit is mechanical.
+// **Supported FTL subset.** This scaffolding deliberately parses only
+// single-line `id = value` declarations with `{ $arg }` interpolation.
+// Plural selector blocks (`{ $count -> [one] … *[other] … }`) are NOT
+// parsed — the original code-review build had a regex+indent bug that
+// silently dropped them, and shipping a half-working selector is worse
+// than shipping none. Plurals are expressed today as separate keys
+// (e.g. `scan-findings-summary-zero`, `-one`, `-other`); the caller
+// picks the right key. The full Fluent selector grammar arrives when
+// we adopt `@fluent/bundle` post-v0.10.
 //
 // Migration pattern for component authors:
 //
@@ -32,95 +34,33 @@ import enUS from "./locales/en-US.ftl?raw";
 
 type LocaleId = "en-US";
 
-interface SelectorBranch {
-  match: string;
-  value: string;
-  isDefault: boolean;
-}
-
-interface Entry {
-  raw: string;
-  selectors?: SelectorBranch[];
-  selectorArg?: string;
-}
-
 const KNOWN_LOCALES: Record<LocaleId, string> = {
   "en-US": enUS,
 };
 
-function parseFtl(source: string): Map<string, Entry> {
-  const entries = new Map<string, Entry>();
-  // Drop comments + blank lines. Fluent comments start with `#`.
-  const lines = source.split("\n");
-  let current: { id: string; lines: string[] } | null = null;
-  const flush = () => {
-    if (!current) return;
-    const body = current.lines.join("\n").trim();
-    if (body.includes("->")) {
-      const selectorMatch = body.match(/\{\s*\$(\w+)\s*->/);
-      const selectorArg = selectorMatch?.[1];
-      const selectors: SelectorBranch[] = [];
-      const branchPattern = /(\*?)\[(\w+)\]\s*([^\[\*\}]+)/g;
-      let m: RegExpExecArray | null;
-      while ((m = branchPattern.exec(body)) !== null) {
-        const [, marker, key, value] = m;
-        if (key === undefined || value === undefined) continue;
-        selectors.push({
-          isDefault: marker === "*",
-          match: key,
-          value: value.trim(),
-        });
-      }
-      entries.set(current.id, { raw: body, selectors, selectorArg });
-    } else {
-      entries.set(current.id, { raw: body });
-    }
-    current = null;
-  };
-
-  for (const rawLine of lines) {
-    if (rawLine.trim().startsWith("#")) continue;
-    if (rawLine.trim() === "") {
-      flush();
-      continue;
-    }
-    const match = rawLine.match(/^([a-z][a-z0-9-]*)\s*=\s*(.*)$/i);
-    if (match) {
-      const id = match[1];
-      const value = match[2];
-      if (id === undefined || value === undefined) continue;
-      flush();
-      current = { id, lines: [value] };
-    } else if (current && rawLine.startsWith("    ")) {
-      // Continuation line — Fluent indents continuation by four spaces.
-      current.lines.push(rawLine.trim());
-    }
+/**
+ * Parse a Fluent file's `id = value` lines into a flat map. Lines that
+ * don't match the simple shape (comments, blank lines, selector blocks,
+ * multi-line continuations) are skipped — selectors are explicitly out
+ * of scope in this scaffolding pass (see file header).
+ */
+function parseFtl(source: string): Map<string, string> {
+  const entries = new Map<string, string>();
+  for (const rawLine of source.split("\n")) {
+    const line = rawLine.trim();
+    if (line === "" || line.startsWith("#")) continue;
+    const match = line.match(/^([a-z][a-z0-9-]*)\s*=\s*(.*)$/i);
+    if (!match) continue;
+    const id = match[1];
+    const value = match[2];
+    if (id === undefined || value === undefined) continue;
+    // Skip selector openings (`= { $arg ->`) — we can't render them
+    // without the full selector parser, and falling through with the
+    // raw `{ $arg ->` would render that string literally to the user.
+    if (value.trimStart().startsWith("{") && value.includes("->")) continue;
+    entries.set(id, value);
   }
-  flush();
   return entries;
-}
-
-function format(entry: Entry, args?: Record<string, string | number>): string {
-  // Selector form: `{ $count -> [one] one finger *[other] {$count} fingers }`.
-  if (entry.selectors && entry.selectorArg && args) {
-    const value = args[entry.selectorArg];
-    const stringMatch = typeof value === "number" ? cardinalCategory(value) : String(value);
-    const exact = entry.selectors.find((s) => s.match === String(value));
-    const category = entry.selectors.find((s) => s.match === stringMatch);
-    const def = entry.selectors.find((s) => s.isDefault);
-    const branch = exact ?? category ?? def;
-    if (branch) {
-      return interpolate(branch.value, args);
-    }
-  }
-  return interpolate(entry.raw, args);
-}
-
-function cardinalCategory(n: number): string {
-  // English cardinal plural rules — CLDR-equivalent slim version.
-  if (n === 0) return "zero";
-  if (n === 1) return "one";
-  return "other";
 }
 
 function interpolate(template: string, args?: Record<string, string | number>): string {
@@ -136,12 +76,24 @@ interface LocalizationCtx {
   t: (id: string, fallback?: string, args?: Record<string, string | number>) => string;
 }
 
-const PARSED: Map<LocaleId, Map<string, Entry>> = new Map();
+const PARSED: Map<LocaleId, Map<string, string>> = new Map();
 for (const id of Object.keys(KNOWN_LOCALES) as LocaleId[]) {
   PARSED.set(id, parseFtl(KNOWN_LOCALES[id]));
 }
 
 const Context = createContext<LocalizationCtx | undefined>(undefined);
+
+function lookup(
+  bundle: Map<string, string>,
+  id: string,
+  fallback: string | undefined,
+  args: Record<string, string | number> | undefined,
+): string {
+  const value = bundle.get(id);
+  if (value !== undefined) return interpolate(value, args);
+  if (fallback !== undefined) return interpolate(fallback, args);
+  return id;
+}
 
 /**
  * Provider that wraps the app. Today picks `en-US` unconditionally; the
@@ -152,11 +104,7 @@ export function LocalizationProvider(props: { children: JSX.Element }): JSX.Elem
   const bundle = PARSED.get(locale)!;
   const ctx: LocalizationCtx = {
     locale,
-    t: (id, fallback, args) => {
-      const entry = bundle.get(id);
-      if (entry) return format(entry, args);
-      return fallback ?? id;
-    },
+    t: (id, fallback, args) => lookup(bundle, id, fallback, args),
   };
   return <Context.Provider value={ctx}>{props.children}</Context.Provider>;
 }
@@ -165,21 +113,16 @@ export function LocalizationProvider(props: { children: JSX.Element }): JSX.Elem
  * Hook for components. Returns `{ locale, t }`.
  *
  * Outside a provider — for example a unit test importing a leaf
- * component — `t(id, fallback)` falls back to the inline English
- * copy so the component still renders.
+ * component — `t(id, fallback)` falls back to the inline English copy
+ * so the component still renders.
  */
 export function useLocalization(): LocalizationCtx {
   const ctx = useContext(Context);
   if (ctx) return ctx;
-  // Provider-less fallback: parse en-US once on first call.
   const bundle = PARSED.get("en-US")!;
   return {
     locale: "en-US",
-    t: (id, fallback, args) => {
-      const entry = bundle.get(id);
-      if (entry) return format(entry, args);
-      return fallback ?? id;
-    },
+    t: (id, fallback, args) => lookup(bundle, id, fallback, args),
   };
 }
 
@@ -191,7 +134,5 @@ export function translate(
   args?: Record<string, string | number>,
 ): string {
   const bundle = PARSED.get("en-US")!;
-  const entry = bundle.get(id);
-  if (entry) return format(entry, args);
-  return fallback ?? id;
+  return lookup(bundle, id, fallback, args);
 }

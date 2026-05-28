@@ -130,6 +130,41 @@ pub fn current_manifest() -> Manifest {
 
 pub const BUNDLE_FORMAT_VERSION: u32 = 1;
 
+/// Maximum bytes [`build_bug_report`] reads from each log file's tail.
+/// 256 KiB is enough to hold the most-recent ~2 000 typical JSON log
+/// lines (~120 bytes each); larger and we risk OOM on memory-constrained
+/// laptops when the appender file grew past rotation between bug-report
+/// clicks.
+pub const BUG_REPORT_TAIL_BYTES: u64 = 256 * 1024;
+
+/// Read the last `cap` bytes of `path` as a UTF-8 string. Used by
+/// [`build_bug_report`] to bound peak memory regardless of how large
+/// the log file grew. On a file smaller than `cap`, returns the whole
+/// file. On a file larger than `cap`, may return a partial first line
+/// (the head is fine to discard because the caller iterates by line
+/// and the first/partial line is dropped).
+fn read_file_tail(path: &Path, cap: u64) -> io::Result<String> {
+    use std::io::{Read as _, Seek as _, SeekFrom};
+    let mut f = File::open(path)?;
+    let len = f.metadata()?.len();
+    let skip = len.saturating_sub(cap);
+    if skip > 0 {
+        f.seek(SeekFrom::Start(skip))?;
+    }
+    let mut buf = Vec::with_capacity(cap.min(len) as usize);
+    f.read_to_end(&mut buf)?;
+    // From-utf8-lossy because a tail seek can land mid-codepoint.
+    let s = String::from_utf8_lossy(&buf).into_owned();
+    // Drop the (possibly partial) first line so callers iterating by
+    // line don't pick up half a JSON object.
+    if skip > 0 {
+        if let Some(nl) = s.find('\n') {
+            return Ok(s[nl + 1..].to_string());
+        }
+    }
+    Ok(s)
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum DiagError {
     #[error("io: {0}")]
@@ -213,17 +248,118 @@ fn write_redacted_log<W: Write + Seek>(
     Ok(())
 }
 
-/// Redact one log line. Non-JSON lines pass through. JSON lines have
-/// any string value at a [`PATH_LIKE_KEYS`] key replaced with
-/// `"<REDACTED>"` at every nesting level.
+/// Redact one log line.
+///
+/// JSON lines have any string value at a [`PATH_LIKE_KEYS`] key replaced
+/// with `"<REDACTED>"` at every nesting level.
+///
+/// Non-JSON lines (panic backtraces, plaintext appender output, any
+/// future non-JSON layer) run through [`redact_path_substrings`] so a
+/// path embedded in a free-text message can't slip past FR-088's "no
+/// scan paths in bundle" guarantee.
 pub fn redact_log_line(line: &str) -> String {
     match serde_json::from_str::<serde_json::Value>(line) {
         Ok(mut v) => {
             redact_value(&mut v);
-            serde_json::to_string(&v).unwrap_or_else(|_| line.to_string())
+            serde_json::to_string(&v).unwrap_or_else(|_| redact_path_substrings(line))
         }
-        Err(_) => line.to_string(),
+        Err(_) => redact_path_substrings(line),
     }
+}
+
+/// Replace path-like substrings in free text with `<REDACTED>`. Catches
+/// the two shapes that show up in panic backtraces / plaintext logs:
+///
+///  * POSIX absolute paths: `/...` segments where every char is the
+///    permissive path alphabet (alnum, dot, dash, underscore, slash).
+///    The match stops at any non-path char so a single sentence with
+///    one path in it has only the path scrubbed.
+///  * Windows absolute paths: `<drive>:\...` where `<drive>` is a
+///    single ASCII letter.
+///
+/// Mid-string relative paths (no leading slash / drive letter) are out
+/// of scope — they're indistinguishable from arbitrary identifiers in
+/// free text. The PRD's threat model targets absolute paths only.
+pub fn redact_path_substrings(line: &str) -> String {
+    let bytes = line.as_bytes();
+    let mut out = String::with_capacity(line.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        let c = bytes[i];
+        // Windows drive-letter prefix: `<letter>:\` at a word boundary
+        // (start-of-line or after whitespace / typical punctuation).
+        // Anchoring at a word boundary avoids matching the `s://` in a
+        // URL like `https://...` where `s` is alphabetic and followed
+        // by `:/`.
+        if c.is_ascii_alphabetic()
+            && is_drive_letter_anchor(&bytes[..i])
+            && i + 2 < bytes.len()
+            && bytes[i + 1] == b':'
+            && (bytes[i + 2] == b'\\' || bytes[i + 2] == b'/')
+        {
+            let end = i + 2 + path_segment_len(&bytes[i + 2..]);
+            out.push_str("<REDACTED>");
+            i = end;
+            continue;
+        }
+        // POSIX absolute path: `/x...` at a word boundary. Anchors are
+        // deliberately narrow (whitespace / quote-like / open-bracket
+        // only — NOT `:`) so a URL's `://` doesn't trigger.
+        if c == b'/'
+            && is_path_anchor(&bytes[..i])
+            && i + 1 < bytes.len()
+            && is_path_byte(bytes[i + 1])
+        {
+            let end = i + path_segment_len(&bytes[i..]);
+            out.push_str("<REDACTED>");
+            i = end;
+            continue;
+        }
+        out.push(c as char);
+        i += 1;
+    }
+    out
+}
+
+/// `true` when `prefix` ends just before a position where an absolute
+/// POSIX path could plausibly begin in a free-text log line.
+/// Deliberately conservative — does NOT match after `:` so a URL's
+/// `://` segment isn't mistaken for a path opener.
+fn is_path_anchor(prefix: &[u8]) -> bool {
+    match prefix.last() {
+        None => true,
+        Some(&b) => {
+            b.is_ascii_whitespace() || matches!(b, b'\'' | b'"' | b'`' | b'(' | b'[' | b'{' | b',')
+        }
+    }
+}
+
+/// `true` when `prefix` ends just before a position where a Windows
+/// drive-letter path could plausibly begin. Same anchor set as
+/// `is_path_anchor` — both rules are word-boundary-strict.
+fn is_drive_letter_anchor(prefix: &[u8]) -> bool {
+    is_path_anchor(prefix)
+}
+
+fn is_path_byte(b: u8) -> bool {
+    b.is_ascii_alphanumeric() || matches!(b, b'/' | b'\\' | b'.' | b'-' | b'_' | b'~' | b' ')
+}
+
+fn path_segment_len(buf: &[u8]) -> usize {
+    // Walk while bytes look like path characters, but cap at 4 KiB to
+    // bound runaway matches on adversarial input.
+    let mut n = 0;
+    let cap = 4096.min(buf.len());
+    while n < cap && is_path_byte(buf[n]) {
+        n += 1;
+    }
+    // Trim trailing spaces so "scanned /Users/me/foo." doesn't eat the
+    // sentence terminator. Trailing space is permitted mid-path but we
+    // shouldn't keep it on the boundary.
+    while n > 0 && (buf[n - 1] == b' ' || buf[n - 1] == b'.') {
+        n -= 1;
+    }
+    n
 }
 
 fn redact_value(v: &mut serde_json::Value) {
@@ -300,7 +436,12 @@ pub fn build_bug_report(
         let mut log_files = collect_recent_logs(log_dir, 1)?;
         log_files.sort();
         for path in log_files {
-            let body = std::fs::read_to_string(&path)?;
+            // Only read the tail. Caps the bug-report cost at ~256 KiB
+            // per log file regardless of log size — without this, a
+            // multi-hundred-MB rolling log allocated its full length in
+            // a single String on the user's machine before `line_cap`
+            // bounded the line count.
+            let body = read_file_tail(&path, BUG_REPORT_TAIL_BYTES)?;
             for line in body.lines().rev().take(line_cap) {
                 recent_log_lines.push(redact_log_line(line));
             }
@@ -385,8 +526,36 @@ mod tests {
     }
 
     #[test]
-    fn redact_passes_through_non_json_lines() {
+    fn redact_passes_through_pathless_non_json_lines() {
         let line = "===== engine started =====";
+        assert_eq!(redact_log_line(line), line);
+    }
+
+    #[test]
+    fn redact_scrubs_posix_paths_in_non_json_lines() {
+        let line = "panicked at 'cannot open /Users/alice/Documents/secret.docx: PermissionDenied'";
+        let out = redact_log_line(line);
+        assert!(!out.contains("/Users/alice"));
+        assert!(out.contains("<REDACTED>"));
+        assert!(out.contains("panicked at"));
+    }
+
+    #[test]
+    fn redact_scrubs_windows_paths_in_non_json_lines() {
+        let line = r"opened C:\Users\bob\Documents\report.docx successfully";
+        let out = redact_log_line(line);
+        assert!(!out.contains(r"C:\Users"));
+        assert!(out.contains("<REDACTED>"));
+        assert!(out.contains("opened"));
+    }
+
+    #[test]
+    fn redact_does_not_scrub_arbitrary_url_path_segments() {
+        // URLs contain `/` segments but don't anchor at a path-start
+        // — the prefix is alphanumeric ("https:") so the / isn't
+        // recognised as an absolute-path opener. We don't want to
+        // accidentally redact every URL in the bundle.
+        let line = "https://example.com/foo/bar";
         assert_eq!(redact_log_line(line), line);
     }
 

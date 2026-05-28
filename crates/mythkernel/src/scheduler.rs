@@ -148,8 +148,16 @@ impl Schedule {
     /// Returns true when:
     ///  * `enabled = true`, and
     ///  * the next-due instant computed against the schedule's
-    ///    `last_fired_at` (or epoch if never fired) is at-or-before `now`, and
+    ///    `last_fired_at` (or `created_at` if never fired) is at-or-before
+    ///    `now`, and
     ///  * `idle_seconds >= idle_min_seconds`.
+    ///
+    /// **`created_at` matters for the never-fired case.** If the baseline
+    /// were epoch (1970), a Daily(at_hour=23) inserted at 09:00 would
+    /// have its next-due-after-1970 land at 1970-01-01 23:00 — already
+    /// fifty years in the past, so the schedule would fire immediately
+    /// instead of waiting until 23:00 of the insert day. Anchoring on
+    /// `created_at` makes "create at 09:00, fire at 23:00 today" work.
     pub fn should_fire(&self, now: DateTime<Utc>, idle_seconds: u64) -> bool {
         if !self.enabled {
             return false;
@@ -157,9 +165,10 @@ impl Schedule {
         if idle_seconds < self.idle_min_seconds {
             return false;
         }
-        let baseline = self
-            .last_fired_at
-            .and_then(|s| Utc.timestamp_opt(s, 0).single())
+        let baseline_unix = self.last_fired_at.unwrap_or(self.created_at);
+        let baseline = Utc
+            .timestamp_opt(baseline_unix, 0)
+            .single()
             .unwrap_or_else(|| Utc.timestamp_opt(0, 0).single().unwrap());
         match self.next_due_after(baseline) {
             Some(next) => next <= now,
@@ -515,6 +524,21 @@ mod tests {
     }
 
     #[test]
+    fn never_fired_schedule_anchors_on_created_at_not_epoch() {
+        // Daily(23:00) created at 09:00 today should NOT fire at 12:00
+        // today — even though epoch + 23:00 is decades in the past.
+        // Regression test for the code-review fix; previously the
+        // baseline-of-last-resort was Utc.timestamp_opt(0, 0) which
+        // pulled next_due_after into the past, firing immediately.
+        let mut s = daily(23, 0);
+        s.created_at = fixed(2026, 5, 27, 9, 0).timestamp();
+        assert_eq!(s.last_fired_at, None);
+        assert!(!s.should_fire(fixed(2026, 5, 27, 12, 0), 0));
+        // After 23:00 same day → fires.
+        assert!(s.should_fire(fixed(2026, 5, 27, 23, 0), 0));
+    }
+
+    #[test]
     fn should_fire_false_until_last_fire_plus_interval_passes() {
         let mut s = daily(8, 0);
         // Fired at 2026-05-27 08:00:00 UTC.
@@ -584,17 +608,32 @@ mod tests {
         // s1 enabled, idle gate met → should appear.
         let mut s1 = daily(0, 0);
         s1.name = "s1".into();
-        insert(&conn, &s1).unwrap();
+        let s1_id = insert(&conn, &s1).unwrap();
         // s2 enabled but requires 5 min idle.
         let mut s2 = daily(0, 0);
         s2.name = "s2".into();
         s2.idle_min_seconds = 300;
-        insert(&conn, &s2).unwrap();
+        let s2_id = insert(&conn, &s2).unwrap();
         // s3 disabled.
         let mut s3 = daily(0, 0);
         s3.name = "s3".into();
         s3.enabled = false;
-        insert(&conn, &s3).unwrap();
+        let s3_id = insert(&conn, &s3).unwrap();
+
+        // After-insert `created_at` is the real `SystemTime::now()`,
+        // which the fixed test clock is in the past relative to — the
+        // never-fired-since-created baseline (post-fix) would prevent
+        // any of these from firing. Rewind each row's `created_at` to
+        // an epoch-adjacent moment so the next-due-after-baseline lands
+        // before `now`.
+        let backdate = 1_000_000i64; // 1970-01-12, well before `now`
+        for id in [s1_id, s2_id, s3_id] {
+            conn.execute(
+                "UPDATE scheduled_scans SET created_at = ? WHERE id = ?",
+                rusqlite::params![backdate, id],
+            )
+            .unwrap();
+        }
 
         let now = fixed(2026, 5, 27, 12, 0);
         let due = list_due(&conn, now, 60).unwrap();

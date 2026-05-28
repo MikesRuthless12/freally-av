@@ -199,8 +199,11 @@ fn walk_site_packages(dir: &Path, out: &mut Vec<PackageRef>) {
 fn walk_cargo_registry(dir: &Path, out: &mut Vec<PackageRef>) {
     // Cargo stores cached crates at
     //   <cargo>/registry/cache/<index>/<name>-<version>.crate
-    // The index dir has a fingerprint suffix; the filename split on the
-    // last `-` gives us name + version.
+    // The index dir has a fingerprint suffix; the filename split occurs
+    // at the FIRST dash followed by an ASCII digit so a pre-release
+    // version like `serde-1.0.100-rc.1` keeps the `-rc.1` as part of
+    // the version rather than splitting at the last dash (which would
+    // give `name=serde-1.0.100-rc`, `version=1`).
     fn walk_inner(dir: &Path, out: &mut Vec<PackageRef>) {
         let Ok(read) = std::fs::read_dir(dir) else {
             return;
@@ -215,11 +218,9 @@ fn walk_cargo_registry(dir: &Path, out: &mut Vec<PackageRef>) {
             let Some(stem) = file.strip_suffix(".crate") else {
                 continue;
             };
-            let Some(last_dash) = stem.rfind('-') else {
+            let Some((name, version)) = split_name_version(stem) else {
                 continue;
             };
-            let (name, version) = stem.split_at(last_dash);
-            let version = &version[1..];
             out.push(PackageRef {
                 ecosystem: PackageEcosystem::CratesIo,
                 name: name.to_string(),
@@ -244,12 +245,12 @@ fn walk_gem_specs(dir: &Path, out: &mut Vec<PackageRef>) {
         let Some(stem) = file.strip_suffix(".gemspec") else {
             continue;
         };
-        // `<name>-<version>.gemspec` — last `-` splits.
-        let Some(last_dash) = stem.rfind('-') else {
+        // `<name>-<version>.gemspec` — split at the FIRST dash-then-digit
+        // so `*-1.0.0-beta.gemspec` keeps `-beta` in the version rather
+        // than dropping it to the name.
+        let Some((name, version)) = split_name_version(stem) else {
             continue;
         };
-        let (name, version) = stem.split_at(last_dash);
-        let version = &version[1..];
         out.push(PackageRef {
             ecosystem: PackageEcosystem::RubyGems,
             name: name.to_string(),
@@ -257,6 +258,29 @@ fn walk_gem_specs(dir: &Path, out: &mut Vec<PackageRef>) {
             manifest_path: path,
         });
     }
+}
+
+/// Split a `<name>-<version>` filename stem at the first `-` whose
+/// following character is an ASCII digit. Returns `None` when no such
+/// separator exists (the filename doesn't carry a version).
+///
+/// Handles semver pre-release suffixes correctly: `serde-1.0.100-rc.1`
+/// returns `("serde", "1.0.100-rc.1")`, not `("serde-1.0.100-rc", "1")`.
+fn split_name_version(stem: &str) -> Option<(&str, &str)> {
+    let bytes = stem.as_bytes();
+    let mut i = 0;
+    while i + 1 < bytes.len() {
+        if bytes[i] == b'-' && bytes[i + 1].is_ascii_digit() {
+            let name = &stem[..i];
+            let version = &stem[i + 1..];
+            if name.is_empty() || version.is_empty() {
+                return None;
+            }
+            return Some((name, version));
+        }
+        i += 1;
+    }
+    None
 }
 
 #[cfg(test)]
@@ -341,6 +365,42 @@ mod tests {
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].name, "rails");
         assert_eq!(out[0].version, "7.1.3");
+    }
+
+    #[test]
+    fn split_name_version_keeps_pre_release_suffix_with_version() {
+        // Regression: rfind('-') would have split `serde-1.0.100-rc.1` at
+        // the last dash, giving name=`serde-1.0.100-rc` version=`1`,
+        // which never matches an OSV.dev advisory filed against `serde`.
+        assert_eq!(
+            split_name_version("serde-1.0.100-rc.1"),
+            Some(("serde", "1.0.100-rc.1"))
+        );
+        assert_eq!(
+            split_name_version("rocksdb-0.21.0-rc.4"),
+            Some(("rocksdb", "0.21.0-rc.4"))
+        );
+        assert_eq!(split_name_version("rails-7.1.3"), Some(("rails", "7.1.3")));
+        // Name with embedded dashes (no version part following a digit)
+        // — no separator yet, returns None.
+        assert!(split_name_version("foo-bar-baz").is_none());
+        // Empty name or empty version → None.
+        assert!(split_name_version("-1.0.0").is_none());
+    }
+
+    #[test]
+    fn cargo_walker_handles_pre_release_filenames() {
+        let dir = tempdir().unwrap();
+        let reg = dir
+            .path()
+            .join("registry/cache/github.com-1ecc6299db9ec823");
+        std::fs::create_dir_all(&reg).unwrap();
+        std::fs::write(reg.join("serde-1.0.100-rc.1.crate"), b"x").unwrap();
+        let mut out = Vec::new();
+        walk_cargo_registry(dir.path(), &mut out);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].name, "serde");
+        assert_eq!(out[0].version, "1.0.100-rc.1");
     }
 
     #[test]

@@ -1,11 +1,20 @@
-//! Phase 6 — ZIP archive scanning helper.
+//! Phase 6 — ZIP archive scanning helper (extended Phase 10 TASK-085).
 //!
 //! When `ScanOptions::include_archives` is on and the engine
-//! encounters a `.zip` / `.zipx` file, it streams every entry through
-//! BLAKE3 (and the same detection pipeline as on-disk files). The
-//! archive itself counts as 1 file in `files_visited`; every entry
-//! bumps a separate `archive_entries_scanned` counter so the UI can
-//! display "archive entries processed" independently.
+//! encounters an archive file, it streams every entry through BLAKE3
+//! (and the same detection pipeline as on-disk files). The archive
+//! itself counts as 1 file in `files_visited`; every entry bumps a
+//! separate `archive_entries_scanned` counter so the UI can display
+//! "archive entries processed" independently.
+//!
+//! **Phase 10 extension.** `is_archive` now recognises every format
+//! the new `walker::archives` module supports (zip / tar / 7z / gzip /
+//! bzip2 / xz / zstd / lz4 plus the compound tar.* variants). The
+//! native ZIP path retained below is kept as a fast path with no
+//! extra crate hop; non-zip kinds dispatch through
+//! [`scan_archive_multiformat`] which calls
+//! `walker::archives::iter_members` and emits the same `ArchiveEntry`
+//! broadcast.
 //!
 //! Defensive limits — zip files are a classic abuse surface:
 //! * `MAX_ENTRIES_PER_ARCHIVE` caps the number of entries we'll iterate
@@ -43,14 +52,26 @@ const MAX_EXTRACT_BYTES_PER_ENTRY: u64 = 512 * 1024 * 1024; // 512 MiB
 const ARCHIVE_EMIT_THROTTLE: std::time::Duration = std::time::Duration::from_millis(100);
 
 /// Returns `true` when the path's extension matches an archive
-/// container we can open. Lower-cased extension comparison.
+/// container or compressed stream the engine knows how to walk.
+///
+/// Delegates to [`crate::walker::archives::detect_kind`] so the list
+/// of recognised formats stays in one place — adding a new format to
+/// `walker::archives` automatically widens this gate. RAR is
+/// intentionally returned `true` here (so the engine logs the skip
+/// rather than silently passing the file through as opaque bytes),
+/// but `walker::archives::iter_members_kind` returns
+/// `UnsupportedFormat` for it; the dispatcher logs and continues.
 pub fn is_archive(path: &Path) -> bool {
+    crate::walker::archives::detect_kind(path).is_some()
+}
+
+/// Returns `true` for the native fast-path ZIP shape (`.zip`, `.zipx`,
+/// jar/war/ear/apk). The engine prefers this path because it can stream
+/// entries from a single open File without a decoder hop.
+fn is_native_zip(path: &Path) -> bool {
     matches!(
-        path.extension()
-            .and_then(|e| e.to_str())
-            .map(|s| s.to_ascii_lowercase())
-            .as_deref(),
-        Some("zip") | Some("zipx")
+        crate::walker::archives::detect_kind(path),
+        Some(crate::walker::archives::ArchiveKind::Zip)
     )
 }
 
@@ -70,6 +91,20 @@ pub fn scan_archive(
     archive_entries_counter: &Arc<AtomicU64>,
     files_hashed_counter: &Arc<AtomicI64>,
 ) -> usize {
+    // Dispatch non-zip formats through the multi-format walker so a
+    // `.tar.gz` / `.7z` / `.zst` / etc. is actually scanned instead of
+    // silently passed through as opaque bytes.
+    if !is_native_zip(path) {
+        return scan_archive_multiformat(
+            scan_id,
+            path,
+            tx,
+            cancel_flag,
+            pause_flag,
+            archive_entries_counter,
+            files_hashed_counter,
+        );
+    }
     let file = match std::fs::File::open(path) {
         Ok(f) => f,
         Err(_) => return 0,
@@ -166,6 +201,90 @@ pub fn scan_archive(
             entry_name,
             archive_entries_scanned_total: total,
         });
+    }
+    processed
+}
+
+/// Scan an archive of any format the `walker::archives` module recognises.
+/// Bridges the multi-format iterator (TASK-085) to the same broadcast +
+/// counter contract the native ZIP path uses, so the UI sees a uniform
+/// `ArchiveEntry` event stream regardless of whether the archive was
+/// .tar.gz / .7z / .zst / .bz2 / etc.
+///
+/// Soft-fails like [`scan_archive`]: any open or per-entry I/O failure
+/// returns the partial count rather than propagating; the engine has
+/// already counted the archive file itself as one visited entry.
+fn scan_archive_multiformat(
+    scan_id: i64,
+    path: &Path,
+    tx: &broadcast::Sender<ScanProgress>,
+    cancel_flag: &Arc<AtomicBool>,
+    pause_flag: &Arc<AtomicBool>,
+    archive_entries_counter: &Arc<AtomicU64>,
+    files_hashed_counter: &Arc<AtomicI64>,
+) -> usize {
+    use crate::walker::archives::iter_members;
+    use crate::walker::bomb_guard::BombGuard;
+
+    let guard = BombGuard::new();
+    let mut processed = 0usize;
+    let mut last_emit = std::time::Instant::now();
+    let archive_path = path.to_path_buf();
+
+    let result = iter_members(path, &guard, cancel_flag, |entry_name, reader| {
+        // Honor pause inside the multi-format scan too — long .tar.gz
+        // shouldn't ignore a click on Pause until the file ends.
+        while pause_flag.load(Ordering::Relaxed) {
+            if cancel_flag.load(Ordering::Relaxed) {
+                return Ok(());
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+        // Hash entry bytes (truncated to the per-entry cap inside the
+        // walker callback). We don't keep the digest — finding-detection
+        // on archive members lands with the archive-detector-bridge.
+        let mut hasher = blake3::Hasher::new();
+        let mut buf = [0u8; 64 * 1024];
+        loop {
+            if cancel_flag.load(Ordering::Relaxed) {
+                break;
+            }
+            let n = match reader.read(&mut buf) {
+                Ok(0) => break,
+                Ok(n) => n,
+                Err(_) => break,
+            };
+            hasher.update(&buf[..n]);
+        }
+        let _digest = hasher.finalize();
+
+        processed += 1;
+        files_hashed_counter.fetch_add(1, Ordering::Relaxed);
+        let total = archive_entries_counter.fetch_add(1, Ordering::Relaxed) + 1;
+        let is_first = processed == 1;
+        let throttle_ok = last_emit.elapsed() >= ARCHIVE_EMIT_THROTTLE;
+        if is_first || throttle_ok {
+            last_emit = std::time::Instant::now();
+            let _ = tx.send(ScanProgress::ArchiveEntry {
+                scan_id,
+                archive_path: archive_path.clone(),
+                entry_name: entry_name.to_string(),
+                archive_entries_scanned_total: total,
+            });
+        }
+        Ok(())
+    });
+    // iter_members soft-fails are folded into the returned count — the
+    // bomb guard / cancel / unsupported-format / bad-archive cases all
+    // arrive here as Err. The engine treats this archive as partially
+    // scanned and continues with the next file. We log a debug line so
+    // the scan log surfaces the skip in operator mode.
+    if let Err(e) = result {
+        tracing::debug!(
+            archive = ?path,
+            error = %e,
+            "multi-format archive scan ended with error (soft-failed)"
+        );
     }
     processed
 }

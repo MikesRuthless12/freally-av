@@ -39,11 +39,12 @@ scan-status-paused = Paused
 scan-status-cancelled = Cancelled
 scan-status-completed = Completed
 scan-files-visited = { $count } files visited
-scan-findings-summary = { $count ->
-    [0] No findings
-    [one] 1 finding
-   *[other] { $count } findings
-}
+# Plural forms are expressed as separate keys (the scaffolding parser
+# does not implement Fluent's selector grammar — see src/i18n/index.tsx
+# header). Component picks the right key based on the count.
+scan-findings-summary-zero = No findings
+scan-findings-summary-one = 1 finding
+scan-findings-summary-other = { $count } findings
 
 ## Real-time
 

@@ -67,28 +67,27 @@ pub enum EspError {
     DeferredMacos,
 }
 
-/// Curated known-bootkit hashes. Compiled into the binary so a fresh
-/// install detects the headline families before any feed update lands.
-/// Each entry is `(sha256_hex, family_label, severity)`. Add new rows
-/// here in PRs alongside a CVE / report citation in the commit message.
-pub const KNOWN_BOOTKIT_HASHES: &[(&str, &str, &str)] = &[
-    // BlackLotus — Reverse-engineering disclosed by ESET 2023-03 +
-    // Kaspersky 2023-03. SHA-256 of the original BootMgr.efi dropper
-    // observed in early samples. Identical hash retained across the
-    // 2023 Q3 follow-up wave.
-    (
-        "0c45663dbb1ac21ff2c64ed5e74cc26d4787c4cc",
-        "BlackLotus",
-        "critical",
-    ),
-    // ESPecter — Kaspersky 2021-10 report on a long-lived ESP-resident
-    // bootkit. SHA-256 of the WinSAT.efi loader.
-    ("a99c5e7d", "ESPecter", "critical"),
-    // MosaicRegressor — Kaspersky 2020-10. Documented Hacking-Team-
-    // derived UEFI implant. Multiple variants; this hash covers the
-    // 2020 wave's loader.
-    ("8126e6cf", "MosaicRegressor", "critical"),
-];
+/// Length of a SHA-256 in hex characters. Every entry in
+/// [`KNOWN_BOOTKIT_HASHES`] must be exactly this long; the lookup
+/// rejects anything else up front so a malformed entry can't silently
+/// no-match.
+pub const SHA256_HEX_LEN: usize = 64;
+
+/// Curated known-bootkit SHA-256 hashes compiled into the binary. Each
+/// entry is `(sha256_hex, family_label, severity)`.
+///
+/// **Intentionally empty in this commit**: an earlier curated list
+/// shipped malformed entries (one 40-char SHA-1 and two truncated
+/// 8-char values) which `match_known_bootkit_hash` could never match
+/// because `str::eq_ignore_ascii_case` requires identical length. The
+/// silent false-negative was caught in code review. Real curated
+/// SHA-256s for BlackLotus / ESPecter / MosaicRegressor land via the
+/// bootkit updater feed in a follow-up — the published research
+/// papers redact full hashes for responsible-disclosure reasons.
+///
+/// Add new rows here only with exactly 64 lower-case hex characters;
+/// the `curated_list_entries_are_64_char_lower_hex` test enforces it.
+pub const KNOWN_BOOTKIT_HASHES: &[(&str, &str, &str)] = &[];
 
 /// Enumerate ESPs reachable on this host.
 pub fn enumerate_esp_roots() -> Result<Vec<EspMount>, EspError> {
@@ -175,9 +174,18 @@ fn enumerate_inner() -> Result<Vec<EspMount>, EspError> {
     Ok(Vec::new())
 }
 
-/// Returns the matching `KNOWN_BOOTKIT_HASHES` row when `sha256_hex`
-/// (lowercase, no `0x` prefix) lines up with a known family.
+/// Returns the matching [`KNOWN_BOOTKIT_HASHES`] row when `sha256_hex`
+/// (no `0x` prefix) lines up with a known family.
+///
+/// Rejects inputs whose length isn't [`SHA256_HEX_LEN`] up front — the
+/// curated list is SHA-256-only by contract, so a SHA-1 or truncated
+/// input always means "no match," and silently returning None here is
+/// the same outcome as letting the loop fall through, but failing fast
+/// surfaces caller bugs earlier in the trace.
 pub fn match_known_bootkit_hash(sha256_hex: &str) -> Option<(&'static str, &'static str)> {
+    if sha256_hex.len() != SHA256_HEX_LEN {
+        return None;
+    }
     let needle = sha256_hex.to_ascii_lowercase();
     for (hash, family, severity) in KNOWN_BOOTKIT_HASHES {
         if hash.eq_ignore_ascii_case(&needle) {
@@ -197,21 +205,37 @@ mod tests {
     }
 
     #[test]
-    fn match_known_bootkit_hash_finds_curated_entries() {
-        let (family, severity) =
-            match_known_bootkit_hash("0c45663dbb1ac21ff2c64ed5e74cc26d4787c4cc").unwrap();
-        assert_eq!(family, "BlackLotus");
-        assert_eq!(severity, "critical");
+    fn match_rejects_inputs_with_wrong_length() {
+        // SHA-1 (40 hex) — too short for a SHA-256 lookup.
+        assert!(match_known_bootkit_hash("0c45663dbb1ac21ff2c64ed5e74cc26d4787c4cc").is_none());
+        // Truncated 8-char input.
+        assert!(match_known_bootkit_hash("a99c5e7d").is_none());
+        // 65 chars — one too many.
+        assert!(match_known_bootkit_hash(&"0".repeat(65)).is_none());
+        // Empty.
+        assert!(match_known_bootkit_hash("").is_none());
     }
 
     #[test]
-    fn match_known_bootkit_hash_is_case_insensitive() {
-        assert!(match_known_bootkit_hash("0C45663DBB1AC21FF2C64ED5E74CC26D4787C4CC").is_some());
+    fn match_known_bootkit_hash_returns_none_for_unknown_well_formed_sha256() {
+        let needle = "f".repeat(SHA256_HEX_LEN);
+        assert!(match_known_bootkit_hash(&needle).is_none());
     }
 
     #[test]
-    fn match_known_bootkit_hash_returns_none_for_unknown() {
-        assert!(match_known_bootkit_hash("ffffffffffffffffffffffffffffffff").is_none());
+    fn curated_list_entries_are_64_char_lower_hex() {
+        for (hash, family, _) in KNOWN_BOOTKIT_HASHES {
+            assert_eq!(
+                hash.len(),
+                SHA256_HEX_LEN,
+                "entry for {family} is not {SHA256_HEX_LEN} chars: {hash:?}"
+            );
+            assert!(
+                hash.bytes()
+                    .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)),
+                "entry for {family} contains non-lower-hex chars: {hash:?}"
+            );
+        }
     }
 
     #[test]
