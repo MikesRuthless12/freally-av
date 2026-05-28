@@ -1,0 +1,185 @@
+//! A/B canary rule rollout (TASK-151, FR-147, Phase 10).
+//!
+//! Each rule (YARA-x, behavior_dsl, lolbin, …) carries an optional
+//! `rollout` field. The gate here decides whether to evaluate the rule
+//! against a given install based on a hash of the install id + rule id
+//! against the rule's stage. Stages:
+//!
+//!   * `Off` — the rule is loaded but never evaluated. Used to take a
+//!     bad rule offline without removing it from the manifest.
+//!   * `Canary(percent)` — evaluate against a deterministic fraction of
+//!     installs. `percent ∈ 0..=100`. The same install always gets the
+//!     same answer for the same rule.
+//!   * `Shadow(percent)` — evaluate, but downgrade the finding's
+//!     severity to `shadow` so the UI doesn't surface it to the user.
+//!     Used to measure false-positive rate before promoting to Live.
+//!   * `Live` — full rollout. Default for legacy rules with no
+//!     `rollout` field.
+//!
+//! ## Hash
+//!
+//! djb2 (Daniel J. Bernstein's hash function) over `(install_id ||
+//! ":" || rule_id)` truncated to mod 100. Deterministic, dependency-
+//! free, good enough for percentage bucketing. Cryptographic strength
+//! is not a requirement here — an attacker who knows their install id
+//! still can't escape the rollout gate, and the hash isn't keyed off
+//! anything sensitive.
+
+use serde::{Deserialize, Serialize};
+
+/// Per-rule rollout stage. Serialised as a tagged enum on disk so the
+/// rule manifest schema can carry it directly.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case", tag = "stage")]
+pub enum RolloutStage {
+    /// Loaded but never evaluated.
+    Off,
+    /// Evaluated against `percent` of installs deterministically.
+    Canary { percent: u8 },
+    /// Like Canary but the resulting finding is downgraded to
+    /// `severity: shadow` so it doesn't surface to the user.
+    Shadow { percent: u8 },
+    /// Full rollout — default for rules with no explicit `rollout`
+    /// field in the manifest.
+    #[default]
+    Live,
+}
+
+/// Decision the rule pipeline acts on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GateDecision {
+    /// Evaluate the rule normally; emit findings at the rule's declared
+    /// severity.
+    Evaluate,
+    /// Evaluate the rule but downgrade emitted findings to `shadow`.
+    EvaluateShadow,
+    /// Skip evaluating the rule entirely.
+    Skip,
+}
+
+/// Compute the rollout decision for one (install, rule, stage) triple.
+pub fn gate(install_id: &str, rule_id: &str, stage: RolloutStage) -> GateDecision {
+    match stage {
+        RolloutStage::Off => GateDecision::Skip,
+        RolloutStage::Live => GateDecision::Evaluate,
+        RolloutStage::Canary { percent } => {
+            if bucket(install_id, rule_id) < percent {
+                GateDecision::Evaluate
+            } else {
+                GateDecision::Skip
+            }
+        }
+        RolloutStage::Shadow { percent } => {
+            if bucket(install_id, rule_id) < percent {
+                GateDecision::EvaluateShadow
+            } else {
+                GateDecision::Skip
+            }
+        }
+    }
+}
+
+/// Returns a deterministic 0..100 bucket for `(install_id, rule_id)`.
+pub fn bucket(install_id: &str, rule_id: &str) -> u8 {
+    let mut h: u64 = 5381;
+    for c in install_id.as_bytes() {
+        h = h.wrapping_mul(33).wrapping_add(*c as u64);
+    }
+    h = h.wrapping_mul(33).wrapping_add(b':' as u64);
+    for c in rule_id.as_bytes() {
+        h = h.wrapping_mul(33).wrapping_add(*c as u64);
+    }
+    (h % 100) as u8
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn off_skips_unconditionally() {
+        assert_eq!(gate("x", "rule:y", RolloutStage::Off), GateDecision::Skip);
+    }
+
+    #[test]
+    fn live_always_evaluates() {
+        for id in ["a", "b", "c", "1234", "long-uuid-12345678"] {
+            assert_eq!(
+                gate(id, "rule:y", RolloutStage::Live),
+                GateDecision::Evaluate
+            );
+        }
+    }
+
+    #[test]
+    fn bucket_is_deterministic() {
+        let a = bucket("install-A", "rule:x");
+        let b = bucket("install-A", "rule:x");
+        assert_eq!(a, b);
+        // Different rule id → different bucket (collision rare; this
+        // pair is fine).
+        assert_ne!(bucket("install-A", "rule:x"), bucket("install-A", "rule:y"));
+    }
+
+    #[test]
+    fn canary_100_percent_evaluates_everyone() {
+        for id in ["a", "b", "c", "1234"] {
+            assert_eq!(
+                gate(id, "rule:x", RolloutStage::Canary { percent: 100 }),
+                GateDecision::Evaluate
+            );
+        }
+    }
+
+    #[test]
+    fn canary_0_percent_skips_everyone() {
+        for id in ["a", "b", "c", "1234"] {
+            assert_eq!(
+                gate(id, "rule:x", RolloutStage::Canary { percent: 0 }),
+                GateDecision::Skip
+            );
+        }
+    }
+
+    #[test]
+    fn canary_distribution_within_one_bucket_of_target() {
+        // Across 1000 synthetic installs, a canary at 30% should
+        // evaluate roughly 30% of them. Allow ±10 percentage points.
+        let mut hits = 0usize;
+        for i in 0..1000 {
+            if matches!(
+                gate(
+                    &format!("install-{i:04}"),
+                    "rule:behavior:rapid_rename",
+                    RolloutStage::Canary { percent: 30 }
+                ),
+                GateDecision::Evaluate
+            ) {
+                hits += 1;
+            }
+        }
+        assert!(
+            (200..=400).contains(&hits),
+            "canary 30% landed at {hits}/1000 — distribution drifted"
+        );
+    }
+
+    #[test]
+    fn shadow_returns_evaluate_shadow_for_in_bucket_installs() {
+        // Force the bucket: use a high percent so the chosen install
+        // is definitely under it.
+        assert_eq!(
+            gate("install-A", "rule:x", RolloutStage::Shadow { percent: 100 }),
+            GateDecision::EvaluateShadow
+        );
+        assert_eq!(
+            gate("install-A", "rule:x", RolloutStage::Shadow { percent: 0 }),
+            GateDecision::Skip
+        );
+    }
+
+    #[test]
+    fn default_stage_is_live() {
+        assert_eq!(RolloutStage::default(), RolloutStage::Live);
+    }
+}

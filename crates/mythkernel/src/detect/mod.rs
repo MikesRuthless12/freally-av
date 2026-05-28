@@ -54,6 +54,7 @@ pub mod partial_match;
 pub mod persistence;
 pub mod platform_store_allowlist;
 pub mod publisher;
+pub mod rollout;
 pub mod sbom_allowlist;
 pub mod stale_temp;
 pub mod supply_chain;
