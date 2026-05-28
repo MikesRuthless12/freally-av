@@ -49,6 +49,7 @@ pub mod macho_sig;
 pub mod package_manager_allowlist;
 pub mod packer;
 pub mod partial_match;
+pub mod persistence;
 pub mod platform_store_allowlist;
 pub mod publisher;
 pub mod sbom_allowlist;
