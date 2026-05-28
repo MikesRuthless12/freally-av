@@ -10,8 +10,12 @@ homepage.workspace = true
 description = "Mythodikal Anti-Virus Windows real-time daemon (ETW + AMSI + WDAC; no kernel driver)"
 publish = false
 
+# Per-OS binary name so all three daemons can build under `cargo
+# build --workspace` without colliding on a shared output path
+# (`mythd.exe`). Windows installer / scheduled-task config
+# references the per-OS name directly.
 [[bin]]
-name = "mythd"
+name = "mythd-windows"
 path = "src/main.rs"
 
 [lib]

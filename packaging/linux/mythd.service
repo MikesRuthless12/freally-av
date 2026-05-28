@@ -16,7 +16,7 @@ Type=simple
 # every capability except CAP_SYS_ADMIN at startup (TASK-073).
 User=root
 Group=root
-ExecStart=/usr/bin/mythd
+ExecStart=/usr/bin/mythd-linux
 # TASK-076 — crash budget. Restart on failure; surface > 3
 # restarts/hour as a UI badge through the heartbeat IPC frame.
 Restart=on-failure
