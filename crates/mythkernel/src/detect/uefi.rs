@@ -37,9 +37,9 @@
 //! — call `enumerate_esp_roots()` and feed the result paths to a
 //! scan_session with `scan_options.scan_esp = true`. macOS deferred.
 
-use std::path::PathBuf;
 #[cfg(target_os = "windows")]
 use std::path::Path;
+use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
