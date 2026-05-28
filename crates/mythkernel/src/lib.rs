@@ -21,6 +21,10 @@ pub mod email;
 /// MS-OFFCRYPTO encrypted-doc fingerprint.
 pub mod office;
 pub mod diff;
+/// Phase 10 Wave 2 — document-payload extractors (TASK-276..279).
+/// PDF action / stream-object scanners, RTF object-package extractor,
+/// Microsoft Shell Link (`.lnk`) parser.
+pub mod doc_payload;
 pub mod engine;
 pub mod error;
 pub mod eta;
