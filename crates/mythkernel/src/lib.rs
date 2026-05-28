@@ -25,6 +25,11 @@ pub mod email;
 /// directory walker + VBA auto-exec + Excel suspicious-formula +
 /// MS-OFFCRYPTO encrypted-doc fingerprint.
 pub mod office;
+/// Phase 10 Wave 2 — cross-cutting payload anomaly detectors
+/// (TASK-286..290): image stego LSB heuristic, hidden-data-after-
+/// EOF, ISO autorun.inf, LNK working-dir anomaly, Office remote-
+/// template injection.
+pub mod payload_anomaly;
 pub mod diff;
 /// Phase 10 Wave 2 — document-payload extractors (TASK-276..279).
 /// PDF action / stream-object scanners, RTF object-package extractor,
