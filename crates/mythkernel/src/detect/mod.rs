@@ -45,6 +45,7 @@ pub mod header_parse;
 pub mod heuristics;
 pub mod honeyfiles;
 pub mod java_bytecode;
+pub mod lolbin;
 pub mod macho_sig;
 pub mod package_manager_allowlist;
 pub mod packer;
