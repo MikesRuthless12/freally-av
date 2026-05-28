@@ -6,6 +6,11 @@
 #![allow(dead_code)]
 
 pub mod archive_scan;
+/// Phase 10 Wave 2 — archive-safety wrappers (TASK-280..285):
+/// detonation-policy stub, zip-bomb compression-ratio guard,
+/// password-protected entry surfacing, extended-format magic
+/// sniffer, recursion-depth guard, self-extracting heuristic.
+pub mod archive_safety;
 /// Phase 10 Wave 2 — browser forensics (TASK-256..270). Read-only
 /// extension / download-history / cookie / cache / cert-store / autofill
 /// readers across Chrome / Edge / Brave / Arc / Firefox / Safari.
