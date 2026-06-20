@@ -137,3 +137,6 @@ nsrl.sqlite*
 **/myth_sha256.bin
 **/myth-blacklist*.sqlite
 **/myth-whitelist*.sqlite
+
+# Internal prompt docs — never track (Mike, 2026-06-20)
+*[Pp][Rr][Oo][Mm][Pp][Tt]*.md
