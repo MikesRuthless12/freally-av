@@ -156,8 +156,8 @@ mod tests {
     #[test]
     fn ignores_short_nop_run() {
         let mut bytes = vec![0u8; 10];
-        bytes.extend(std::iter::repeat(0x90u8).take(8));
-        bytes.extend(std::iter::repeat(0u8).take(10));
+        bytes.extend(std::iter::repeat_n(0x90u8, 8));
+        bytes.extend(std::iter::repeat_n(0u8, 10));
         let findings = scan_shellcode_shapes(&bytes);
         assert!(findings.iter().all(|f| f.shape != ShellcodeShape::NopSled));
     }
@@ -185,7 +185,7 @@ mod tests {
     fn duplicate_shape_only_once() {
         let mut bytes = Vec::new();
         bytes.extend_from_slice(&[0xE8, 0x00, 0x00, 0x00, 0x00, 0x58]);
-        bytes.extend(std::iter::repeat(0u8).take(16));
+        bytes.extend(std::iter::repeat_n(0u8, 16));
         bytes.extend_from_slice(&[0xE8, 0x00, 0x00, 0x00, 0x00, 0x59]);
         let findings = scan_shellcode_shapes(&bytes);
         let getpc_count = findings

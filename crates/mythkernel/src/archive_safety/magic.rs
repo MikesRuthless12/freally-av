@@ -194,12 +194,12 @@ mod tests {
     fn detects_vhdx_and_wim() {
         let mut blob = Vec::new();
         blob.extend_from_slice(b"vhdxfile");
-        blob.extend(std::iter::repeat(0u8).take(512));
+        blob.extend(std::iter::repeat_n(0u8, 512));
         assert_eq!(detect_archive_kind(&blob), Some(ExtendedArchiveKind::Vhdx));
 
         let mut wim = Vec::new();
         wim.extend_from_slice(b"MSWIM\0\0\0");
-        wim.extend(std::iter::repeat(0u8).take(512));
+        wim.extend(std::iter::repeat_n(0u8, 512));
         assert_eq!(detect_archive_kind(&wim), Some(ExtendedArchiveKind::Wim));
     }
 
