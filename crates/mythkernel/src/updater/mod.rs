@@ -8,6 +8,12 @@
 
 pub mod abusech;
 pub mod channels;
+/// Curated repo-distributed blacklist downloader (repo-curated-DB decision,
+/// 2026-06-21). Downloads the maintainer-curated `.bin` from the GitHub
+/// release and atomically swaps it into `<feeds_dir>/abusech_sha256.bin`;
+/// the raw abuse.ch upstream pull is disabled. Adapter runners live in
+/// [`database`] (manual / channel) and [`scheduler`] (periodic).
+pub mod curated;
 pub mod database;
 pub mod delta_sig;
 pub mod engine;
@@ -23,10 +29,11 @@ pub mod yara_forge;
 pub use channels::{
     ChannelKind, ChannelState, LastCheckOutcome, load_state, save_state, updater_dir,
 };
+pub use curated::{CuratedBlacklistUpdater, CuratedError, CuratedUpdateReport};
 pub use database::{
-    AbuseChFeedRunner, DatabaseChannel, DatabaseChannelState, DatabaseFeedRunner,
-    DatabaseUpdatePhase, DatabaseUpdateProgress, DbProgressCallback, FeedMeta, FeedRunOutcome,
-    NsrlFeedRunner,
+    AbuseChFeedRunner, CuratedBlacklistFeedRunner, DatabaseChannel, DatabaseChannelState,
+    DatabaseFeedRunner, DatabaseUpdatePhase, DatabaseUpdateProgress, DbProgressCallback, FeedMeta,
+    FeedRunOutcome, NsrlFeedRunner,
 };
 pub use engine::{
     DEFAULT_LATEST_JSON_URL, EngineChannel, EngineUpdateAvailable, EngineUpdateError,

@@ -1,0 +1,222 @@
+diff --git a/crates/mythkernel/src/detect/lolbin.rs b/crates/mythkernel/src/detect/lolbin.rs
+new file mode 100644
+index 0000000..35ff510
+--- /dev/null
++++ b/crates/mythkernel/src/detect/lolbin.rs
+@@ -0,0 +1,216 @@
++//! LOLBin invocation-chain detector (TASK-146, FR-139, Phase 10).
++//!
++//! Living-off-the-land binaries — signed first-party tools (certutil,
++//! mshta, bitsadmin, regsvr32, …) repurposed for malware delivery — are
++//! the dominant initial-access vector once a maldoc or phishing email
++//! lands. This module is the catalogue + classification API; the actual
++//! "parent X spawned child Y" matching runs through
++//! [`crate::detect::behavior_dsl`]'s `process_chain_office_lolbin.toml`
++//! seed rule (TASK-143). The two work together — the DSL rule fires the
++//! detection; this module provides the metadata for the explainer
++//! ("certutil.exe is a built-in Windows certificate utility that
++//! attackers abuse for URL-cache decode + remote download…").
++//!
++//! ## Update feed
++//!
++//! The community-maintained LOLBAS project (Living Off the Land Binaries
++//! and Scripts) publishes a YAML index per binary. [`crate::updater::lolbas`]
++//! pulls that feed on the engine's normal updater tick and lands new
++//! entries here; the curated `BUILTIN_LOLBINS` covers the top entries so
++//! a fresh install detects them before any feed update lands.
++
++use serde::{Deserialize, Serialize};
++
++/// One LOLBin row. The fields match the LOLBAS YAML schema's relevant
++/// subset; fields we don't use today (Acknowledgement, Created, Tags,
++/// Resources, Detection) are omitted.
++#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
++pub struct Lolbin {
++    /// Lower-case file name (`"certutil.exe"`). Used by
++    /// [`classify_by_filename`].
++    pub name: String,
++    /// Short paragraph rendered in the UI explainer.
++    pub description: &'static str,
++    /// One-word category (`"download"`, `"execute"`, `"awl-bypass"`).
++    pub category: &'static str,
++    /// MITRE ATT&CK technique id (`"T1218.010"`, etc.) when known.
++    pub mitre_attack: Option<&'static str>,
++}
++
++/// Curated LOLBAS subset compiled into the binary. Each is one of the
++/// highest-volume initial-access tools observed across malware
++/// telemetry; the live updater extends this with the full LOLBAS catalogue.
++pub const BUILTIN_LOLBINS: &[Lolbin] = &[Lolbin {
++    name: String::new(), // placeholder; real entries below — see lolbin_entry helper
++    description: "",
++    category: "",
++    mitre_attack: None,
++}];
++
++/// Internal constructor used by the static list. Kept private so the
++/// curated list lives in one declaration with stable rust-fmt output.
++const fn lolbin_entry(
++    name: &'static str,
++    description: &'static str,
++    category: &'static str,
++    mitre_attack: Option<&'static str>,
++) -> LolbinStatic {
++    LolbinStatic {
++        name,
++        description,
++        category,
++        mitre_attack,
++    }
++}
++
++/// Static-string variant of [`Lolbin`] — avoids heap allocation for
++/// the compile-time curated set. Public so callers writing their own
++/// catalogues can mirror the shape.
++#[derive(Debug, Clone, Copy, PartialEq, Eq)]
++pub struct LolbinStatic {
++    pub name: &'static str,
++    pub description: &'static str,
++    pub category: &'static str,
++    pub mitre_attack: Option<&'static str>,
++}
++
++/// The actual curated set. Each entry's `name` is lower-case so
++/// [`classify_by_filename`] can match against a normalised input.
++pub const CURATED: &[LolbinStatic] = &[
++    lolbin_entry(
++        "certutil.exe",
++        "Built-in Windows certificate utility — abused for URL-cache download + base64 decode of staged payloads.",
++        "download",
++        Some("T1140"),
++    ),
++    lolbin_entry(
++        "mshta.exe",
++        "Windows host for HTML Applications — executes HTA / JScript / VBScript from any URL.",
++        "execute",
++        Some("T1218.005"),
++    ),
++    lolbin_entry(
++        "bitsadmin.exe",
++        "Background Intelligent Transfer Service CLI — abused to download payloads under a benign process tree.",
++        "download",
++        Some("T1197"),
++    ),
++    lolbin_entry(
++        "regsvr32.exe",
++        "Registers DLLs / OCX — `regsvr32 /s /u /i:http(s)://...` runs arbitrary scriptlet from a URL.",
++        "execute",
++        Some("T1218.010"),
++    ),
++    lolbin_entry(
++        "rundll32.exe",
++        "Loads a DLL by ordinal — abused for code execution via `javascript:` URI scheme or COM hijacks.",
++        "execute",
++        Some("T1218.011"),
++    ),
++    lolbin_entry(
++        "powershell.exe",
++        "Windows PowerShell host — abused with `-EncodedCommand` / `IEX (New-Object Net.WebClient)` for in-memory execution.",
++        "execute",
++        Some("T1059.001"),
++    ),
++    lolbin_entry(
++        "pwsh.exe",
++        "Cross-platform PowerShell 7+ host — same abuse pattern as powershell.exe.",
++        "execute",
++        Some("T1059.001"),
++    ),
++    lolbin_entry(
++        "wmic.exe",
++        "WMI command-line — `wmic process call create` runs arbitrary processes; abused for lateral execution.",
++        "execute",
++        Some("T1047"),
++    ),
++    lolbin_entry(
++        "msbuild.exe",
++        ".NET project build tool — XAML / inline-task workflows let it execute arbitrary code from a project file.",
++        "execute",
++        Some("T1127.001"),
++    ),
++    lolbin_entry(
++        "installutil.exe",
++        ".NET assembly registrar — `installutil /logfile= /U` runs assembly code via custom installer attributes.",
++        "execute",
++        Some("T1218.004"),
++    ),
++    // POSIX side — both macOS and Linux abuse via shell loaders.
++    lolbin_entry(
++        "curl",
++        "URL retrieval — abused for staged payload download (`curl -o ...` then `chmod +x` then exec).",
++        "download",
++        Some("T1105"),
++    ),
++    lolbin_entry(
++        "wget",
++        "URL retrieval — equivalent to curl, abused identically.",
++        "download",
++        Some("T1105"),
++    ),
++    lolbin_entry(
++        "osascript",
++        "macOS AppleScript / JXA runner — abused for GUI-less script execution.",
++        "execute",
++        Some("T1059.002"),
++    ),
++];
++
++/// Look up `filename` in the curated catalogue. `filename` is matched
++/// case-insensitively against the lower-case `name` of each entry.
++pub fn classify_by_filename(filename: &str) -> Option<&'static LolbinStatic> {
++    let needle = filename.to_ascii_lowercase();
++    let base = needle.rsplit(['/', '\\']).next()?;
++    CURATED.iter().find(|e| e.name.eq_ignore_ascii_case(base))
++}
++
++/// Look up by absolute or relative path. Convenience over
++/// [`classify_by_filename`] for callers that have a full path.
++pub fn classify_by_path(path: &str) -> Option<&'static LolbinStatic> {
++    classify_by_filename(path)
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[test]
++    fn classify_finds_known_lolbins_case_insensitive() {
++        assert!(classify_by_filename("certutil.exe").is_some());
++        assert!(classify_by_filename("CERTUTIL.EXE").is_some());
++        assert!(classify_by_filename("certutil.EXE").is_some());
++    }
++
++    #[test]
++    fn classify_handles_full_paths() {
++        let c = classify_by_path("C:\\Windows\\System32\\certutil.exe").unwrap();
++        assert_eq!(c.name, "certutil.exe");
++        let p = classify_by_path("/usr/bin/curl").unwrap();
++        assert_eq!(p.name, "curl");
++    }
++
++    #[test]
++    fn classify_returns_none_for_unknown() {
++        assert!(classify_by_filename("notepad.exe").is_none());
++        assert!(classify_by_path("").is_none());
++    }
++
++    #[test]
++    fn every_curated_entry_has_unique_name() {
++        let mut names: Vec<&str> = CURATED.iter().map(|e| e.name).collect();
++        names.sort();
++        let before = names.len();
++        names.dedup();
++        assert_eq!(names.len(), before, "duplicate name in CURATED");
++    }
++
++    #[test]
++    fn at_least_one_lolbin_per_category() {
++        let categories: std::collections::HashSet<&str> =
++            CURATED.iter().map(|e| e.category).collect();
++        assert!(categories.contains("download"));
++        assert!(categories.contains("execute"));
++    }
++}

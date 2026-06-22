@@ -1,0 +1,442 @@
+diff --git a/crates/mythkernel/src/detect/persistence.rs b/crates/mythkernel/src/detect/persistence.rs
+new file mode 100644
+index 0000000..2a7c6a4
+--- /dev/null
++++ b/crates/mythkernel/src/detect/persistence.rs
+@@ -0,0 +1,436 @@
++//! Persistence-mechanism inventory (TASK-144, FR-137, Phase 10).
++//!
++//! Cross-platform enumeration of OS-level autostart surfaces, persisted
++//! in the `persistence_entries` table for the Persistence page (TASK-144
++//! frontend) + TASK-149's two-scan persistence diff. Each per-OS
++//! enumerator returns a `Vec<PersistenceEntry>`; the engine upserts the
++//! result, stamping `last_seen_at` on every re-scan and `first_seen_at`
++//! only on initial insertion.
++//!
++//! ## Scope
++//!
++//! Phase 10 wave 1 covers the file-based autostart surfaces that work
++//! across every OS without paid signing or kernel access:
++//!
++//!  - Windows: Startup folders (per-user + all-users)
++//!  - macOS: LaunchAgents / LaunchDaemons plists (filesystem only)
++//!  - Linux: ~/.config/autostart/*.desktop, ~/.config/systemd/user/*.service,
++//!    /etc/cron.d/*, /etc/cron.{hourly,daily,weekly,monthly}/*
++//!
++//! Out of scope for this wave (planned follow-ups):
++//!
++//!  - Windows registry Run / RunOnce values — needs `windows::Win32::System::Registry`
++//!    binding for HKLM/HKCU enumeration. The frame here already supports
++//!    `PersistenceKind::RunKey` so the retrofit is mechanical.
++//!  - Windows services with `start = auto` — needs SCM enumeration via
++//!    the `windows-service` crate or a `windows` crate wrapper.
++//!  - macOS login items — needs `ServiceManagement.framework` calls;
++//!    accessible via `objc2` without Apple Dev Program membership.
++//!
++//! The Persistence page renders this table regardless; future wave
++//! retrofits widen coverage without changing the schema.
++
++use std::path::{Path, PathBuf};
++use std::time::{SystemTime, UNIX_EPOCH};
++
++use rusqlite::{Connection, params};
++use serde::{Deserialize, Serialize};
++
++/// Closed enum of supported persistence-surface kinds. Stored in the DB
++/// as the lower-case string returned by [`PersistenceKind::as_str`].
++/// Each variant's docstring names the surface and the path/identifier
++/// shape the enumerator produces.
++#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
++#[serde(rename_all = "snake_case")]
++pub enum PersistenceKind {
++    /// Windows Startup folder file. `identifier` = absolute path.
++    StartupFolder,
++    /// Windows registry Run / RunOnce value. `identifier` =
++    /// `HKLM\…\Run\ValueName` or `HKCU\…\RunOnce\ValueName`.
++    /// (Deferred — see module doc comment.)
++    RunKey,
++    /// Windows service registered with `start = auto`.
++    /// `identifier` = service name.
++    /// (Deferred — see module doc comment.)
++    Service,
++    /// macOS LaunchAgent plist. `identifier` = absolute path.
++    LaunchAgent,
++    /// macOS LaunchDaemon plist. `identifier` = absolute path.
++    LaunchDaemon,
++    /// macOS legacy login item. `identifier` =
++    /// `com.example.bundle:Label`.
++    /// (Deferred — see module doc comment.)
++    LoginItem,
++    /// Linux systemd unit (user or system). `identifier` = unit name +
++    /// scope, e.g. `vpn.service@user`.
++    SystemdUnit,
++    /// Linux XDG autostart desktop entry under
++    /// `~/.config/autostart/*.desktop`. `identifier` = absolute path.
++    XdgAutostart,
++    /// Linux crontab file. `identifier` = absolute path.
++    Crontab,
++}
++
++impl PersistenceKind {
++    pub fn as_str(self) -> &'static str {
++        match self {
++            PersistenceKind::StartupFolder => "startup_folder",
++            PersistenceKind::RunKey => "run_key",
++            PersistenceKind::Service => "service",
++            PersistenceKind::LaunchAgent => "launch_agent",
++            PersistenceKind::LaunchDaemon => "launch_daemon",
++            PersistenceKind::LoginItem => "login_item",
++            PersistenceKind::SystemdUnit => "systemd_unit",
++            PersistenceKind::XdgAutostart => "xdg_autostart",
++            PersistenceKind::Crontab => "crontab",
++        }
++    }
++
++    pub fn parse(s: &str) -> Option<Self> {
++        Some(match s {
++            "startup_folder" => PersistenceKind::StartupFolder,
++            "run_key" => PersistenceKind::RunKey,
++            "service" => PersistenceKind::Service,
++            "launch_agent" => PersistenceKind::LaunchAgent,
++            "launch_daemon" => PersistenceKind::LaunchDaemon,
++            "login_item" => PersistenceKind::LoginItem,
++            "systemd_unit" => PersistenceKind::SystemdUnit,
++            "xdg_autostart" => PersistenceKind::XdgAutostart,
++            "crontab" => PersistenceKind::Crontab,
++            _ => return None,
++        })
++    }
++}
++
++/// One persistence row.
++#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
++pub struct PersistenceEntry {
++    pub id: Option<i64>,
++    pub kind: PersistenceKind,
++    pub identifier: String,
++    /// Resolved executable path the entry runs at boot, when knowable.
++    pub target_path: Option<PathBuf>,
++    /// Human-friendly name (file name / registry value / unit `Name=`).
++    pub display_name: Option<String>,
++    /// Signing identity when present (Windows Authenticode signer name,
++    /// macOS team-id, Linux signature off-by-default — typically `None`).
++    pub signer: Option<String>,
++    pub first_seen_at: i64,
++    pub last_seen_at: i64,
++}
++
++#[derive(Debug, thiserror::Error)]
++pub enum PersistenceError {
++    #[error("io: {0}")]
++    Io(#[from] std::io::Error),
++    #[error("db: {0}")]
++    Db(#[from] rusqlite::Error),
++}
++
++fn now_unix() -> i64 {
++    SystemTime::now()
++        .duration_since(UNIX_EPOCH)
++        .map(|d| d.as_secs() as i64)
++        .unwrap_or(0)
++}
++
++/// Cross-platform enumeration. Calls into the per-OS file-walker
++/// helpers below and returns the union. Caller persists via
++/// [`upsert_many`].
++pub fn enumerate_all() -> Vec<PersistenceEntry> {
++    let mut entries = Vec::new();
++    enumerate_into(&mut entries);
++    entries
++}
++
++#[cfg(target_os = "windows")]
++fn enumerate_into(out: &mut Vec<PersistenceEntry>) {
++    use std::env;
++    let candidates = [
++        env::var_os("APPDATA")
++            .map(PathBuf::from)
++            .map(|p| p.join("Microsoft\\Windows\\Start Menu\\Programs\\Startup")),
++        env::var_os("ProgramData")
++            .map(PathBuf::from)
++            .map(|p| p.join("Microsoft\\Windows\\Start Menu\\Programs\\StartUp")),
++    ];
++    for opt in candidates.iter().flatten() {
++        walk_dir_into(opt, PersistenceKind::StartupFolder, out);
++    }
++}
++
++#[cfg(target_os = "macos")]
++fn enumerate_into(out: &mut Vec<PersistenceEntry>) {
++    if let Some(home) = dirs_home() {
++        walk_dir_into(
++            &home.join("Library/LaunchAgents"),
++            PersistenceKind::LaunchAgent,
++            out,
++        );
++    }
++    walk_dir_into(
++        Path::new("/Library/LaunchAgents"),
++        PersistenceKind::LaunchAgent,
++        out,
++    );
++    walk_dir_into(
++        Path::new("/Library/LaunchDaemons"),
++        PersistenceKind::LaunchDaemon,
++        out,
++    );
++}
++
++#[cfg(target_os = "linux")]
++fn enumerate_into(out: &mut Vec<PersistenceEntry>) {
++    if let Some(home) = dirs_home() {
++        walk_dir_into(
++            &home.join(".config/autostart"),
++            PersistenceKind::XdgAutostart,
++            out,
++        );
++        walk_dir_into(
++            &home.join(".config/systemd/user"),
++            PersistenceKind::SystemdUnit,
++            out,
++        );
++        walk_dir_into(
++            &home.join(".local/share/systemd/user"),
++            PersistenceKind::SystemdUnit,
++            out,
++        );
++    }
++    for cron in [
++        "/etc/cron.d",
++        "/etc/cron.hourly",
++        "/etc/cron.daily",
++        "/etc/cron.weekly",
++        "/etc/cron.monthly",
++    ] {
++        walk_dir_into(Path::new(cron), PersistenceKind::Crontab, out);
++    }
++}
++
++/// Walk one directory looking for non-hidden regular files; convert
++/// each into a `PersistenceEntry` of the supplied kind. Silently
++/// tolerates the directory not existing.
++fn walk_dir_into(dir: &Path, kind: PersistenceKind, out: &mut Vec<PersistenceEntry>) {
++    let Ok(read) = std::fs::read_dir(dir) else {
++        return;
++    };
++    let now = now_unix();
++    for entry in read.flatten() {
++        let path = entry.path();
++        if !path.is_file() {
++            continue;
++        }
++        let display = path
++            .file_name()
++            .and_then(|s| s.to_str())
++            .map(str::to_string);
++        out.push(PersistenceEntry {
++            id: None,
++            kind,
++            identifier: path.to_string_lossy().into_owned(),
++            target_path: Some(path.clone()),
++            display_name: display,
++            signer: None,
++            first_seen_at: now,
++            last_seen_at: now,
++        });
++    }
++}
++
++fn dirs_home() -> Option<PathBuf> {
++    #[cfg(target_os = "windows")]
++    {
++        std::env::var_os("USERPROFILE").map(PathBuf::from)
++    }
++    #[cfg(not(target_os = "windows"))]
++    {
++        std::env::var_os("HOME").map(PathBuf::from)
++    }
++}
++
++/// Upsert a batch of entries. New `(kind, identifier)` pairs are
++/// inserted with `first_seen_at = last_seen_at = now`; existing pairs
++/// update `last_seen_at = now` while preserving `first_seen_at` and
++/// re-stamping `target_path` / `display_name` / `signer` from the
++/// fresh scan.
++pub fn upsert_many(
++    conn: &Connection,
++    entries: &[PersistenceEntry],
++) -> Result<usize, PersistenceError> {
++    let now = now_unix();
++    let mut count = 0;
++    let tx = conn.unchecked_transaction()?;
++    for e in entries {
++        tx.execute(
++            "INSERT INTO persistence_entries
++             (kind, identifier, target_path, display_name, signer, first_seen_at, last_seen_at)
++             VALUES (?, ?, ?, ?, ?, ?, ?)
++             ON CONFLICT(kind, identifier) DO UPDATE SET
++               target_path  = excluded.target_path,
++               display_name = excluded.display_name,
++               signer       = excluded.signer,
++               last_seen_at = excluded.last_seen_at",
++            params![
++                e.kind.as_str(),
++                e.identifier,
++                e.target_path
++                    .as_ref()
++                    .map(|p| p.to_string_lossy().into_owned()),
++                e.display_name,
++                e.signer,
++                now,
++                now,
++            ],
++        )?;
++        count += 1;
++    }
++    tx.commit()?;
++    Ok(count)
++}
++
++pub fn list_all(conn: &Connection) -> Result<Vec<PersistenceEntry>, PersistenceError> {
++    let mut stmt = conn.prepare(
++        "SELECT id, kind, identifier, target_path, display_name, signer,
++                first_seen_at, last_seen_at
++         FROM persistence_entries
++         ORDER BY kind, identifier",
++    )?;
++    let rows = stmt
++        .query_map([], |row| {
++            let kind_str: String = row.get("kind")?;
++            let kind = PersistenceKind::parse(&kind_str).ok_or_else(|| {
++                rusqlite::Error::FromSqlConversionFailure(
++                    1,
++                    rusqlite::types::Type::Text,
++                    Box::new(std::io::Error::other(format!(
++                        "unknown persistence kind '{kind_str}'"
++                    ))),
++                )
++            })?;
++            Ok(PersistenceEntry {
++                id: Some(row.get("id")?),
++                kind,
++                identifier: row.get("identifier")?,
++                target_path: row
++                    .get::<_, Option<String>>("target_path")?
++                    .map(PathBuf::from),
++                display_name: row.get("display_name")?,
++                signer: row.get("signer")?,
++                first_seen_at: row.get("first_seen_at")?,
++                last_seen_at: row.get("last_seen_at")?,
++            })
++        })?
++        .collect::<Result<Vec<_>, _>>()?;
++    Ok(rows)
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    fn open_test_db() -> Connection {
++        let conn = Connection::open_in_memory().unwrap();
++        conn.execute_batch(include_str!(
++            "../../migrations/0011_persistence_entries.sql"
++        ))
++        .unwrap();
++        conn
++    }
++
++    fn sample(kind: PersistenceKind, id: &str) -> PersistenceEntry {
++        PersistenceEntry {
++            id: None,
++            kind,
++            identifier: id.into(),
++            target_path: Some(PathBuf::from(id)),
++            display_name: Some(id.split('/').next_back().unwrap_or(id).to_string()),
++            signer: None,
++            first_seen_at: 0,
++            last_seen_at: 0,
++        }
++    }
++
++    #[test]
++    fn kind_round_trips_string() {
++        for k in [
++            PersistenceKind::StartupFolder,
++            PersistenceKind::RunKey,
++            PersistenceKind::LaunchAgent,
++            PersistenceKind::LaunchDaemon,
++            PersistenceKind::SystemdUnit,
++            PersistenceKind::XdgAutostart,
++            PersistenceKind::Crontab,
++            PersistenceKind::Service,
++            PersistenceKind::LoginItem,
++        ] {
++            assert_eq!(PersistenceKind::parse(k.as_str()), Some(k));
++        }
++        assert!(PersistenceKind::parse("bogus").is_none());
++    }
++
++    #[test]
++    fn upsert_inserts_and_lists() {
++        let conn = open_test_db();
++        let entries = vec![
++            sample(
++                PersistenceKind::LaunchAgent,
++                "/Users/me/Library/LaunchAgents/x.plist",
++            ),
++            sample(PersistenceKind::Crontab, "/etc/cron.daily/y"),
++        ];
++        assert_eq!(upsert_many(&conn, &entries).unwrap(), 2);
++        let listed = list_all(&conn).unwrap();
++        assert_eq!(listed.len(), 2);
++        // Sorted alphabetically on `kind` string: "crontab" < "launch_agent".
++        assert_eq!(listed[0].kind, PersistenceKind::Crontab);
++        assert_eq!(listed[1].kind, PersistenceKind::LaunchAgent);
++    }
++
++    #[test]
++    fn second_upsert_updates_last_seen_preserves_first_seen() {
++        let conn = open_test_db();
++        let row = sample(PersistenceKind::LaunchAgent, "/x");
++        upsert_many(&conn, std::slice::from_ref(&row)).unwrap();
++        let first = list_all(&conn).unwrap()[0].clone();
++        // Force a different "now" by sleeping is fragile in CI; instead
++        // verify the row is unique and not duplicated.
++        upsert_many(&conn, &[row]).unwrap();
++        let second = list_all(&conn).unwrap();
++        assert_eq!(second.len(), 1, "upsert must not duplicate");
++        assert_eq!(second[0].first_seen_at, first.first_seen_at);
++        assert!(second[0].last_seen_at >= first.last_seen_at);
++    }
++
++    #[test]
++    fn enumerate_all_tolerates_missing_directories() {
++        // Should never panic, even on a fresh CI box that lacks any of
++        // the candidate paths.
++        let _ = enumerate_all();
++    }
++
++    #[test]
++    fn walk_dir_into_handles_missing_dir() {
++        let mut out = Vec::new();
++        walk_dir_into(
++            Path::new("/non/existent/dir/xyz123"),
++            PersistenceKind::Crontab,
++            &mut out,
++        );
++        assert!(out.is_empty());
++    }
++
++    #[test]
++    fn walk_dir_into_collects_regular_files() {
++        let dir = tempfile::tempdir().unwrap();
++        std::fs::write(dir.path().join("a.plist"), b"x").unwrap();
++        std::fs::write(dir.path().join("b.plist"), b"y").unwrap();
++        std::fs::create_dir(dir.path().join("subdir")).unwrap();
++        let mut out = Vec::new();
++        walk_dir_into(dir.path(), PersistenceKind::LaunchAgent, &mut out);
++        assert_eq!(out.len(), 2, "should pick up the 2 files, not the subdir");
++        assert!(out.iter().all(|e| e.kind == PersistenceKind::LaunchAgent));
++    }
++}

@@ -29,6 +29,7 @@ import { attachQuarantineEvents } from "@/stores/quarantine";
 import { attachShieldsEvents } from "@/stores/shields";
 import { attachTrayEvents } from "@/stores/tray";
 import { firstRunCompleted, reconcileFirstRunFlag } from "@/stores/firstRun";
+import { LocalizationProvider } from "@/i18n";
 
 const App: Component = () => {
   // Attach during the top-level render so the listeners' onCleanup
@@ -46,29 +47,31 @@ const App: Component = () => {
   // welcome flow on every launch.
   void reconcileFirstRunFlag();
   return (
-    <Show
-      when={firstRunCompleted()}
-      fallback={
-        <Router>
-          <Route path="*" component={FirstRun} />
+    <LocalizationProvider>
+      <Show
+        when={firstRunCompleted()}
+        fallback={
+          <Router>
+            <Route path="*" component={FirstRun} />
+          </Router>
+        }
+      >
+        <Router root={(props) => <AppFrame>{props.children}</AppFrame>}>
+          <Route path="/" component={() => <Navigate href="/scan" />} />
+          <Route path="/scan" component={Scan} />
+          <Route path="/history" component={History} />
+          <Route path="/history/usb-writes" component={UsbWrites} />
+          <Route path="/quarantine" component={Quarantine} />
+          <Route path="/exclusions" component={Exclusions} />
+          <Route path="/realtime" component={Realtime} />
+          <Route path="/usb-devices" component={UsbDevices} />
+          <Route path="/settings" component={Settings} />
+          <Route path="/settings/usb-allowlist" component={UsbAllowlist} />
+          <Route path="/settings/usb-policy" component={UsbPolicy} />
+          <Route path="/settings/mac-exemptions" component={MacExemptions} />
         </Router>
-      }
-    >
-      <Router root={(props) => <AppFrame>{props.children}</AppFrame>}>
-        <Route path="/" component={() => <Navigate href="/scan" />} />
-        <Route path="/scan" component={Scan} />
-        <Route path="/history" component={History} />
-        <Route path="/history/usb-writes" component={UsbWrites} />
-        <Route path="/quarantine" component={Quarantine} />
-        <Route path="/exclusions" component={Exclusions} />
-        <Route path="/realtime" component={Realtime} />
-        <Route path="/usb-devices" component={UsbDevices} />
-        <Route path="/settings" component={Settings} />
-        <Route path="/settings/usb-allowlist" component={UsbAllowlist} />
-        <Route path="/settings/usb-policy" component={UsbPolicy} />
-        <Route path="/settings/mac-exemptions" component={MacExemptions} />
-      </Router>
-    </Show>
+      </Show>
+    </LocalizationProvider>
   );
 };
 

@@ -8,11 +8,11 @@ use mythkernel::{
     quarantine::QuarantineVault,
     realtime::shields::ShieldsBroker,
     updater::{
-        abusech::AbuseChUpdater,
-        database::{AbuseChFeedRunner, DatabaseChannel, NsrlFeedRunner},
+        curated::CuratedBlacklistUpdater,
+        database::{CuratedBlacklistFeedRunner, DatabaseChannel, NsrlFeedRunner},
         engine::EngineChannel,
         nsrl::{NsrlSource, NsrlUpdater},
-        scheduler::{self, AbuseChScheduledFeed, ScheduledFeed, SchedulerHandle},
+        scheduler::{self, CuratedBlacklistScheduledFeed, ScheduledFeed, SchedulerHandle},
     },
 };
 use serde::Serialize;
@@ -466,16 +466,13 @@ fn spawn_feed_scheduler(state: &ui_bridge::commands::AppState) -> SchedulerHandl
         // beyond any realistic session so it never fires on its own.
         Duration::from_secs(365 * 24 * 3600)
     };
-    let mut feeds: Vec<Box<dyn ScheduledFeed>> = Vec::new();
-    if !cfg.updater.abusech_auth_key.trim().is_empty() {
-        let updater =
-            AbuseChUpdater::new(cfg.updater.abusech_auth_key.trim().to_string(), &feeds_dir);
-        feeds.push(Box::new(AbuseChScheduledFeed::new(updater)));
-    } else {
-        tracing::info!(
-            "feed scheduler: abuse.ch auth key not configured — scheduled abuse.ch refresh disabled"
-        );
-    }
+    // Repo-curated DB (2026-06-21): the periodic refresh downloads the
+    // curated blacklist `.bin` from the GitHub release. The raw abuse.ch
+    // upstream pull is disabled, so this is always registered (no auth key
+    // required) and every user converges on the same curated database.
+    let feeds: Vec<Box<dyn ScheduledFeed>> = vec![Box::new(CuratedBlacklistScheduledFeed::new(
+        CuratedBlacklistUpdater::new(&feeds_dir),
+    ))];
     scheduler::spawn(feeds, feeds_dir, interval)
 }
 
@@ -566,14 +563,13 @@ fn init_state() -> Result<AppState, Box<dyn std::error::Error>> {
 fn build_database_channel(data_dir: &std::path::Path) -> DatabaseChannel {
     let feeds_dir = ui_bridge::commands::feeds_dir(data_dir);
     let mut channel = DatabaseChannel::new(data_dir);
-    // Always register feeds at startup so manual "Check now" works
-    // without the user having configured an auth-key first; the
-    // adapter itself fails fast when the key is empty.
-    let abusech_auth_key = std::env::var("MYTHODIKAL_ABUSECH_AUTH_KEY").unwrap_or_default();
-    if !abusech_auth_key.is_empty() {
-        let updater = AbuseChUpdater::new(abusech_auth_key, &feeds_dir);
-        channel = channel.register(AbuseChFeedRunner::new(updater));
-    }
+    // Repo-curated DB (Part B, 2026-06-21): the blacklist is the curated
+    // `.bin` downloaded from the GitHub release — the raw abuse.ch upstream
+    // pull is disabled. Always registered (no auth key) so manual "Check
+    // now" and the auto-update timer both refresh the curated database.
+    channel = channel.register(CuratedBlacklistFeedRunner::new(
+        CuratedBlacklistUpdater::new(&feeds_dir),
+    ));
     let nsrl_local = std::env::var("MYTHODIKAL_NSRL_LOCAL").unwrap_or_default();
     if !nsrl_local.is_empty() {
         let updater = NsrlUpdater::new(NsrlSource::Local(nsrl_local.into()), &feeds_dir);

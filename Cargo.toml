@@ -123,7 +123,7 @@ memmap2 = "0.9"
 
 # HTTPS client for feed updaters (TASK-022 / TASK-023). Per docs/prd.md § 1.5
 # we use rustls-only — no openssl / native-tls dep tree.
-reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "gzip", "deflate", "json"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "gzip", "deflate", "json", "stream"] }
 
 # OS keychain access for the quarantine vault XOR key (TASK-024). Pure-Rust
 # bindings to libsecret / macOS Keychain / Windows Credential Manager. Falls

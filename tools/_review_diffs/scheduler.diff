@@ -1,0 +1,673 @@
+diff --git a/crates/mythkernel/src/scheduler.rs b/crates/mythkernel/src/scheduler.rs
+index 2bdd4d9..1df7171 100644
+--- a/crates/mythkernel/src/scheduler.rs
++++ b/crates/mythkernel/src/scheduler.rs
+@@ -1,6 +1,665 @@
+-//! Scheduled scans. Filled in by TASK-086 (Phase 10).
++//! Scheduled scans (TASK-086, Phase 10).
+ //!
+-//! Phase 7C wave 3 adds the wake-gate scaffolding (TASK-207); the
+-//! actual scheduler driver lands in Phase 10.
++//! Cron-like recurrence — but not POSIX cron syntax. Schedules pick from
++//! four shapes that map cleanly onto the Settings sub-tab dropdowns:
++//!
++//!  * `Daily`   — fires every day at HH:MM
++//!  * `Weekly`  — fires on a set of weekdays at HH:MM
++//!  * `Monthly` — fires on a specific day-of-month at HH:MM
++//!  * `OneShot` — fires once at a UTC unix timestamp
++//!
++//! Engine ticks once a minute. On each tick it queries [`list_due`] and
++//! dispatches matching scans through the normal `scan::ScanEngine` path.
++//! `last_fired_at` is bumped so an engine restart in the same minute
++//! doesn't re-fire what just ran.
++//!
++//! The idle-only constraint (FR-086) is enforced by passing the host's
++//! current idle-seconds reading to [`Schedule::should_fire`]. Setting
++//! `idle_min_seconds = 0` opts out of the gate.
++//!
++//! Phase 7C TASK-207's [`wake::WakeGate`] handles laptop-wake resumption
++//! for *paused* scans; this module handles the first-fire decision for
++//! *not-yet-started* scheduled runs. The two are orthogonal — a
++//! scheduled scan that starts then gets paused will resume through the
++//! wake gate independently of its schedule.
++
++use std::path::PathBuf;
++use std::time::{SystemTime, UNIX_EPOCH};
++
++use chrono::{DateTime, Datelike, Duration, NaiveDate, TimeZone, Utc, Weekday};
++use rusqlite::{Connection, params};
++use serde::{Deserialize, Serialize};
+ 
+ pub mod wake;
++
++/// Default idle threshold (seconds). One minute of keyboard / mouse
++/// quiet — the UI exposes this as a single slider so a user can dial it
++/// from 0 (always-fire) up to 3600 (one hour).
++pub const DEFAULT_IDLE_MIN_SECONDS: u64 = 60;
++
++/// Recurrence shape. `kind_data` in the DB carries the variant-specific
++/// payload; this enum is the runtime representation.
++#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
++#[serde(tag = "kind", rename_all = "snake_case")]
++pub enum ScheduleKind {
++    Daily,
++    Weekly {
++        /// 0 = Sunday … 6 = Saturday. Empty = never fires (caller
++        /// guarded; the DB CHECK lets this through but [`Schedule::validate`]
++        /// rejects it).
++        weekdays: Vec<u8>,
++    },
++    Monthly {
++        /// 1 … 31. Months with fewer days clamp downward — Feb 31 fires
++        /// on the last day of February.
++        day: u8,
++    },
++    OneShot {
++        /// Wall-clock target as UTC unix seconds. The engine fires once
++        /// when `now >= at_unix` and never again (the row stays in the
++        /// table for audit, but `should_fire` returns false forever
++        /// after the first fire).
++        at_unix: i64,
++    },
++}
++
++/// One scheduled scan row.
++#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
++pub struct Schedule {
++    pub id: i64,
++    pub name: String,
++    pub enabled: bool,
++    pub kind: ScheduleKind,
++    /// Local-time hour at which the scan fires. Stored as UTC in the DB
++    /// (no per-row timezone column — schedules are interpreted in UTC
++    /// to keep daylight-saving math out of the engine's hot path).
++    pub at_hour: u8,
++    pub at_minute: u8,
++    /// Minimum host idle-seconds at fire time. `0` disables the gate.
++    pub idle_min_seconds: u64,
++    /// Roots the scan covers. Empty = full-system scan per the engine's
++    /// default. UI exposes a multi-select that maps onto this.
++    pub scan_roots: Vec<PathBuf>,
++    /// UTC unix seconds the schedule last fired. `None` until it has
++    /// fired once.
++    pub last_fired_at: Option<i64>,
++    pub created_at: i64,
++    pub updated_at: i64,
++}
++
++#[derive(Debug, thiserror::Error)]
++pub enum ScheduleError {
++    #[error("invalid schedule: {0}")]
++    Invalid(String),
++    #[error("db: {0}")]
++    Db(#[from] rusqlite::Error),
++    #[error("json: {0}")]
++    Json(#[from] serde_json::Error),
++}
++
++impl Schedule {
++    /// Caller-side validation. Caught before INSERT so the DB never
++    /// holds a row that can't fire.
++    pub fn validate(&self) -> Result<(), ScheduleError> {
++        if self.name.trim().is_empty() {
++            return Err(ScheduleError::Invalid("name is empty".into()));
++        }
++        if self.at_hour > 23 || self.at_minute > 59 {
++            return Err(ScheduleError::Invalid(format!(
++                "at_hour {}:{} out of range",
++                self.at_hour, self.at_minute
++            )));
++        }
++        match &self.kind {
++            ScheduleKind::Weekly { weekdays } if weekdays.is_empty() => Err(
++                ScheduleError::Invalid("weekly schedule with no weekdays".into()),
++            ),
++            ScheduleKind::Weekly { weekdays } if weekdays.iter().any(|d| *d > 6) => {
++                Err(ScheduleError::Invalid("weekday > 6".into()))
++            }
++            ScheduleKind::Monthly { day } if *day == 0 || *day > 31 => Err(ScheduleError::Invalid(
++                format!("monthly day {day} out of range"),
++            )),
++            _ => Ok(()),
++        }
++    }
++
++    /// Wall-clock instant of the next firing strictly after `from`.
++    /// Pure — no DB / clock reads. Returns `None` for one-shots whose
++    /// target is in the past, otherwise always `Some`.
++    pub fn next_due_after(&self, from: DateTime<Utc>) -> Option<DateTime<Utc>> {
++        match &self.kind {
++            ScheduleKind::OneShot { at_unix } => {
++                let target = Utc.timestamp_opt(*at_unix, 0).single()?;
++                (target > from).then_some(target)
++            }
++            ScheduleKind::Daily => Some(next_at_hm_after(from, self.at_hour, self.at_minute)),
++            ScheduleKind::Weekly { weekdays } => {
++                next_weekday_at(from, weekdays, self.at_hour, self.at_minute)
++            }
++            ScheduleKind::Monthly { day } => {
++                Some(next_monthly_at(from, *day, self.at_hour, self.at_minute))
++            }
++        }
++    }
++
++    /// Should the engine fire this schedule **right now**?
++    ///
++    /// Returns true when:
++    ///  * `enabled = true`, and
++    ///  * the next-due instant computed against the schedule's
++    ///    `last_fired_at` (or epoch if never fired) is at-or-before `now`, and
++    ///  * `idle_seconds >= idle_min_seconds`.
++    pub fn should_fire(&self, now: DateTime<Utc>, idle_seconds: u64) -> bool {
++        if !self.enabled {
++            return false;
++        }
++        if idle_seconds < self.idle_min_seconds {
++            return false;
++        }
++        let baseline = self
++            .last_fired_at
++            .and_then(|s| Utc.timestamp_opt(s, 0).single())
++            .unwrap_or_else(|| Utc.timestamp_opt(0, 0).single().unwrap());
++        match self.next_due_after(baseline) {
++            Some(next) => next <= now,
++            None => false,
++        }
++    }
++}
++
++fn next_at_hm_after(from: DateTime<Utc>, hour: u8, minute: u8) -> DateTime<Utc> {
++    let today = Utc
++        .with_ymd_and_hms(
++            from.year(),
++            from.month(),
++            from.day(),
++            hour as u32,
++            minute as u32,
++            0,
++        )
++        .single()
++        .unwrap_or(from);
++    if today > from {
++        today
++    } else {
++        today + Duration::days(1)
++    }
++}
++
++fn next_weekday_at(
++    from: DateTime<Utc>,
++    weekdays: &[u8],
++    hour: u8,
++    minute: u8,
++) -> Option<DateTime<Utc>> {
++    if weekdays.is_empty() {
++        return None;
++    }
++    // Look ahead 0..=7 days — we are guaranteed to hit one of the
++    // allowed weekdays within a week.
++    for ahead in 0..=7 {
++        let candidate_date = from
++            .date_naive()
++            .checked_add_days(chrono::Days::new(ahead as u64))?;
++        let weekday = sunday_indexed(candidate_date.weekday());
++        if !weekdays.contains(&weekday) {
++            continue;
++        }
++        let dt = Utc
++            .with_ymd_and_hms(
++                candidate_date.year(),
++                candidate_date.month(),
++                candidate_date.day(),
++                hour as u32,
++                minute as u32,
++                0,
++            )
++            .single()?;
++        if dt > from {
++            return Some(dt);
++        }
++    }
++    None
++}
++
++fn next_monthly_at(from: DateTime<Utc>, day: u8, hour: u8, minute: u8) -> DateTime<Utc> {
++    let try_month = |year: i32, month: u32| -> Option<DateTime<Utc>> {
++        let last_day = days_in_month(year, month);
++        let chosen_day = (day as u32).min(last_day);
++        Utc.with_ymd_and_hms(year, month, chosen_day, hour as u32, minute as u32, 0)
++            .single()
++    };
++
++    // First try the current month; fall through to subsequent months if
++    // the candidate is already in the past or unrepresentable.
++    let (mut year, mut month) = (from.year(), from.month());
++    for _ in 0..13 {
++        if let Some(dt) = try_month(year, month)
++            && dt > from
++        {
++            return dt;
++        }
++        month += 1;
++        if month > 12 {
++            month = 1;
++            year += 1;
++        }
++    }
++    // Defensive fallback — should never reach here for sensible inputs.
++    from + Duration::days(31)
++}
++
++fn days_in_month(year: i32, month: u32) -> u32 {
++    // First of next month minus one day → last day of `month`.
++    let (ny, nm) = if month == 12 {
++        (year + 1, 1)
++    } else {
++        (year, month + 1)
++    };
++    let first_of_next = NaiveDate::from_ymd_opt(ny, nm, 1).expect("calendar math");
++    (first_of_next - chrono::Days::new(1)).day()
++}
++
++fn sunday_indexed(w: Weekday) -> u8 {
++    match w {
++        Weekday::Sun => 0,
++        Weekday::Mon => 1,
++        Weekday::Tue => 2,
++        Weekday::Wed => 3,
++        Weekday::Thu => 4,
++        Weekday::Fri => 5,
++        Weekday::Sat => 6,
++    }
++}
++
++fn now_unix() -> i64 {
++    SystemTime::now()
++        .duration_since(UNIX_EPOCH)
++        .map(|d| d.as_secs() as i64)
++        .unwrap_or(0)
++}
++
++/// Insert a new schedule. Caller validates first via [`Schedule::validate`].
++/// Returns the row's auto-assigned `id`.
++pub fn insert(conn: &Connection, schedule: &Schedule) -> Result<i64, ScheduleError> {
++    schedule.validate()?;
++    let (kind_tag, kind_data) = encode_kind(&schedule.kind)?;
++    let scan_roots = serde_json::to_string(&schedule.scan_roots)?;
++    let now = now_unix();
++    conn.execute(
++        "INSERT INTO scheduled_scans
++         (name, enabled, kind, kind_data, at_hour, at_minute,
++          idle_min_seconds, scan_roots, last_fired_at, created_at, updated_at)
++         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
++        params![
++            schedule.name,
++            schedule.enabled as i64,
++            kind_tag,
++            kind_data,
++            schedule.at_hour as i64,
++            schedule.at_minute as i64,
++            schedule.idle_min_seconds as i64,
++            scan_roots,
++            schedule.last_fired_at,
++            now,
++            now,
++        ],
++    )?;
++    Ok(conn.last_insert_rowid())
++}
++
++pub fn delete(conn: &Connection, id: i64) -> Result<(), ScheduleError> {
++    conn.execute("DELETE FROM scheduled_scans WHERE id = ?", params![id])?;
++    Ok(())
++}
++
++pub fn list_all(conn: &Connection) -> Result<Vec<Schedule>, ScheduleError> {
++    let mut stmt = conn.prepare("SELECT * FROM scheduled_scans ORDER BY id")?;
++    let rows = stmt
++        .query_map([], row_to_schedule)?
++        .collect::<Result<Vec<_>, _>>()?;
++    Ok(rows)
++}
++
++/// Returns enabled schedules whose next-due-after-baseline is at-or-before
++/// `now` AND whose idle gate is satisfied. Pure DB read + in-memory filter
++/// — the engine's tick loop calls this once a minute.
++pub fn list_due(
++    conn: &Connection,
++    now: DateTime<Utc>,
++    idle_seconds: u64,
++) -> Result<Vec<Schedule>, ScheduleError> {
++    let mut stmt = conn.prepare("SELECT * FROM scheduled_scans WHERE enabled = 1")?;
++    let rows = stmt
++        .query_map([], row_to_schedule)?
++        .filter_map(|r| r.ok())
++        .filter(|s| s.should_fire(now, idle_seconds))
++        .collect();
++    Ok(rows)
++}
++
++/// Stamp `last_fired_at = now` so the next tick doesn't re-fire the
++/// schedule until its next recurrence comes due.
++pub fn record_fired(conn: &Connection, id: i64) -> Result<(), ScheduleError> {
++    let now = now_unix();
++    conn.execute(
++        "UPDATE scheduled_scans SET last_fired_at = ?, updated_at = ? WHERE id = ?",
++        params![now, now, id],
++    )?;
++    Ok(())
++}
++
++fn encode_kind(kind: &ScheduleKind) -> Result<(&'static str, String), ScheduleError> {
++    Ok(match kind {
++        ScheduleKind::Daily => ("daily", "{}".to_string()),
++        ScheduleKind::Weekly { weekdays } => (
++            "weekly",
++            serde_json::to_string(&serde_json::json!({"weekdays": weekdays}))?,
++        ),
++        ScheduleKind::Monthly { day } => (
++            "monthly",
++            serde_json::to_string(&serde_json::json!({"day": day}))?,
++        ),
++        ScheduleKind::OneShot { at_unix } => (
++            "oneshot",
++            serde_json::to_string(&serde_json::json!({"at_unix": at_unix}))?,
++        ),
++    })
++}
++
++fn decode_kind(tag: &str, data: &str) -> Result<ScheduleKind, ScheduleError> {
++    let v: serde_json::Value = serde_json::from_str(data)?;
++    match tag {
++        "daily" => Ok(ScheduleKind::Daily),
++        "weekly" => {
++            let weekdays: Vec<u8> = serde_json::from_value(
++                v.get("weekdays")
++                    .cloned()
++                    .ok_or_else(|| ScheduleError::Invalid("weekly missing weekdays".into()))?,
++            )?;
++            Ok(ScheduleKind::Weekly { weekdays })
++        }
++        "monthly" => {
++            let day: u8 = serde_json::from_value(
++                v.get("day")
++                    .cloned()
++                    .ok_or_else(|| ScheduleError::Invalid("monthly missing day".into()))?,
++            )?;
++            Ok(ScheduleKind::Monthly { day })
++        }
++        "oneshot" => {
++            let at_unix: i64 = serde_json::from_value(
++                v.get("at_unix")
++                    .cloned()
++                    .ok_or_else(|| ScheduleError::Invalid("oneshot missing at_unix".into()))?,
++            )?;
++            Ok(ScheduleKind::OneShot { at_unix })
++        }
++        other => Err(ScheduleError::Invalid(format!("unknown kind '{other}'"))),
++    }
++}
++
++fn row_to_schedule(row: &rusqlite::Row<'_>) -> rusqlite::Result<Schedule> {
++    let kind_tag: String = row.get("kind")?;
++    let kind_data: String = row.get("kind_data")?;
++    let kind = decode_kind(&kind_tag, &kind_data).map_err(|e| {
++        rusqlite::Error::FromSqlConversionFailure(
++            0,
++            rusqlite::types::Type::Text,
++            Box::new(std::io::Error::other(e.to_string())),
++        )
++    })?;
++    let scan_roots: Vec<PathBuf> =
++        serde_json::from_str(&row.get::<_, String>("scan_roots")?).unwrap_or_default();
++    Ok(Schedule {
++        id: row.get("id")?,
++        name: row.get("name")?,
++        enabled: row.get::<_, i64>("enabled")? != 0,
++        kind,
++        at_hour: row.get::<_, i64>("at_hour")? as u8,
++        at_minute: row.get::<_, i64>("at_minute")? as u8,
++        idle_min_seconds: row.get::<_, i64>("idle_min_seconds")? as u64,
++        scan_roots,
++        last_fired_at: row.get::<_, Option<i64>>("last_fired_at")?,
++        created_at: row.get("created_at")?,
++        updated_at: row.get("updated_at")?,
++    })
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    fn fixed(year: i32, month: u32, day: u32, hh: u32, mm: u32) -> DateTime<Utc> {
++        Utc.with_ymd_and_hms(year, month, day, hh, mm, 0).unwrap()
++    }
++
++    fn daily(at_hour: u8, at_minute: u8) -> Schedule {
++        Schedule {
++            id: 0,
++            name: "t".into(),
++            enabled: true,
++            kind: ScheduleKind::Daily,
++            at_hour,
++            at_minute,
++            idle_min_seconds: 0,
++            scan_roots: vec![],
++            last_fired_at: None,
++            created_at: 0,
++            updated_at: 0,
++        }
++    }
++
++    #[test]
++    fn next_daily_rolls_forward_when_today_already_passed() {
++        let s = daily(8, 30);
++        let now = fixed(2026, 5, 27, 9, 0);
++        let nxt = s.next_due_after(now).unwrap();
++        assert_eq!(nxt, fixed(2026, 5, 28, 8, 30));
++    }
++
++    #[test]
++    fn next_daily_uses_today_when_target_still_ahead() {
++        let s = daily(8, 30);
++        let now = fixed(2026, 5, 27, 7, 0);
++        let nxt = s.next_due_after(now).unwrap();
++        assert_eq!(nxt, fixed(2026, 5, 27, 8, 30));
++    }
++
++    #[test]
++    fn next_weekly_picks_next_matching_weekday() {
++        let mut s = daily(9, 0);
++        // 2026-05-27 is a Wednesday (3). Schedule for Friday (5).
++        s.kind = ScheduleKind::Weekly { weekdays: vec![5] };
++        let now = fixed(2026, 5, 27, 10, 0);
++        let nxt = s.next_due_after(now).unwrap();
++        assert_eq!(nxt, fixed(2026, 5, 29, 9, 0));
++    }
++
++    #[test]
++    fn next_monthly_clamps_to_last_day_when_chosen_day_too_large() {
++        let mut s = daily(0, 0);
++        s.kind = ScheduleKind::Monthly { day: 31 };
++        // April has 30 days; from a fixed point in April the next
++        // April firing clamps to 04-30; otherwise we roll into May 31.
++        let nxt = s.next_due_after(fixed(2026, 4, 1, 12, 0)).unwrap();
++        assert_eq!(nxt, fixed(2026, 4, 30, 0, 0));
++        let nxt = s.next_due_after(fixed(2026, 4, 30, 13, 0)).unwrap();
++        assert_eq!(nxt, fixed(2026, 5, 31, 0, 0));
++    }
++
++    #[test]
++    fn one_shot_in_the_past_returns_none() {
++        let mut s = daily(0, 0);
++        s.kind = ScheduleKind::OneShot {
++            at_unix: fixed(2024, 1, 1, 0, 0).timestamp(),
++        };
++        assert!(s.next_due_after(fixed(2026, 5, 27, 0, 0)).is_none());
++    }
++
++    #[test]
++    fn should_fire_respects_idle_gate() {
++        let mut s = daily(0, 0);
++        s.idle_min_seconds = 60;
++        let now = fixed(2026, 5, 27, 1, 0);
++        assert!(!s.should_fire(now, 59));
++        assert!(s.should_fire(now, 60));
++    }
++
++    #[test]
++    fn should_fire_false_when_disabled() {
++        let mut s = daily(0, 0);
++        s.enabled = false;
++        assert!(!s.should_fire(fixed(2030, 1, 1, 0, 0), u64::MAX));
++    }
++
++    #[test]
++    fn should_fire_false_until_last_fire_plus_interval_passes() {
++        let mut s = daily(8, 0);
++        // Fired at 2026-05-27 08:00:00 UTC.
++        s.last_fired_at = Some(fixed(2026, 5, 27, 8, 0).timestamp());
++        // 23 hours later — next due is tomorrow 08:00, current is not
++        // there yet.
++        assert!(!s.should_fire(fixed(2026, 5, 28, 7, 0), 0));
++        // 24 hours later — tomorrow at 08:00 is now due.
++        assert!(s.should_fire(fixed(2026, 5, 28, 8, 0), 0));
++    }
++
++    #[test]
++    fn validate_rejects_empty_name() {
++        let mut s = daily(0, 0);
++        s.name = "".into();
++        assert!(matches!(s.validate(), Err(ScheduleError::Invalid(_))));
++    }
++
++    #[test]
++    fn validate_rejects_empty_weekly_weekdays() {
++        let mut s = daily(0, 0);
++        s.kind = ScheduleKind::Weekly { weekdays: vec![] };
++        assert!(matches!(s.validate(), Err(ScheduleError::Invalid(_))));
++    }
++
++    #[test]
++    fn validate_rejects_monthly_day_out_of_range() {
++        let mut s = daily(0, 0);
++        s.kind = ScheduleKind::Monthly { day: 0 };
++        assert!(matches!(s.validate(), Err(ScheduleError::Invalid(_))));
++        s.kind = ScheduleKind::Monthly { day: 32 };
++        assert!(matches!(s.validate(), Err(ScheduleError::Invalid(_))));
++    }
++
++    #[test]
++    fn validate_rejects_out_of_range_clock() {
++        let mut s = daily(24, 0);
++        assert!(matches!(s.validate(), Err(ScheduleError::Invalid(_))));
++        s.at_hour = 23;
++        s.at_minute = 60;
++        assert!(matches!(s.validate(), Err(ScheduleError::Invalid(_))));
++    }
++
++    fn open_test_db() -> Connection {
++        let conn = Connection::open_in_memory().unwrap();
++        conn.execute_batch(include_str!("../migrations/0010_scheduled_scans.sql"))
++            .unwrap();
++        conn
++    }
++
++    #[test]
++    fn insert_then_list_round_trips() {
++        let conn = open_test_db();
++        let s = daily(7, 15);
++        let id = insert(&conn, &s).unwrap();
++        let listed = list_all(&conn).unwrap();
++        assert_eq!(listed.len(), 1);
++        let row = &listed[0];
++        assert_eq!(row.id, id);
++        assert_eq!(row.at_hour, 7);
++        assert_eq!(row.kind, ScheduleKind::Daily);
++    }
++
++    #[test]
++    fn list_due_filters_disabled_and_idle_unsatisfied() {
++        let conn = open_test_db();
++        // s1 enabled, idle gate met → should appear.
++        let mut s1 = daily(0, 0);
++        s1.name = "s1".into();
++        insert(&conn, &s1).unwrap();
++        // s2 enabled but requires 5 min idle.
++        let mut s2 = daily(0, 0);
++        s2.name = "s2".into();
++        s2.idle_min_seconds = 300;
++        insert(&conn, &s2).unwrap();
++        // s3 disabled.
++        let mut s3 = daily(0, 0);
++        s3.name = "s3".into();
++        s3.enabled = false;
++        insert(&conn, &s3).unwrap();
++
++        let now = fixed(2026, 5, 27, 12, 0);
++        let due = list_due(&conn, now, 60).unwrap();
++        assert_eq!(due.len(), 1);
++        assert_eq!(due[0].name, "s1");
++    }
++
++    #[test]
++    fn record_fired_advances_last_fired_at() {
++        let conn = open_test_db();
++        let id = insert(&conn, &daily(0, 0)).unwrap();
++        let before = list_all(&conn).unwrap()[0].last_fired_at;
++        assert!(before.is_none());
++        record_fired(&conn, id).unwrap();
++        let after = list_all(&conn).unwrap()[0].last_fired_at;
++        assert!(after.is_some());
++    }
++
++    #[test]
++    fn round_trip_each_kind_through_db() {
++        let conn = open_test_db();
++        let mut s = daily(1, 2);
++        s.kind = ScheduleKind::Weekly {
++            weekdays: vec![0, 6],
++        };
++        let id = insert(&conn, &s).unwrap();
++        let back = list_all(&conn)
++            .unwrap()
++            .into_iter()
++            .find(|r| r.id == id)
++            .unwrap();
++        assert_eq!(
++            back.kind,
++            ScheduleKind::Weekly {
++                weekdays: vec![0, 6]
++            }
++        );
++
++        let mut s = daily(3, 4);
++        s.kind = ScheduleKind::Monthly { day: 15 };
++        s.name = "monthly".into();
++        let id = insert(&conn, &s).unwrap();
++        let back = list_all(&conn)
++            .unwrap()
++            .into_iter()
++            .find(|r| r.id == id)
++            .unwrap();
++        assert_eq!(back.kind, ScheduleKind::Monthly { day: 15 });
++
++        let mut s = daily(5, 6);
++        s.kind = ScheduleKind::OneShot {
++            at_unix: 1_800_000_000,
++        };
++        s.name = "one".into();
++        let id = insert(&conn, &s).unwrap();
++        let back = list_all(&conn)
++            .unwrap()
++            .into_iter()
++            .find(|r| r.id == id)
++            .unwrap();
++        assert_eq!(
++            back.kind,
++            ScheduleKind::OneShot {
++                at_unix: 1_800_000_000
++            }
++        );
++    }
++}

@@ -35,7 +35,6 @@ use mythkernel::{
     realtime::shields::{ShieldsActor, ShieldsBroker, ShieldsState},
     scan::{ScanOptions, ScanProgress, ScanTarget},
     updater::{
-        abusech::AbuseChUpdater,
         channels::ChannelState,
         database::{DatabaseChannel, DatabaseUpdateProgress, DbProgressCallback},
         engine::{EngineChannel, EngineUpdateAvailable},
@@ -1180,24 +1179,28 @@ pub async fn feed_update_now(
     std::fs::create_dir_all(&feeds_dir).map_err(stringify)?;
     let mut results = Vec::new();
 
-    if let Some(key) = abusech_auth_key.filter(|k| !k.trim().is_empty()) {
-        let updater = AbuseChUpdater::new(key, &feeds_dir);
-        match updater.update().await {
-            Ok(r) => results.push(FeedUpdateResult {
-                feed_id: "abusech".to_string(),
-                parsed_count: r.malwarebazaar_count + r.threatfox_count,
-                merged_count: r.merged_count,
-                elapsed_ms: r.elapsed.as_millis() as u64,
-                error: None,
-            }),
-            Err(e) => results.push(FeedUpdateResult {
-                feed_id: "abusech".to_string(),
-                parsed_count: 0,
-                merged_count: 0,
-                elapsed_ms: 0,
-                error: Some(e.to_string()),
-            }),
-        }
+    // Repo-curated DB (2026-06-21): the raw abuse.ch upstream pull is
+    // disabled. The curated blacklist is delivered as a verified `.bin` on
+    // the GitHub release and refreshed by the database update channel
+    // (Settings → Updates → Virus database / `updater_db_check_now`). A
+    // legacy caller that still passes a key gets a clear, non-fatal
+    // explanation here rather than a silent upstream fetch.
+    if abusech_auth_key
+        .as_deref()
+        .map(|k| !k.trim().is_empty())
+        .unwrap_or(false)
+    {
+        results.push(FeedUpdateResult {
+            feed_id: "abusech".to_string(),
+            parsed_count: 0,
+            merged_count: 0,
+            elapsed_ms: 0,
+            error: Some(
+                "abuse.ch upstream pull is disabled — the curated blacklist is delivered via the \
+                 GitHub release; use Settings → Updates → Virus database to refresh it."
+                    .to_string(),
+            ),
+        });
     }
 
     let nsrl_source = match (nsrl_local, nsrl_url) {

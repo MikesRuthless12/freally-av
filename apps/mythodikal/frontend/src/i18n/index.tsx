@@ -29,14 +29,47 @@
 // today. It's surfaced so a missing-translation review only requires
 // reading the component, not cross-referencing the .ftl file.
 
-import { createContext, useContext, type JSX } from "solid-js";
+import { createContext, useContext, type Accessor, type JSX } from "solid-js";
 import enUS from "./locales/en-US.ftl?raw";
+import { setUiLocale, uiLocale } from "@/stores/uiLocale";
 
-type LocaleId = "en-US";
+// The 18 canonical locales shipped under `./locales/*.ftl`. The picker in
+// Settings → General switches between these; "en-US" is the guaranteed
+// fallback (also imported statically below so it's always present even if
+// the glob ever misses it).
+export type LocaleId =
+  | "en-US"
+  | "ar"
+  | "de"
+  | "es"
+  | "fr"
+  | "hi"
+  | "id"
+  | "it"
+  | "ja"
+  | "ko"
+  | "nl"
+  | "pl"
+  | "pt-BR"
+  | "ru"
+  | "tr"
+  | "uk"
+  | "vi"
+  | "zh-CN";
 
-const KNOWN_LOCALES: Record<LocaleId, string> = {
-  "en-US": enUS,
-};
+// Eagerly load every locale file as raw text. Keys look like
+// `./locales/fr.ftl`; we strip the prefix/suffix to recover the code.
+const RAW_LOCALES = import.meta.glob("./locales/*.ftl", {
+  query: "?raw",
+  import: "default",
+  eager: true,
+}) as Record<string, string>;
+
+const KNOWN_LOCALES: Partial<Record<LocaleId, string>> = { "en-US": enUS };
+for (const [path, source] of Object.entries(RAW_LOCALES)) {
+  const code = path.replace(/^\.\/locales\//, "").replace(/\.ftl$/, "");
+  KNOWN_LOCALES[code as LocaleId] = source;
+}
 
 /**
  * Parse a Fluent file's `id = value` lines into a flat map. Lines that
@@ -72,13 +105,17 @@ function interpolate(template: string, args?: Record<string, string | number>): 
 }
 
 interface LocalizationCtx {
-  locale: LocaleId;
+  /** Reactive accessor for the active locale code. */
+  locale: Accessor<LocaleId>;
+  /** Persist + switch the active locale. */
+  setLocale: (code: LocaleId) => void;
   t: (id: string, fallback?: string, args?: Record<string, string | number>) => string;
 }
 
 const PARSED: Map<LocaleId, Map<string, string>> = new Map();
 for (const id of Object.keys(KNOWN_LOCALES) as LocaleId[]) {
-  PARSED.set(id, parseFtl(KNOWN_LOCALES[id]));
+  const source = KNOWN_LOCALES[id];
+  if (source !== undefined) PARSED.set(id, parseFtl(source));
 }
 
 const Context = createContext<LocalizationCtx | undefined>(undefined);
@@ -96,15 +133,25 @@ function lookup(
 }
 
 /**
- * Provider that wraps the app. Today picks `en-US` unconditionally; the
- * locale-negotiation pass (future TASK) adds navigator.language matching.
+ * Provider that wraps the app. Reads the persisted UI-locale signal
+ * (`@/stores/uiLocale`) so the Settings → General language picker can
+ * switch languages reactively. Falls back to `en-US` when the stored
+ * code isn't one of the bundled locales.
+ *
+ * NOTE: only components that call `t()` re-render on a locale change.
+ * Wiring `t()` into the rest of the UI is a separate phase, so today the
+ * picker persists + flips the active locale without visibly retranslating.
  */
 export function LocalizationProvider(props: { children: JSX.Element }): JSX.Element {
-  const locale: LocaleId = "en-US";
-  const bundle = PARSED.get(locale)!;
+  const locale: Accessor<LocaleId> = () => {
+    const code = uiLocale();
+    return PARSED.has(code as LocaleId) ? (code as LocaleId) : "en-US";
+  };
   const ctx: LocalizationCtx = {
     locale,
-    t: (id, fallback, args) => lookup(bundle, id, fallback, args),
+    setLocale: (code) => setUiLocale(code),
+    t: (id, fallback, args) =>
+      lookup(PARSED.get(locale()) ?? PARSED.get("en-US")!, id, fallback, args),
   };
   return <Context.Provider value={ctx}>{props.children}</Context.Provider>;
 }
@@ -121,7 +168,8 @@ export function useLocalization(): LocalizationCtx {
   if (ctx) return ctx;
   const bundle = PARSED.get("en-US")!;
   return {
-    locale: "en-US",
+    locale: () => "en-US",
+    setLocale: () => {},
     t: (id, fallback, args) => lookup(bundle, id, fallback, args),
   };
 }

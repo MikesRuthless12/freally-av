@@ -235,6 +235,110 @@ impl DatabaseFeedRunner for AbuseChFeedRunner {
     }
 }
 
+/// Adapter wrapping [`crate::updater::curated::CuratedBlacklistUpdater`]
+/// (repo-curated-DB decision, 2026-06-21). Replaces `AbuseChFeedRunner` as
+/// the registered blacklist runner: instead of pulling raw abuse.ch upstream
+/// it downloads the curated `.bin` from the GitHub release, verifies it, and
+/// atomically swaps it in. Reports under feed id `"abusech"` so the existing
+/// per-feed UI row + detector source label (`abusech:hash`) are unchanged.
+pub struct CuratedBlacklistFeedRunner {
+    inner: crate::updater::curated::CuratedBlacklistUpdater,
+}
+
+impl CuratedBlacklistFeedRunner {
+    pub fn new(inner: crate::updater::curated::CuratedBlacklistUpdater) -> Self {
+        Self { inner }
+    }
+}
+
+impl DatabaseFeedRunner for CuratedBlacklistFeedRunner {
+    fn feed_id(&self) -> &str {
+        "abusech"
+    }
+    fn run<'a>(
+        &'a self,
+        progress: DbProgressCallback,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<FeedRunOutcome, String>> + Send + 'a>,
+    > {
+        Box::pin(async move {
+            emit(
+                &progress,
+                "abusech",
+                DatabaseUpdatePhase::Download,
+                0,
+                0,
+                "downloading curated database",
+            );
+            // Forward byte-level download progress into the same Download
+            // phase bar (throttled to ~16 MiB steps inside the updater).
+            let prog = progress.clone();
+            let on_progress = move |done: u64, total: u64| {
+                emit(
+                    &prog,
+                    "abusech",
+                    DatabaseUpdatePhase::Download,
+                    done,
+                    total,
+                    "",
+                );
+            };
+            let report = self
+                .inner
+                .update(&on_progress)
+                .await
+                .map_err(|e| e.to_string())?;
+            if !report.changed {
+                emit(
+                    &progress,
+                    "abusech",
+                    DatabaseUpdatePhase::Swap,
+                    0,
+                    0,
+                    "already up to date",
+                );
+                return Ok(FeedRunOutcome {
+                    entry_count: 0,
+                    last_modified: String::new(),
+                    // Stash the digest so a future short-circuit / audit can
+                    // see what's installed; not an HTTP ETag, but the field's
+                    // role (opaque change token) fits.
+                    etag: report.sha256,
+                    detail: "curated database already current".to_string(),
+                    bytes_changed: false,
+                });
+            }
+            emit(
+                &progress,
+                "abusech",
+                DatabaseUpdatePhase::RebuildIndex,
+                report.entry_count,
+                report.entry_count,
+                "verifying checksum",
+            );
+            emit(
+                &progress,
+                "abusech",
+                DatabaseUpdatePhase::Swap,
+                report.entry_count,
+                report.entry_count,
+                "atomic rename",
+            );
+            Ok(FeedRunOutcome {
+                entry_count: report.entry_count,
+                last_modified: String::new(),
+                etag: report.sha256,
+                detail: format!(
+                    "installed {} curated hashes in {:.1}s",
+                    report.entry_count,
+                    report.elapsed.as_secs_f64()
+                ),
+                bytes_changed: true,
+            })
+        })
+    }
+}
+
 /// Adapter wrapping the existing `NsrlUpdater`. Same shape as
 /// `AbuseChFeedRunner`.
 pub struct NsrlFeedRunner {

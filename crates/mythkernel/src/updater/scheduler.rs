@@ -28,6 +28,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::Notify;
 
 use crate::updater::abusech::AbuseChUpdater;
+use crate::updater::curated::CuratedBlacklistUpdater;
 
 /// Default interval between successful runs (24 hours).
 pub const DEFAULT_INTERVAL: Duration = Duration::from_secs(24 * 60 * 60);
@@ -95,6 +96,47 @@ impl ScheduledFeed for AbuseChScheduledFeed {
                     )
                 })
                 .map_err(|e| e.to_string())
+        })
+    }
+}
+
+/// Periodic adapter around [`CuratedBlacklistUpdater`] (repo-curated-DB
+/// decision, 2026-06-21). Replaces [`AbuseChScheduledFeed`] on the auto-update
+/// timer: each cycle downloads + verifies the curated `.bin` from the release
+/// rather than pulling raw abuse.ch upstream. Reports under name `"abusech"`
+/// for status-file continuity.
+pub struct CuratedBlacklistScheduledFeed {
+    inner: CuratedBlacklistUpdater,
+}
+
+impl CuratedBlacklistScheduledFeed {
+    pub fn new(inner: CuratedBlacklistUpdater) -> Self {
+        Self { inner }
+    }
+}
+
+impl ScheduledFeed for CuratedBlacklistScheduledFeed {
+    fn name(&self) -> &str {
+        "abusech"
+    }
+    fn run<'a>(
+        &'a self,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<String, String>> + Send + 'a>>
+    {
+        Box::pin(async move {
+            // The periodic path doesn't surface byte-level progress (no UI
+            // bar subscribes), so pass a no-op progress sink.
+            let noop = |_done: u64, _total: u64| {};
+            let report = self.inner.update(&noop).await.map_err(|e| e.to_string())?;
+            if report.changed {
+                Ok(format!(
+                    "installed {} curated hashes in {:.1}s",
+                    report.entry_count,
+                    report.elapsed.as_secs_f64()
+                ))
+            } else {
+                Ok("curated database already current".to_string())
+            }
         })
     }
 }

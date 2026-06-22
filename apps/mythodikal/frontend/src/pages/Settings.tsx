@@ -39,10 +39,37 @@ import type {
   UpdateChannelStateView,
   UpdaterStatusView,
 } from "@/ipc/types";
+import { useLocalization, type LocaleId } from "@/i18n";
 
 type Tab = "general" | "scanning" | "updates" | "privacy" | "about";
 
+// UI-language options for the Settings → General picker. Fixed order:
+// English first, then alphabetical by English language name. The order
+// must NOT change with the selected language; each option is labelled by
+// its native endonym. Codes match `src/i18n/locales/<code>.ftl`.
+const UI_LOCALES: { code: LocaleId; name: string }[] = [
+  { code: "en-US", name: "English" },
+  { code: "ar", name: "العربية" },
+  { code: "zh-CN", name: "简体中文" },
+  { code: "nl", name: "Nederlands" },
+  { code: "fr", name: "Français" },
+  { code: "de", name: "Deutsch" },
+  { code: "hi", name: "हिन्दी" },
+  { code: "id", name: "Bahasa Indonesia" },
+  { code: "it", name: "Italiano" },
+  { code: "ja", name: "日本語" },
+  { code: "ko", name: "한국어" },
+  { code: "pl", name: "Polski" },
+  { code: "pt-BR", name: "Português (Brasil)" },
+  { code: "ru", name: "Русский" },
+  { code: "es", name: "Español" },
+  { code: "tr", name: "Türkçe" },
+  { code: "uk", name: "Українська" },
+  { code: "vi", name: "Tiếng Việt" },
+];
+
 const Settings: Component = () => {
+  const { locale, setLocale } = useLocalization();
   const [tab, setTab] = createSignal<Tab>("general");
   const [snap, { refetch }] = createResource<SettingsSnapshot>(settingsGet);
   const [updater, { refetch: refetchUpdater }] =
@@ -201,6 +228,10 @@ const Settings: Component = () => {
       <Show when={snap()}>
         <Show when={tab() === "general"}>
           <section class="space-y-3 rounded-md border border-myth-line bg-myth-bg-1 p-4 text-sm text-myth-text-md">
+            <LanguageSelect
+              value={locale()}
+              onChange={(code) => setLocale(code)}
+            />
             <Toggle
               label="Start with operating system"
               value={autostart()?.enabled ?? false}
@@ -509,6 +540,30 @@ const Settings: Component = () => {
     </div>
   );
 };
+
+const LanguageSelect: Component<{
+  value: LocaleId;
+  onChange: (code: LocaleId) => void;
+}> = (props) => (
+  <label class="flex flex-col gap-1 text-sm">
+    <span class="flex items-center justify-between gap-3">
+      <span class="text-myth-text-hi">Interface language</span>
+      <select
+        class="rounded-sm border border-myth-line bg-myth-bg-0 px-2 py-1 font-mono text-xs text-myth-text-hi"
+        value={props.value}
+        onChange={(e) => props.onChange(e.currentTarget.value as LocaleId)}
+      >
+        <For each={UI_LOCALES}>
+          {(opt) => <option value={opt.code}>{opt.name}</option>}
+        </For>
+      </select>
+    </span>
+    <span class="text-xs text-myth-text-lo">
+      Sets the language used for the app interface. Translations are still
+      being wired in, so the visible text stays English for now.
+    </span>
+  </label>
+);
 
 const Toggle: Component<{
   label: string;

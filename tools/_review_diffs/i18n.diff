@@ -1,0 +1,203 @@
+diff --git a/apps/mythodikal/frontend/src/i18n/index.tsx b/apps/mythodikal/frontend/src/i18n/index.tsx
+new file mode 100644
+index 0000000..c204d34
+--- /dev/null
++++ b/apps/mythodikal/frontend/src/i18n/index.tsx
+@@ -0,0 +1,197 @@
++// Mythodikal Anti-Virus — localisation scaffolding (TASK-089).
++//
++// Solid.js context + `useLocalization()` hook. Loads the seed
++// `en-US.ftl` at module init and exposes `t(id, fallback?, args?)` for
++// components to call. The implementation is deliberately tiny so it
++// adds **zero npm dependencies** — Fluent's full machinery (plural
++// rules, term references, BiDi isolates) is overkill for the v0.10
++// release and would require pinning @fluent/bundle + langneg + a
++// CLDR data file. The parser here handles the subset of Fluent syntax
++// we actually use today: `id = value` lines, `{ $arg }` interpolation,
++// and `{ $count -> [zero] … [one] … *[other] … }` selector blocks.
++//
++// When the locale set grows past one (TASK-089 ships en-US only — FR
++// for other locales lives in follow-up PRs), the right move is to swap
++// this stub for `@fluent/bundle` + `@fluent/langneg`. The public
++// API — `useLocalization().t(id, fallback?, args?)` — is stable so the
++// retrofit is mechanical.
++//
++// Migration pattern for component authors:
++//
++// ```tsx
++// const { t } = useLocalization();
++// return <button>{t("button-scan-now", "Scan now")}</button>;
++// ```
++//
++// `fallback` is the inline English copy that ships in the component
++// today. It's surfaced so a missing-translation review only requires
++// reading the component, not cross-referencing the .ftl file.
++
++import { createContext, useContext, type JSX } from "solid-js";
++import enUS from "./locales/en-US.ftl?raw";
++
++type LocaleId = "en-US";
++
++interface SelectorBranch {
++  match: string;
++  value: string;
++  isDefault: boolean;
++}
++
++interface Entry {
++  raw: string;
++  selectors?: SelectorBranch[];
++  selectorArg?: string;
++}
++
++const KNOWN_LOCALES: Record<LocaleId, string> = {
++  "en-US": enUS,
++};
++
++function parseFtl(source: string): Map<string, Entry> {
++  const entries = new Map<string, Entry>();
++  // Drop comments + blank lines. Fluent comments start with `#`.
++  const lines = source.split("\n");
++  let current: { id: string; lines: string[] } | null = null;
++  const flush = () => {
++    if (!current) return;
++    const body = current.lines.join("\n").trim();
++    if (body.includes("->")) {
++      const selectorMatch = body.match(/\{\s*\$(\w+)\s*->/);
++      const selectorArg = selectorMatch?.[1];
++      const selectors: SelectorBranch[] = [];
++      const branchPattern = /(\*?)\[(\w+)\]\s*([^\[\*\}]+)/g;
++      let m: RegExpExecArray | null;
++      while ((m = branchPattern.exec(body)) !== null) {
++        const [, marker, key, value] = m;
++        if (key === undefined || value === undefined) continue;
++        selectors.push({
++          isDefault: marker === "*",
++          match: key,
++          value: value.trim(),
++        });
++      }
++      entries.set(current.id, { raw: body, selectors, selectorArg });
++    } else {
++      entries.set(current.id, { raw: body });
++    }
++    current = null;
++  };
++
++  for (const rawLine of lines) {
++    if (rawLine.trim().startsWith("#")) continue;
++    if (rawLine.trim() === "") {
++      flush();
++      continue;
++    }
++    const match = rawLine.match(/^([a-z][a-z0-9-]*)\s*=\s*(.*)$/i);
++    if (match) {
++      const id = match[1];
++      const value = match[2];
++      if (id === undefined || value === undefined) continue;
++      flush();
++      current = { id, lines: [value] };
++    } else if (current && rawLine.startsWith("    ")) {
++      // Continuation line — Fluent indents continuation by four spaces.
++      current.lines.push(rawLine.trim());
++    }
++  }
++  flush();
++  return entries;
++}
++
++function format(entry: Entry, args?: Record<string, string | number>): string {
++  // Selector form: `{ $count -> [one] one finger *[other] {$count} fingers }`.
++  if (entry.selectors && entry.selectorArg && args) {
++    const value = args[entry.selectorArg];
++    const stringMatch = typeof value === "number" ? cardinalCategory(value) : String(value);
++    const exact = entry.selectors.find((s) => s.match === String(value));
++    const category = entry.selectors.find((s) => s.match === stringMatch);
++    const def = entry.selectors.find((s) => s.isDefault);
++    const branch = exact ?? category ?? def;
++    if (branch) {
++      return interpolate(branch.value, args);
++    }
++  }
++  return interpolate(entry.raw, args);
++}
++
++function cardinalCategory(n: number): string {
++  // English cardinal plural rules — CLDR-equivalent slim version.
++  if (n === 0) return "zero";
++  if (n === 1) return "one";
++  return "other";
++}
++
++function interpolate(template: string, args?: Record<string, string | number>): string {
++  if (!args) return template;
++  return template.replace(/\{\s*\$(\w+)\s*\}/g, (_, name: string) => {
++    const value = args[name];
++    return value === undefined ? `{$${name}}` : String(value);
++  });
++}
++
++interface LocalizationCtx {
++  locale: LocaleId;
++  t: (id: string, fallback?: string, args?: Record<string, string | number>) => string;
++}
++
++const PARSED: Map<LocaleId, Map<string, Entry>> = new Map();
++for (const id of Object.keys(KNOWN_LOCALES) as LocaleId[]) {
++  PARSED.set(id, parseFtl(KNOWN_LOCALES[id]));
++}
++
++const Context = createContext<LocalizationCtx | undefined>(undefined);
++
++/**
++ * Provider that wraps the app. Today picks `en-US` unconditionally; the
++ * locale-negotiation pass (future TASK) adds navigator.language matching.
++ */
++export function LocalizationProvider(props: { children: JSX.Element }): JSX.Element {
++  const locale: LocaleId = "en-US";
++  const bundle = PARSED.get(locale)!;
++  const ctx: LocalizationCtx = {
++    locale,
++    t: (id, fallback, args) => {
++      const entry = bundle.get(id);
++      if (entry) return format(entry, args);
++      return fallback ?? id;
++    },
++  };
++  return <Context.Provider value={ctx}>{props.children}</Context.Provider>;
++}
++
++/**
++ * Hook for components. Returns `{ locale, t }`.
++ *
++ * Outside a provider — for example a unit test importing a leaf
++ * component — `t(id, fallback)` falls back to the inline English
++ * copy so the component still renders.
++ */
++export function useLocalization(): LocalizationCtx {
++  const ctx = useContext(Context);
++  if (ctx) return ctx;
++  // Provider-less fallback: parse en-US once on first call.
++  const bundle = PARSED.get("en-US")!;
++  return {
++    locale: "en-US",
++    t: (id, fallback, args) => {
++      const entry = bundle.get(id);
++      if (entry) return format(entry, args);
++      return fallback ?? id;
++    },
++  };
++}
++
++// Re-export for ad-hoc lookups outside a Solid component (engine event
++// handlers, etc.).
++export function translate(
++  id: string,
++  fallback?: string,
++  args?: Record<string, string | number>,
++): string {
++  const bundle = PARSED.get("en-US")!;
++  const entry = bundle.get(id);
++  if (entry) return format(entry, args);
++  return fallback ?? id;
++}

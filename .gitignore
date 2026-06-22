@@ -44,6 +44,8 @@ docs/product-roadmap.md
 docs/gtm.md
 docs/launch-checklists/
 Mythodikal-Build-Prompts-Guide.md
+# Never git-track any prompt guide — operator-only docs (matches "prompt" anywhere, any case).
+*[Pp][Rr][Oo][Mm][Pp][Tt]*.md
 Mythodikal-Feature-Ideas-Master-List.md
 Mythodikal-Feature-Integration-Plan.md
 RESEARCH-DOSSIER.md

@@ -1,0 +1,196 @@
+diff --git a/crates/mythkernel/src/detect/net_ioc.rs b/crates/mythkernel/src/detect/net_ioc.rs
+new file mode 100644
+index 0000000..fdc0de3
+--- /dev/null
++++ b/crates/mythkernel/src/detect/net_ioc.rs
+@@ -0,0 +1,190 @@
++//! Network IOC check (TASK-148, FR-145, Phase 10).
++//!
++//! One-shot at scan time: pull the current set of active TCP
++//! connections, match each remote endpoint against the ThreatFox IOC
++//! feed (loaded via the engine updater), and surface flagged
++//! connections as `info`-severity findings ("a process on this box has
++//! an active TCP session to a known C2 IP").
++//!
++//! This module owns the **pure matcher logic** + the cross-platform
++//! `ActiveConnection` shape. Per-OS connection enumeration (Windows
++//! `GetExtendedTcpTable`, macOS `proc_pidinfo`, Linux `/proc/net/tcp`)
++//! lives in the daemon side and feeds into [`match_iocs`] here so the
++//! matcher stays trivially testable.
++
++use std::collections::HashSet;
++use std::net::IpAddr;
++
++use serde::{Deserialize, Serialize};
++
++/// One active TCP connection observed on the host.
++#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
++pub struct ActiveConnection {
++    pub local_ip: IpAddr,
++    pub local_port: u16,
++    pub remote_ip: IpAddr,
++    pub remote_port: u16,
++    /// Owning process id when knowable. `None` on platforms where
++    /// caller didn't have permission to resolve the pid (Linux
++    /// `/proc/net/tcp` exposes only the inode; the engine joins inode
++    /// → pid via `/proc/<pid>/fd/*`).
++    pub pid: Option<u32>,
++    pub process_name: Option<String>,
++}
++
++/// IOC feed loaded from disk (ThreatFox export). Each IP entry is the
++/// `remote_ip` to flag; each domain entry is matched only when the
++/// caller has resolved the connection's remote DNS name (deferred to
++/// the future passive-DNS feature — for now the matcher uses IPs).
++#[derive(Debug, Clone, Default, Serialize, Deserialize)]
++pub struct IocList {
++    pub ips: HashSet<IpAddr>,
++    pub domains: HashSet<String>,
++}
++
++impl IocList {
++    pub fn new() -> Self {
++        Self::default()
++    }
++
++    pub fn add_ip(&mut self, ip: IpAddr) {
++        self.ips.insert(ip);
++    }
++
++    pub fn add_domain(&mut self, domain: impl Into<String>) {
++        self.domains.insert(domain.into().to_ascii_lowercase());
++    }
++
++    pub fn ip_count(&self) -> usize {
++        self.ips.len()
++    }
++
++    pub fn domain_count(&self) -> usize {
++        self.domains.len()
++    }
++}
++
++/// One match between an active connection and the IOC feed.
++#[derive(Debug, Clone, PartialEq, Eq)]
++pub struct NetIocMatch {
++    pub connection: ActiveConnection,
++    pub matched_ip: IpAddr,
++    /// Future: when domain-keyed matches land, this becomes
++    /// `Option<String>`. Today every match is IP-keyed.
++    pub source: &'static str,
++}
++
++/// Match `connections` against `iocs`. Returns one row per matching
++/// connection-side IP. Caller turns each row into an `info`-severity
++/// finding via the existing findings-write path.
++pub fn match_iocs(connections: &[ActiveConnection], iocs: &IocList) -> Vec<NetIocMatch> {
++    let mut out = Vec::new();
++    if iocs.ips.is_empty() {
++        return out;
++    }
++    for conn in connections {
++        if iocs.ips.contains(&conn.remote_ip) {
++            out.push(NetIocMatch {
++                connection: conn.clone(),
++                matched_ip: conn.remote_ip,
++                source: "threatfox",
++            });
++        }
++    }
++    out
++}
++
++/// Parse the textual ThreatFox IP-list export (one IP per line, comments
++/// starting with `#`, optional trailing whitespace). Returns the count
++/// of IPs added so the updater can log the feed size.
++pub fn ingest_text_ip_list(iocs: &mut IocList, body: &str) -> usize {
++    let mut added = 0;
++    for line in body.lines() {
++        let line = line.trim();
++        if line.is_empty() || line.starts_with('#') {
++            continue;
++        }
++        // Strip trailing comments / fields after whitespace.
++        let candidate = line.split_whitespace().next().unwrap_or(line);
++        if let Ok(ip) = candidate.parse::<IpAddr>() {
++            iocs.ips.insert(ip);
++            added += 1;
++        }
++    }
++    added
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    use std::net::Ipv4Addr;
++
++    fn conn(remote: Ipv4Addr) -> ActiveConnection {
++        ActiveConnection {
++            local_ip: Ipv4Addr::new(10, 0, 0, 1).into(),
++            local_port: 12345,
++            remote_ip: remote.into(),
++            remote_port: 443,
++            pid: Some(42),
++            process_name: Some("test".into()),
++        }
++    }
++
++    #[test]
++    fn empty_ioc_list_yields_no_matches() {
++        let cs = vec![conn(Ipv4Addr::new(1, 2, 3, 4))];
++        let iocs = IocList::new();
++        assert!(match_iocs(&cs, &iocs).is_empty());
++    }
++
++    #[test]
++    fn match_finds_active_connection_to_flagged_ip() {
++        let bad = Ipv4Addr::new(185, 220, 101, 7);
++        let cs = vec![
++            conn(Ipv4Addr::new(8, 8, 8, 8)),
++            conn(bad),
++            conn(Ipv4Addr::new(1, 1, 1, 1)),
++        ];
++        let mut iocs = IocList::new();
++        iocs.add_ip(bad.into());
++        let hits = match_iocs(&cs, &iocs);
++        assert_eq!(hits.len(), 1);
++        assert_eq!(hits[0].matched_ip, IpAddr::from(bad));
++        assert_eq!(hits[0].source, "threatfox");
++    }
++
++    #[test]
++    fn ingest_skips_comments_and_blanks() {
++        let body = "# header comment\n\n1.2.3.4\n5.6.7.8 # trailing\n\nnot_an_ip\n";
++        let mut iocs = IocList::new();
++        let n = ingest_text_ip_list(&mut iocs, body);
++        assert_eq!(n, 2);
++        assert_eq!(iocs.ip_count(), 2);
++        assert!(iocs.ips.contains(&"1.2.3.4".parse::<IpAddr>().unwrap()));
++        assert!(iocs.ips.contains(&"5.6.7.8".parse::<IpAddr>().unwrap()));
++    }
++
++    #[test]
++    fn add_domain_lower_cases() {
++        let mut iocs = IocList::new();
++        iocs.add_domain("EVIL.example.COM");
++        assert_eq!(iocs.domain_count(), 1);
++        assert!(iocs.domains.contains("evil.example.com"));
++    }
++
++    #[test]
++    fn match_does_not_panic_on_ipv6() {
++        let cs = vec![ActiveConnection {
++            local_ip: "::1".parse().unwrap(),
++            local_port: 1,
++            remote_ip: "2001:db8::1".parse().unwrap(),
++            remote_port: 443,
++            pid: None,
++            process_name: None,
++        }];
++        let mut iocs = IocList::new();
++        iocs.add_ip("2001:db8::1".parse().unwrap());
++        let hits = match_iocs(&cs, &iocs);
++        assert_eq!(hits.len(), 1);
++    }
++}
