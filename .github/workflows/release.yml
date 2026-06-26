@@ -126,7 +126,7 @@ jobs:
       - name: Build & sign Tauri bundles
         # Pinned to a commit SHA per sec-review H1. Update only when
         # auditing the new tauri-action release diff.
-        uses: tauri-apps/tauri-action@9a2e3bd86a76cfe263e0f5b3a1ad14fa5f72e62c # v0.5.21
+        uses: tauri-apps/tauri-action@8c94c894075e92c8a2b668b2d35c57e1e38cfdfb # v0.5.21
         env:
           # ed25519 signing keypair pulled from repo secrets. The
           # `TAURI_SIGNING_PRIVATE_KEY` value is the base64-encoded contents
