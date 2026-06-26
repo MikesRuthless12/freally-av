@@ -5,7 +5,7 @@
   "identifier": "com.mythodikal.av",
   "build": {
     "beforeDevCommand": "pnpm -C ../frontend dev",
-    "beforeBuildCommand": "pnpm -C ../frontend build",
+    "beforeBuildCommand": "pnpm -C frontend build",
     "devUrl": "http://localhost:1420",
     "frontendDist": "../frontend/dist"
   },
