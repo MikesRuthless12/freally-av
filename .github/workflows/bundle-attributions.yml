@@ -22,6 +22,11 @@ jobs:
   generate:
     name: Generate attribution files
     runs-on: ubuntu-latest
+    # The "Attach to release" step below uploads the four attribution files to
+    # the GitHub Release via softprops/action-gh-release, which needs write
+    # access to release assets. The workflow-level default stays `read`.
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
