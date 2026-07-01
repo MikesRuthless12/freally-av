@@ -38,7 +38,7 @@ pub struct FsEvent {
     pub inode: u64,
     /// `stat.st_mtim` in nanoseconds. 0 when unavailable. i64 (not
     /// i128) for parity with the JSON-over-XPC IPC frame at
-    /// `mythkernel::ipc::macesf::NotifyEvent::mtime_ns`.
+    /// `freallykernel::ipc::macesf::NotifyEvent::mtime_ns`.
     pub mtime_ns: i64,
     /// `stat.st_size`. 0 when unavailable.
     pub size: u64,
@@ -92,7 +92,7 @@ impl FsEventsHandle {
         // / FSEventStreamStart wire-up lives in the macOS-runtime
         // validation pass — this Windows-built foundation can't link
         // against CoreServices. The vendored journal subscriber at
-        // `mythkernel::platform::mac::journal::subscriber` already
+        // `freallykernel::platform::mac::journal::subscriber` already
         // owns the FFI; the daemon's runtime loop will wrap it.
         Ok(Self {
             mode_label: "fsevents (observe)".to_string(),
@@ -150,11 +150,11 @@ mod tests {
 
     #[cfg(target_os = "macos")]
     #[test]
-    fn flag_constants_agree_with_mythkernel_vendored_set() {
-        // On macOS hosts the mythkernel-vendored constants compile;
+    fn flag_constants_agree_with_freallykernel_vendored_set() {
+        // On macOS hosts the freallykernel-vendored constants compile;
         // cross-check the daemon copy against them so a future edit
         // to either side stays in sync.
-        use mythkernel::platform::mac::journal::flags as kjf;
+        use freallykernel::platform::mac::journal::flags as kjf;
         assert_eq!(flags::ITEM_CREATED, kjf::kFSEventStreamEventFlagItemCreated);
         assert_eq!(flags::ITEM_REMOVED, kjf::kFSEventStreamEventFlagItemRemoved);
         assert_eq!(flags::ITEM_RENAMED, kjf::kFSEventStreamEventFlagItemRenamed);

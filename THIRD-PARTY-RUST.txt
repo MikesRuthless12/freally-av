@@ -1,7 +1,7 @@
-MYTHODIKAL ANTI-VIRUS — RUST CRATE ATTRIBUTIONS
+FREALLY ANTI-VIRUS — RUST CRATE ATTRIBUTIONS
 ================================================
 
-This file lists every Rust crate compiled into Mythodikal Anti-Virus,
+This file lists every Rust crate compiled into Freally Anti-Virus,
 together with its version, license, and (where the upstream license
 requires) the full text of that license. Generated automatically by
 `cargo about generate about.hbs` per `about.toml`. Do not hand-edit;

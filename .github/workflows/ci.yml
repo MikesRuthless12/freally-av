@@ -61,7 +61,7 @@ jobs:
         with:
           node-version: 20
           cache: pnpm
-          cache-dependency-path: apps/mythodikal/frontend/pnpm-lock.yaml
+          cache-dependency-path: apps/freally/frontend/pnpm-lock.yaml
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -81,7 +81,7 @@ jobs:
             cargo-${{ matrix.os }}-
 
       - name: Install frontend dependencies
-        run: pnpm -C apps/mythodikal/frontend install --frozen-lockfile
+        run: pnpm -C apps/freally/frontend install --frozen-lockfile
 
       - name: cargo fmt
         run: cargo fmt --all -- --check
@@ -93,10 +93,10 @@ jobs:
         run: cargo test --workspace --no-fail-fast
 
       - name: Frontend typecheck
-        run: pnpm -C apps/mythodikal/frontend typecheck
+        run: pnpm -C apps/freally/frontend typecheck
 
       - name: Frontend build
-        run: pnpm -C apps/mythodikal/frontend build
+        run: pnpm -C apps/freally/frontend build
 
   cargo-deny:
     name: cargo-deny (licenses + advisories)

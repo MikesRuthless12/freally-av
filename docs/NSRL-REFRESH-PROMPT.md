@@ -69,8 +69,8 @@ Expect a single `.db` SQLite file inside, e.g. `RDS_$($NSRL_VERSION)_modern_mini
 ```powershell
 $PREV_NSRL_VERSION = "2026.03.1"  # whatever the prior was
 Move-Item `
-  "C:\Users\miken\Desktop\Havoc Software\MythodikalAV\hash_database\nsrl.sqlite" `
-  "C:\Users\miken\Desktop\Havoc Software\MythodikalAV\hash_database\nsrl-$PREV_NSRL_VERSION.sqlite.bak"
+  "C:\Users\miken\Desktop\Havoc Software\FreallyAV\hash_database\nsrl.sqlite" `
+  "C:\Users\miken\Desktop\Havoc Software\FreallyAV\hash_database\nsrl-$PREV_NSRL_VERSION.sqlite.bak"
 ```
 
 Reversible — old version stays as `.bak` until you confirm new run is good.
@@ -78,12 +78,12 @@ Reversible — old version stays as `.bak` until you confirm new run is good.
 ### Step 4 — Run the NSRL ingest
 
 ```powershell
-cd "C:\Users\miken\Desktop\Havoc Software\MythodikalAV\tools\feed-builder"
+cd "C:\Users\miken\Desktop\Havoc Software\FreallyAV\tools\feed-builder"
 .\target\release\feed-builder.exe `
   --db D:\feed-builder\feed-builder.sqlite `
   nsrl `
   --rds "E:\feed-builder\nsrl\extracted_$NSRL_VERSION\RDS_$($NSRL_VERSION)_modern_minimal.db" `
-  --out "C:\Users\miken\Desktop\Havoc Software\MythodikalAV\hash_database\nsrl.sqlite" `
+  --out "C:\Users\miken\Desktop\Havoc Software\FreallyAV\hash_database\nsrl.sqlite" `
   --chunk-size 200000 `
   > D:\feed-builder\nsrl_$($NSRL_VERSION).log 2>&1
 ```
@@ -98,7 +98,7 @@ streams to disk at ~1.5 GB / 10 min, eventually checkpointing the final
 ### Step 5 — Verify the new nsrl.sqlite
 
 ```powershell
-python "C:\Users\miken\Desktop\Havoc Software\MythodikalAV\hash_database\verify_nsrl.py"
+python "C:\Users\miken\Desktop\Havoc Software\FreallyAV\hash_database\verify_nsrl.py"
 ```
 
 Expected output:
@@ -114,7 +114,7 @@ STOP if anything looks structurally wrong.
 ```powershell
 $WL_VERSION = "v$NSRL_VERSION"  # e.g. v2026.06.1
 
-cd "C:\Users\miken\Desktop\Havoc Software\MythodikalAV\tools\feed-builder"
+cd "C:\Users\miken\Desktop\Havoc Software\FreallyAV\tools\feed-builder"
 .\target\release\feed-builder.exe consolidate `
   --src-db ..\..\hash_database\MythAV-HashDB.sqlite `
   --src-nsrl ..\..\hash_database\nsrl.sqlite `
@@ -135,10 +135,10 @@ ETA: 15-25 min.
 
 ```python
 import sqlite3
-db = r'C:\Users\miken\Desktop\Havoc Software\MythodikalAV\hash_database\myth-whitelist.sqlite'
+db = r'C:\Users\miken\Desktop\Havoc Software\FreallyAV\hash_database\myth-whitelist.sqlite'
 c = sqlite3.connect(f'file:{db}?mode=ro', uri=True)
 n = c.execute('SELECT COUNT(*) FROM nsrl_samples').fetchone()[0]
-meta = dict(c.execute('SELECT key, value FROM myth_meta').fetchall())
+meta = dict(c.execute('SELECT key, value FROM freally_meta').fetchall())
 print(f'whitelist rows={n:,} version={meta["artifact_version"]}')
 assert n >= 70_000_000
 ```
@@ -148,7 +148,7 @@ STOP if low.
 ### Step 8 — Publish whitelist GitHub release (MAINTAINER ACK)
 
 ```powershell
-cd "C:\Users\miken\Desktop\Havoc Software\MythodikalAV"
+cd "C:\Users\miken\Desktop\Havoc Software\FreallyAV"
 $STG = "release-staging-whitelist-$WL_VERSION"
 New-Item -ItemType Directory -Path $STG -Force | Out-Null
 
@@ -161,7 +161,7 @@ git tag -a "whitelist-$WL_VERSION" -m "NSRL whitelist refresh $WL_VERSION"
 git push origin "whitelist-$WL_VERSION"
 
 gh release create "whitelist-$WL_VERSION" `
-  --title "MythodikalAV Whitelist $WL_VERSION (NSRL $NSRL_VERSION)" `
+  --title "FreallyAV Whitelist $WL_VERSION (NSRL $NSRL_VERSION)" `
   --notes "Refreshed NIST NSRL whitelist. Row count: $n. Source: NSRL RDSv3 $NSRL_VERSION. Optional download for end users wanting faster scans (skips known-good files)." `
   "$STG\myth-whitelist-$WL_VERSION.sqlite.zst" `
   "$STG\SHA256SUMS.txt"

@@ -16,7 +16,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-use mythkernel::ipc::macesf::NotifySource;
+use freallykernel::ipc::macesf::NotifySource;
 
 /// Dedup-window length. Spec: 50 ms. An event from one source that
 /// hasn't been corroborated by the other within this window is
@@ -31,7 +31,7 @@ pub struct NormalizedEvent {
     pub source: NotifySource,
     pub path: PathBuf,
     /// Dedup key — `(inode, mtime_ns, size)`. i64 ns since epoch
-    /// matches the IPC frame at `mythkernel::ipc::macesf::NotifyEvent`.
+    /// matches the IPC frame at `freallykernel::ipc::macesf::NotifyEvent`.
     pub inode: u64,
     pub mtime_ns: i64,
     pub size: u64,

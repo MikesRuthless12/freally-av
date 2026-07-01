@@ -1,0 +1,28 @@
+[package]
+name = "freallyctl"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license-file.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Freally Anti-Virus command-line interface"
+publish = false
+
+[[bin]]
+name = "freallyctl"
+path = "src/main.rs"
+
+[dependencies]
+clap = { workspace = true }
+anyhow = { workspace = true }
+freallykernel = { path = "../freallykernel" }
+tokio = { workspace = true }
+serde_json = { workspace = true }
+rusqlite = { workspace = true }
+# Pulled in so the CLI surfaces engine `tracing::info!()` lines on
+# stderr — without it walker fallback / USN rotation / feed progress
+# would be silent.
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }

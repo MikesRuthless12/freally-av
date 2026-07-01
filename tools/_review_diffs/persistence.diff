@@ -1,8 +1,8 @@
-diff --git a/crates/mythkernel/src/detect/persistence.rs b/crates/mythkernel/src/detect/persistence.rs
+diff --git a/crates/freallykernel/src/detect/persistence.rs b/crates/freallykernel/src/detect/persistence.rs
 new file mode 100644
 index 0000000..2a7c6a4
 --- /dev/null
-+++ b/crates/mythkernel/src/detect/persistence.rs
++++ b/crates/freallykernel/src/detect/persistence.rs
 @@ -0,0 +1,436 @@
 +//! Persistence-mechanism inventory (TASK-144, FR-137, Phase 10).
 +//!

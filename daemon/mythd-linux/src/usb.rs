@@ -2,7 +2,7 @@
 //!
 //! Subscribes to udev `subsystem=usb` + `subsystem=block` events.
 //! Joins the USB device and block-device events by parent path to
-//! produce a single [`mythkernel::usb::UsbInsertEvent`].
+//! produce a single [`freallykernel::usb::UsbInsertEvent`].
 //!
 //! Per § 1.5.4: **read-only**, no filter driver — udev is a user-mode
 //! event source. The daemon merely observes; user opts in to scan
@@ -12,7 +12,7 @@
 //! flagged port writes `0` to `bConfigurationValue` to unbind
 //! interfaces, leaving the device powered.
 
-use mythkernel::usb::{UsbInsertEvent, UsbWatcher, UsbWatcherError};
+use freallykernel::usb::{UsbInsertEvent, UsbWatcher, UsbWatcherError};
 
 pub struct LinuxUsbWatcher {
     pub stopped: bool,

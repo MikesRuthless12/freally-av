@@ -14,7 +14,7 @@
 //! [`FanotifyError::Unsupported`] from every entry point.
 //!
 //! Per § 1.5.4: no kernel module. fanotify is user-mode-loaded — the
-//! syscall is in the kernel but the consumer is `mythd` running with
+//! syscall is in the kernel but the consumer is `freallyd` running with
 //! `CAP_SYS_ADMIN`.
 
 use std::path::PathBuf;

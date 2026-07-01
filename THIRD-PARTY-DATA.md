@@ -1,6 +1,6 @@
 # Third-Party Data Sources
 
-Mythodikal Anti-Virus pulls public threat intelligence and goodware allowlists from the sources documented below. Every source is selected for **commercial redistribution-friendly licensing** so that compiled binaries shipped under `LICENSE.md` are clean.
+Freally Anti-Virus pulls public threat intelligence and goodware allowlists from the sources documented below. Every source is selected for **commercial redistribution-friendly licensing** so that compiled binaries shipped under `LICENSE.md` are clean.
 
 For deeper analysis of why each source was chosen — and what alternatives were considered and rejected — see `RESEARCH-DOSSIER.md` § 3.
 
@@ -16,7 +16,7 @@ For deeper analysis of why each source was chosen — and what alternatives were
 | Used for | Hash blacklist (MalwareBazaar bulk dumps + ThreatFox JSON), C2 IOC matching (ThreatFox), URL hashes (URLhaus) |
 | License posture | **Free for commercial use** per the [abuse.ch FAQ](https://bazaar.abuse.ch/faq/). Donations to abuse.ch are encouraged and the project has done so. |
 | Update frequency | Hourly (mirrored to our feed CDN) |
-| Mythodikal entry points | `crates/mythkernel/src/updater/abusech.rs` (TASK-022); `crates/mythkernel/src/detect/hash_blacklist.rs` (TASK-020); `crates/mythkernel/src/detect/net_ioc.rs` (TASK-148) |
+| Freally entry points | `crates/freallykernel/src/updater/abusech.rs` (TASK-022); `crates/freallykernel/src/detect/hash_blacklist.rs` (TASK-020); `crates/freallykernel/src/detect/net_ioc.rs` (TASK-148) |
 
 ### NIST NSRL (National Software Reference Library)
 
@@ -26,7 +26,7 @@ For deeper analysis of why each source was chosen — and what alternatives were
 | Used for | Goodware allowlist — known-good system-binary hashes that are skipped during scans |
 | License posture | **U.S. Government public domain.** No license restrictions. Citation appreciated. |
 | Update frequency | NIST publishes RDS dumps quarterly; we mirror with each release. |
-| Mythodikal entry points | `crates/mythkernel/src/updater/nsrl.rs` (TASK-023); `crates/mythkernel/src/detect/goodware_allowlist.rs` (TASK-021) |
+| Freally entry points | `crates/freallykernel/src/updater/nsrl.rs` (TASK-023); `crates/freallykernel/src/detect/goodware_allowlist.rs` (TASK-021) |
 
 ### YARA-Forge — `core` tier only
 
@@ -36,7 +36,7 @@ For deeper analysis of why each source was chosen — and what alternatives were
 | Used for | Bundled YARA-rule pack covering common consumer malware families |
 | License posture | YARA-Forge aggregates rules under multiple licenses. We ship **only** the `core` tier and additionally **license-scrub in CI** (`scripts/license-scrub-yara.ts`, TASK-066/067). Rules whose metadata license is **not** one of MIT / Apache-2.0 / BSD / CC0 / MPL-2.0 / Unicode-3.0 are **rejected at build time**. |
 | Update frequency | Pinned per release; nightly drift check posts a GitHub issue if upstream relicenses. |
-| Mythodikal entry points | `crates/mythkernel/src/updater/yara_forge.rs` (TASK-066); `crates/mythkernel/src/detect/yara_engine.rs` (TASK-065); `.github/workflows/license-scrub.yml` (TASK-067) |
+| Freally entry points | `crates/freallykernel/src/updater/yara_forge.rs` (TASK-066); `crates/freallykernel/src/detect/yara_engine.rs` (TASK-065); `.github/workflows/license-scrub.yml` (TASK-067) |
 
 ### loldrivers.io
 
@@ -46,7 +46,7 @@ For deeper analysis of why each source was chosen — and what alternatives were
 | Used for | BYOVD (Bring-Your-Own-Vulnerable-Driver) blocklist — hashes of known-abused signed drivers |
 | License posture | Permissive aggregator. Ingested as a hash blacklist; rule text is not redistributed. |
 | Update frequency | Daily JSON pull |
-| Mythodikal entry points | `crates/mythkernel/src/updater/loldrivers.rs` (TASK-139); `crates/mythkernel/src/detect/byovd.rs` |
+| Freally entry points | `crates/freallykernel/src/updater/loldrivers.rs` (TASK-139); `crates/freallykernel/src/detect/byovd.rs` |
 
 ### LOLBAS (Living Off The Land Binaries and Scripts)
 
@@ -55,7 +55,7 @@ For deeper analysis of why each source was chosen — and what alternatives were
 | Vendor | The LOLBAS Project |
 | Used for | Suspicious parent-child invocation chains (e.g., Office spawning `certutil`, `mshta`, `wmic`) |
 | License posture | MIT-licensed YAML index. Indexed by hash, not redistributed verbatim. |
-| Mythodikal entry points | `crates/mythkernel/src/updater/lolbas.rs` (TASK-146); `crates/mythkernel/src/detect/lolbin.rs` |
+| Freally entry points | `crates/freallykernel/src/updater/lolbas.rs` (TASK-146); `crates/freallykernel/src/detect/lolbin.rs` |
 
 ### OSV.dev malicious package feed
 
@@ -64,7 +64,7 @@ For deeper analysis of why each source was chosen — and what alternatives were
 | Vendor | Google / OpenSSF |
 | Used for | Supply-chain detection — npm / PyPI / Cargo malicious-package match |
 | License posture | OSV data is licensed CC-BY-4.0; we consume the JSON feed only, do not embed verbatim records into compiled binaries. |
-| Mythodikal entry points | `crates/mythkernel/src/updater/osv.rs` (TASK-147); `crates/mythkernel/src/detect/supply_chain.rs` |
+| Freally entry points | `crates/freallykernel/src/updater/osv.rs` (TASK-147); `crates/freallykernel/src/detect/supply_chain.rs` |
 
 ---
 
@@ -89,7 +89,7 @@ Rust dependency licenses are independently checked by `cargo-deny` per `deny.tom
 
 ## How to report a feed concern
 
-If you believe a third-party source listed above has changed its license terms, or is being misrepresented here, please email `mythodikalone@gmail.com` with the subject `THIRD-PARTY-DATA:` and a link to the upstream notice.
+If you believe a third-party source listed above has changed its license terms, or is being misrepresented here, please email `freallyone@gmail.com` with the subject `THIRD-PARTY-DATA:` and a link to the upstream notice.
 
 ---
 

@@ -3,10 +3,10 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Mythodikal Anti-Virus — Releases &amp; Updates</title>
+    <title>Freally Anti-Virus — Releases &amp; Updates</title>
     <meta
       name="description"
-      content="Browse every Mythodikal Anti-Virus release and changelog in one place."
+      content="Browse every Freally Anti-Virus release, changelog, and desktop download in one place."
     />
     <link rel="icon" type="image/png" href="icon.png" />
     <link rel="apple-touch-icon" href="icon.png" />
@@ -14,13 +14,13 @@
   </head>
   <body>
     <header class="hero">
-      <img class="logo" src="icon.png" alt="Mythodikal Anti-Virus icon" width="96" height="96" />
+      <img class="logo" src="icon.png" alt="Freally Anti-Virus icon" width="96" height="96" />
       <h1>Releases &amp; Updates</h1>
-      <p class="sub">Browse every Mythodikal Anti-Virus release and changelog in one place.</p>
+      <p class="sub">Browse every Freally Anti-Virus release, changelog, and desktop download in one place.</p>
     </header>
 
     <main>
-      <!-- Latest release -->
+      <!-- Current development build (no download yet) -->
       <article class="release latest">
         <div class="release-head">
           <div class="meta">
@@ -30,29 +30,54 @@
           <span class="soon">Desktop downloads — coming soon</span>
         </div>
 
-        <h2>Mythodikal — Polish &amp; public launch (Phase 10)</h2>
+        <h2>Freally — Polish &amp; public launch (Phase 10)</h2>
         <p class="summary">
-          Behavioral heuristics, archive scanning across 12 formats, a scan scheduler, supply-chain
-          and process-integrity checks, and an i18n scaffold — the engine now passes over 800 tests.
+          Behavioral heuristics, archive scanning across 12 formats, a scan scheduler,
+          supply-chain and process-integrity checks, and an i18n scaffold — the engine now
+          passes over 800 tests.
         </p>
+
+        <h3>What's in this build</h3>
+        <ul class="features">
+          <li>Behavioral heuristics layer with statistical anomaly baseline.</li>
+          <li>Archive scanning: ZIP, 7z, tar, gzip, bzip2, xz, rar, cab, iso, dmg, pkg, and deb.</li>
+          <li>Scan scheduler — daily, weekly, or on-login triggers with run-if-missed option.</li>
+          <li>Supply-chain integrity checks: SBOM diff, publisher allowlists, BYOVD blocklist via loldrivers.io.</li>
+          <li>i18n scaffold; first localization bundles in a subsequent wave.</li>
+          <li>Engine at 804+ unit tests green.</li>
+        </ul>
       </article>
 
-      <!-- Previous releases -->
+      <!-- v0.7.20 -->
       <article class="release">
         <div class="release-head">
           <div class="meta">
             <span class="badge">0.7.20</span>
-            <span class="date">May 27, 2026 · Latest</span>
+            <span class="date">May 27, 2026 · Latest tag</span>
           </div>
         </div>
 
-        <h2>Mythodikal 0.7.20 — Engine enhancement</h2>
+        <h2>Freally 0.7.20 — Engine enhancement</h2>
         <p class="summary">
-          Resumable scans, diff-rescan, multi-root parallel scanning, battery and wake throttling,
-          and PE/ELF/Mach-O/.NET/Java/DEX parsers with a UPX unpacker.
+          Resumable scans, diff-rescan, multi-root parallel scanning, battery and wake
+          throttling, and PE/ELF/Mach-O/.NET&nbsp;IL/Java/DEX parsers with a UPX unpacker.
         </p>
+
+        <h3>New features</h3>
+        <ul class="features">
+          <li>Resumable scans — state persists across reboots; resume exactly where you left off.</li>
+          <li>USN file-state diff cache: second scans complete in seconds, not minutes.</li>
+          <li>Multi-root parallel producer/consumer engine with per-mount real-time toggle.</li>
+          <li>Foreground-aware throttle, battery-aware throttle, and AC-only/idle-only wake gate.</li>
+          <li>Format-aware parsers: PE/Authenticode, ELF hardening inventory, Mach-O code-signature, .NET IL extractor, Java bytecode, Android DEX/AXML, UPX unpacker.</li>
+          <li>Sparse-aware hashing, APFS clone dedup, Btrfs/ZFS reflink handling, reparse-point policy, FastCDC selective rehash.</li>
+          <li>Entropy heatmap, packer identification, archive-bomb guard, hot-zone mmap hashing.</li>
+          <li>Remote-mount scan mode (SMB/NFS) with slow-mode throttle.</li>
+          <li>638 engine unit tests green.</li>
+        </ul>
       </article>
 
+      <!-- v0.7.13 -->
       <article class="release">
         <div class="release-head">
           <div class="meta">
@@ -61,13 +86,26 @@
           </div>
         </div>
 
-        <h2>Mythodikal 0.7.13 — Malware &amp; goodware databases</h2>
+        <h2>Freally 0.7.13 — Malware &amp; goodware databases</h2>
         <p class="summary">
-          The first public data release — a 53.7M-row malware blacklist and a 72M-row NSRL goodware
-          allowlist as SQLite artifacts.
+          The first public data release — a 53.7 M-row malware blacklist and a 72 M-row
+          NSRL goodware allowlist as SQLite artifacts, with Bloom + Cuckoo filter front-ends
+          and an in-app IOC editor.
         </p>
+
+        <h3>New features</h3>
+        <ul class="features">
+          <li>53.7 M-row abuse.ch malware hash blacklist (MalwareBazaar + ThreatFox) as a sorted <code>.bin</code> artifact.</li>
+          <li>72 M-row NIST NSRL RDSv3 goodware allowlist, per-OS sliced, with nightly refresh workflow.</li>
+          <li>Bloom filter + Cuckoo filter front-ends collapse per-file lookup to sub-microsecond for clean files.</li>
+          <li>BLAKE3 + SHA-256 dual-key gate on P0 promotions; hash de-aging and feed-freshness widget.</li>
+          <li>In-app user-IOC editor supporting CSV, STIX 2.1, and MISP formats.</li>
+          <li>Confidence-graded findings; per-finding citation copy; reverse-lookup and lateral-search.</li>
+          <li>Mirror failover with chained Ed25519 epoch signatures; package-manager and App Store allowlists.</li>
+        </ul>
       </article>
 
+      <!-- v0.6.0 -->
       <article class="release">
         <div class="release-head">
           <div class="meta">
@@ -76,14 +114,23 @@
           </div>
         </div>
 
-        <h2>Mythodikal 0.6.0 — macOS port</h2>
+        <h2>Freally 0.6.0 — macOS port</h2>
         <p class="summary">
-          A macOS universal binary with hardened-runtime entitlements and a platform-aware UI,
-          consolidating the Phase 4–6 work.
+          A macOS universal binary (Apple Silicon + Intel) with hardened-runtime entitlements
+          and a platform-aware UI — consolidating the Phase 4–6 work into the first
+          cross-platform build.
         </p>
+
+        <h3>New features</h3>
+        <ul class="features">
+          <li>macOS universal binary: single download runs natively on Apple Silicon and Intel.</li>
+          <li>Hardened-runtime entitlements for macOS sandbox compliance.</li>
+          <li>Platform-aware Modal component; OS-conditional UI paths throughout.</li>
+          <li>Consolidated single-file shippable artifacts for all three platforms.</li>
+        </ul>
       </article>
 
-      <!-- Roadmap to 1.0 -->
+      <!-- Roadmap -->
       <section class="roadmap">
         <h2>Roadmap to 1.0</h2>
         <ol class="timeline">
@@ -91,15 +138,23 @@
             <span class="badge upcoming">0.11–0.15</span>
             <div>
               <strong>Real-time protection</strong>
-              <p>macOS NOTIFY cleanup and Windows ETW + AMSI + WDAC enforcement.</p>
+              <p>macOS NOTIFY cleanup (XProtect-style launchd) and Windows ETW + AMSI + WDAC enforcement stack — all user-mode, zero kernel drivers.</p>
             </div>
             <span class="soon">Planned</span>
+          </li>
+          <li>
+            <span class="badge upcoming">0.16–0.17</span>
+            <div>
+              <strong>Donor / Pro tier</strong>
+              <p>Optional paid features — encrypted quarantine vault, advanced reporting, STIX exports, and cloud-sync / backup awareness.</p>
+            </div>
+            <span class="soon">Exploring</span>
           </li>
           <li>
             <span class="badge upcoming">0.18</span>
             <div>
               <strong>Hardening</strong>
-              <p>Security hardening ahead of the stable run-up.</p>
+              <p>Accessibility audit, fuzzing, memory-leak audit, ≤ 4-minute cold scan on 1 M files, top-5 localization, and user documentation.</p>
             </div>
             <span class="soon">Planned</span>
           </li>
@@ -107,7 +162,7 @@
             <span class="badge upcoming">0.19.84</span>
             <div>
               <strong>Stable release</strong>
-              <p>The first stable Mythodikal Anti-Virus.</p>
+              <p>The first stable Freally Anti-Virus — signed release notes, refreshed marketing site, public announcement.</p>
             </div>
             <span class="soon">Planned</span>
           </li>
@@ -118,9 +173,10 @@
     <footer>
       <p>© 2026 Mike Weaver — All Rights Reserved · no telemetry · local-first · privacy-respecting</p>
       <p>
-        <a href="https://github.com/MikesRuthless12/mythodikal-av">GitHub</a> ·
-        <a href="https://github.com/MikesRuthless12/mythodikal-av/releases">All releases</a> ·
-        <a href="https://github.com/MikesRuthless12/mythodikal-av/blob/main/LICENSE.md">License</a>
+        <a href="https://github.com/MikesRuthless12/freally-av">GitHub</a> ·
+        <a href="https://github.com/MikesRuthless12/freally-av/releases">All releases</a> ·
+        <a href="https://github.com/MikesRuthless12/freally-av/blob/main/LICENSE.md">License</a> ·
+        <a href="documentation.html">Documentation</a>
       </p>
     </footer>
   </body>

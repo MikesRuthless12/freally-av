@@ -1,7 +1,7 @@
 //! Per-mount real-time toggle Tauri commands (TASK-238, Phase 8 Wave 2).
 //!
 //! The store lives in the daemon-local sqlite at
-//! `/var/lib/mythd/mythd.db` so the engine + UI only need to read /
+//! `/var/lib/freallyd/freallyd.db` so the engine + UI only need to read /
 //! write the **preference**; the daemon owns the FAN_MARK_ADD /
 //! FAN_MARK_REMOVE application.
 //!
@@ -82,9 +82,9 @@ pub async fn set_mount_enabled(
     )
     .map_err(stringify)?;
     // TASK-238 foundation: the preference lands in the engine sqlite
-    // (`<data_dir>/mythodikal.db`). The Linux-runtime validation pass
+    // (`<data_dir>/freally.db`). The Linux-runtime validation pass
     // wires the daemon to read this table directly via a shared
-    // sqlite handle — daemon-local `/var/lib/mythd/mythd.db` is the
+    // sqlite handle — daemon-local `/var/lib/freallyd/freallyd.db` is the
     // fallback for when the daemon runs detached from the engine
     // (e.g. headless install). Until that wiring lands, this command
     // persists the user preference but the fanotify mark set is not
@@ -97,7 +97,7 @@ pub async fn set_mount_enabled(
 // ---------------------------------------------------------------------------
 
 #[tauri::command]
-pub async fn wsl_list_distros() -> Result<Vec<mythkernel::platform::wsl::WslDistroRow>, String> {
+pub async fn wsl_list_distros() -> Result<Vec<freallykernel::platform::wsl::WslDistroRow>, String> {
     #[cfg(target_os = "windows")]
     {
         use std::process::Command;
@@ -106,7 +106,7 @@ pub async fn wsl_list_distros() -> Result<Vec<mythkernel::platform::wsl::WslDist
             .arg("--verbose")
             .output();
         match out {
-            Ok(o) => Ok(mythkernel::platform::wsl::parse_wsl_list_utf16le(&o.stdout)),
+            Ok(o) => Ok(freallykernel::platform::wsl::parse_wsl_list_utf16le(&o.stdout)),
             Err(_) => Ok(Vec::new()),
         }
     }

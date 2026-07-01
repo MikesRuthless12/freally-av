@@ -1,13 +1,13 @@
-# Mythodikal Brand Assets
+# Freally Brand Assets
 
-Single source of truth for the Mythodikal Anti-Virus mark and wordmark.
+Single source of truth for the Freally Anti-Virus mark and wordmark.
 
 ## Files
 
 | File | Purpose |
 |---|---|
 | `m-glyph.svg` | The "M" glyph used as the app icon, the favicon, and the tray icon base. 256 × 256 viewBox; baby-blue gradient with light highlight, bottom shade, and a soft drop shadow for a 3D effect. Transparent background. |
-| `wordmark.svg` | "M" glyph + "Mythodikal Anti-Virus" in Inter Display 600. Used in the marketing site, the splash screen, and About. 720 × 144 viewBox. |
+| `wordmark.svg` | "M" glyph + "Freally Anti-Virus" in Inter Display 600. Used in the marketing site, the splash screen, and About. 720 × 144 viewBox. |
 
 ## Visual identity
 
@@ -24,7 +24,7 @@ The mark is a geometric uppercase **M** built from rectangular and diagonal stro
 
 ## Tray icon variants
 
-Per `docs/prd.md` § 6.12 (FR-162) and TASK-158, the tray icon has four states with priority `shields_off > update_available > scanning > idle`. Variants live under `apps/mythodikal/src-tauri/icons/`:
+Per `docs/prd.md` § 6.12 (FR-162) and TASK-158, the tray icon has four states with priority `shields_off > update_available > scanning > idle`. Variants live under `apps/freally/src-tauri/icons/`:
 
 - `tray-{idle,scanning,shields_off,update_available}-{16,22,32}.png` — full-color, the M with a small overlay glyph in the bottom-right (accent dot for scanning; `!` on a `--myth-bad` chip for shields_off; `↑` on a `--myth-warn` chip for update_available; idle is the bare M).
 - `tray-{idle,scanning,shields_off,update_available}-mac-22.png` — single-channel alpha templates for macOS menu bars (`isTemplate = true`). Status color signaling on macOS is conveyed by the menu-item label, not by the icon.
@@ -33,4 +33,4 @@ The base mark in each variant is rendered from `m-glyph.svg` so the M's geometry
 
 ## License
 
-The brand assets are part of Mythodikal Anti-Virus and governed by `LICENSE.md` (proprietary, source-visible). Section 3.9 prohibits use of the marks without separate written permission.
+The brand assets are part of Freally Anti-Virus and governed by `LICENSE.md` (proprietary, source-visible). Section 3.9 prohibits use of the marks without separate written permission.

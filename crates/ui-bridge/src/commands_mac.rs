@@ -8,7 +8,7 @@
 //!     these commands; mutations re-prompt the user for Touch-ID /
 //!     system-password via the SecAccessControl item.
 //!   * launchd heartbeat reader (TASK-254). The daemon writes
-//!     `~/Library/Application Support/Mythodikal/heartbeat.json` once
+//!     `~/Library/Application Support/Freally/heartbeat.json` once
 //!     per second; this command returns the parsed JSON plus a
 //!     derived `age_ms` so the Real-time page can render a
 //!     green/amber/red chip.
@@ -18,7 +18,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use mythkernel::exempt::per_app::PerAppExemption;
+use freallykernel::exempt::per_app::PerAppExemption;
 
 // ---------------------------------------------------------------------------
 // TASK-253 — per-app exemption commands
@@ -152,10 +152,10 @@ struct HeartbeatFile {
 
 /// Path the daemon writes the heartbeat JSON to. Per-user under
 /// `Application Support` so no sudo install / shared FS perms are
-/// required. Single source of truth lives in mythkernel — re-export
+/// required. Single source of truth lives in freallykernel — re-export
 /// here so callers don't need an extra import (review CR-10,
 /// 2026-05-27).
-pub use mythkernel::ipc::macesf::HEARTBEAT_FILENAME;
+pub use freallykernel::ipc::macesf::HEARTBEAT_FILENAME;
 
 /// Parse a heartbeat JSON blob with the current wall-clock time, and
 /// derive `age_ms`. Pure function so cargo test exercises it on
@@ -187,7 +187,7 @@ pub async fn mac_heartbeat() -> Result<MacHeartbeat, String> {
         let path = home
             .join("Library")
             .join("Application Support")
-            .join("Mythodikal")
+            .join("Freally")
             .join(HEARTBEAT_FILENAME);
         let blob = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
         let now_ms = std::time::SystemTime::now()

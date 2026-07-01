@@ -1,5 +1,5 @@
 #!/bin/sh
-# Mythodikal Anti-Virus — .deb / .rpm prerm (TASK-076, Phase 8).
+# Freally Anti-Virus — .deb / .rpm prerm (TASK-076, Phase 8).
 #
 # Stops + disables the daemon on uninstall. The unit file itself is
 # removed by the package manager's own "delete files" step; this
@@ -8,8 +8,8 @@
 set -e
 
 if command -v systemctl > /dev/null 2>&1; then
-    systemctl stop mythd.service || true
-    systemctl disable mythd.service || true
+    systemctl stop freallyd.service || true
+    systemctl disable freallyd.service || true
 fi
 
 exit 0

@@ -1,6 +1,6 @@
 //! Tauri commands (TASK-028, Phase 3).
 //!
-//! Each `#[tauri::command]` is a thin async wrapper around mythkernel.
+//! Each `#[tauri::command]` is a thin async wrapper around freallykernel.
 //! Error path: every command returns `Result<T, String>` — Tauri
 //! serializes that natively to TS `Promise<T>` / rejection.
 //!
@@ -23,7 +23,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 
-use mythkernel::{
+use freallykernel::{
     detect::{
         DetectionPipeline, HashKind, goodware_allowlist::GoodwareAllowlistDetector,
         hash_blacklist::HashBlacklistDetector, publisher,
@@ -62,7 +62,7 @@ pub enum PathPolicyError {
     BadScheme(String),
 }
 
-/// Roots that Mythodikal refuses to scan / restore into. Defense-in-depth
+/// Roots that Freally refuses to scan / restore into. Defense-in-depth
 /// against a tampered SQLite row or a malicious frontend pointing
 /// `scan_start` at an OS-managed location (security review C2 + C1+H1).
 ///
@@ -189,7 +189,7 @@ mod policy_tests {
 
     #[test]
     fn validate_scan_target_rejects_missing() {
-        let nonexistent = std::env::temp_dir().join("mythodikal-validate-not-real-xyz123");
+        let nonexistent = std::env::temp_dir().join("freally-validate-not-real-xyz123");
         let _ = std::fs::remove_file(&nonexistent);
         let err = validate_scan_target(&nonexistent).unwrap_err();
         assert!(matches!(err, PathPolicyError::Missing(_)));
@@ -207,7 +207,7 @@ mod policy_tests {
     fn validate_restore_target_accepts_unknown_parent() {
         // Restore-to-new-dir is a valid case (engine will create the
         // parent). The policy check only refuses *system* parents.
-        let target = std::env::temp_dir().join("mythodikal-restore-new-xyz123/file.bin");
+        let target = std::env::temp_dir().join("freally-restore-new-xyz123/file.bin");
         let _ = std::fs::remove_dir_all(target.parent().unwrap());
         validate_restore_target(&target).unwrap();
     }
@@ -230,7 +230,7 @@ pub struct AppState {
     /// Live TOML config snapshot + path (TASK-041). The Mutex protects
     /// the in-memory copy; every `settings_update` mutates this and
     /// `config::save()`s atomically.
-    pub config: Arc<Mutex<mythkernel::config::Config>>,
+    pub config: Arc<Mutex<freallykernel::config::Config>>,
     pub config_path: PathBuf,
     /// Active scan pause flags (TASK-040). `scan_start` registers a
     /// flag; the forwarder removes it on the terminal event. `scan_pause`
@@ -313,7 +313,7 @@ pub async fn first_run_set(state: State<'_, AppState>, completed: bool) -> Resul
 pub async fn enumerate_volumes() -> Result<Vec<VolumeView>, String> {
     #[cfg(target_os = "windows")]
     {
-        let raw = mythkernel::platform::win::volumes::enumerate_volumes().map_err(stringify)?;
+        let raw = freallykernel::platform::win::volumes::enumerate_volumes().map_err(stringify)?;
         Ok(raw
             .into_iter()
             .map(|v| VolumeView {
@@ -497,7 +497,7 @@ pub async fn scan_start(
         ScanTarget::Path(canonical_target)
     };
     // CRC32 fast-screen gate (TASK / CRC32 pre-screen). When the
-    // Mythodikal-side feed-builder has published a `crc32_blacklist.bin`
+    // Freally-side feed-builder has published a `crc32_blacklist.bin`
     // to the feeds dir, hand its path to the engine so the scan
     // worker can skip BLAKE3 + SHA-256 + the detection pipeline on
     // files whose CRC32 isn't in the malware set (~99.977% miss
@@ -1143,7 +1143,7 @@ pub async fn feed_status(state: State<'_, AppState>) -> Result<Vec<FeedState>, S
     ] {
         let path = feeds_dir.join(file);
         let (hash_count, last_updated_utc) = if path.exists() {
-            let n = mythkernel::detect::hash_set_file::HashSetFile::open(&path)
+            let n = freallykernel::detect::hash_set_file::HashSetFile::open(&path)
                 .map(|f| f.len())
                 .unwrap_or(0);
             let mtime = std::fs::metadata(&path)
@@ -1260,7 +1260,7 @@ fn compute_definition_count(data_dir: &std::path::Path) -> DefinitionCount {
         if !path.exists() {
             return 0;
         }
-        mythkernel::detect::hash_set_file::HashSetFile::open(&path)
+        freallykernel::detect::hash_set_file::HashSetFile::open(&path)
             .map(|f| f.len())
             .unwrap_or(0)
     };
@@ -1379,7 +1379,7 @@ pub async fn settings_update(
     }
     let snapshot = guard.clone();
     drop(guard);
-    mythkernel::config::save(&path, &snapshot).map_err(stringify)?;
+    freallykernel::config::save(&path, &snapshot).map_err(stringify)?;
     tracing::info!(
         "settings_update persisted to {}: {} field group(s) changed",
         path.display(),
@@ -1391,7 +1391,7 @@ pub async fn settings_update(
 /// Tiny structural-equality helper. `Config` doesn't derive `PartialEq`
 /// (its nested vecs/maps could grow), so we compare on the fields the
 /// patch can actually touch.
-fn configs_equal(a: &mythkernel::config::Config, b: &mythkernel::config::Config) -> bool {
+fn configs_equal(a: &freallykernel::config::Config, b: &freallykernel::config::Config) -> bool {
     a.general.close_action == b.general.close_action
         && a.telemetry.enabled == b.telemetry.enabled
         && a.scanning.archives_enabled == b.scanning.archives_enabled
@@ -1399,7 +1399,7 @@ fn configs_equal(a: &mythkernel::config::Config, b: &mythkernel::config::Config)
         && a.scanning.skip_hidden == b.scanning.skip_hidden
 }
 
-fn section_change_count(a: &mythkernel::config::Config, b: &mythkernel::config::Config) -> usize {
+fn section_change_count(a: &freallykernel::config::Config, b: &freallykernel::config::Config) -> usize {
     let g = (a.general.close_action != b.general.close_action) as usize;
     let p = (a.telemetry.enabled != b.telemetry.enabled) as usize;
     let s = ((a.scanning.archives_enabled != b.scanning.archives_enabled) as usize)
@@ -1424,7 +1424,7 @@ pub async fn updater_status(
 ) -> Result<Option<UpdaterStatusView>, String> {
     let feeds_dir = feeds_dir(&state.data_dir);
     Ok(
-        mythkernel::updater::scheduler::read_last_run(&feeds_dir).map(|r| UpdaterStatusView {
+        freallykernel::updater::scheduler::read_last_run(&feeds_dir).map(|r| UpdaterStatusView {
             started_at_utc: r.started_at_utc,
             finished_at_utc: r.finished_at_utc,
             outcome: r.outcome,
@@ -1631,8 +1631,8 @@ fn channel_state_to_view(s: &ChannelState, kind: &str) -> UpdateChannelStateView
     }
 }
 
-fn outcome_to_wire(o: mythkernel::updater::channels::LastCheckOutcome) -> String {
-    use mythkernel::updater::channels::LastCheckOutcome::*;
+fn outcome_to_wire(o: freallykernel::updater::channels::LastCheckOutcome) -> String {
+    use freallykernel::updater::channels::LastCheckOutcome::*;
     match o {
         Never => "never",
         UpToDate => "up_to_date",
@@ -1795,7 +1795,7 @@ fn finding_to_view(f: findings::Finding) -> FindingView {
     }
 }
 
-fn report_to_wire(r: &mythkernel::quarantine::BatchReport) -> BatchOpReport {
+fn report_to_wire(r: &freallykernel::quarantine::BatchReport) -> BatchOpReport {
     BatchOpReport {
         batch_id: r.batch_id,
         kind: r.kind.into(),
@@ -1840,12 +1840,12 @@ fn make_batch_callback(app: AppHandle) -> ProgressCallback {
 /// `docs/prd.md` § 1.5.1 the engine ships with no bundled feeds.
 pub fn build_pipeline_from_feeds(data_dir: &std::path::Path) -> DetectionPipeline {
     let feeds_dir = feeds_dir(data_dir);
-    let mut detectors: Vec<Box<dyn mythkernel::detect::Detector>> = Vec::new();
+    let mut detectors: Vec<Box<dyn freallykernel::detect::Detector>> = Vec::new();
 
     // Built-in: EICAR test signature. Always loaded — no feed
     // download required. Verifies detection works end-to-end (drop
     // the canonical EICAR string into a `.txt` and scan).
-    detectors.push(Box::new(mythkernel::detect::eicar::EicarDetector::new()));
+    detectors.push(Box::new(freallykernel::detect::eicar::EicarDetector::new()));
     tracing::info!("loaded built-in EICAR test detector");
 
     // YARA rule pack (Phase 7 / commercial-friendly detection). Loads
@@ -1856,7 +1856,7 @@ pub fn build_pipeline_from_feeds(data_dir: &std::path::Path) -> DetectionPipelin
     // entirely when there are no rules avoids paying a fs::read +
     // scan cost per file for a no-op.
     let yara_dir = feeds_dir.join("yara_rules");
-    if let Some(yara) = mythkernel::detect::yara_engine::YaraDetector::from_dir(&yara_dir) {
+    if let Some(yara) = freallykernel::detect::yara_engine::YaraDetector::from_dir(&yara_dir) {
         tracing::info!(yara_rules = yara.rule_count(), "loaded YARA rule pack");
         detectors.push(Box::new(yara));
     }
@@ -1865,7 +1865,7 @@ pub fn build_pipeline_from_feeds(data_dir: &std::path::Path) -> DetectionPipelin
     // to the union .bin when the per-OS variants aren't downloaded.
     // Multiple slices may be loaded as parallel detector instances
     // (host-OS slice + the cross-platform `_other` slice).
-    for nsrl_path in mythkernel::detect::goodware_allowlist::resolve_nsrl_slice_paths(&feeds_dir) {
+    for nsrl_path in freallykernel::detect::goodware_allowlist::resolve_nsrl_slice_paths(&feeds_dir) {
         match GoodwareAllowlistDetector::open(&nsrl_path) {
             Ok(d) => {
                 tracing::info!(
@@ -1913,7 +1913,7 @@ pub fn build_pipeline_from_feeds(data_dir: &std::path::Path) -> DetectionPipelin
 ///
 /// **Tauri v2 quirk:** `.invoke_handler()` can only be called **once**
 /// per builder — a second call replaces the first. App-level commands
-/// (defined in `apps/mythodikal/src-tauri/src/lib.rs`) are passed in
+/// (defined in `apps/freally/src-tauri/src/lib.rs`) are passed in
 /// as extra arguments so we land in one generate_handler! call.
 ///
 /// Usage:

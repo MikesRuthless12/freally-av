@@ -1,6 +1,6 @@
-//! `mythd-linux` library surface.
+//! `freallyd-linux` library surface.
 //!
-//! The binary at `bin/mythd` is a thin wrapper that wires the modules
+//! The binary at `bin/freallyd` is a thin wrapper that wires the modules
 //! below into a tokio runtime; this lib.rs exists so the unit tests
 //! for each module run on every platform without depending on the
 //! binary entry point.
@@ -21,11 +21,11 @@
 //! | 239     | `container_dedupe`              |
 //! | 240     | `wsl_peer`                      |
 //! | 241     | `usb`                           |
-//! | 242     | (re-exports `mythkernel::usb::allowlist`) |
-//! | 243     | (re-exports `mythkernel::usb::hid_anomaly`) |
+//! | 242     | (re-exports `freallykernel::usb::allowlist`) |
+//! | 243     | (re-exports `freallykernel::usb::hid_anomaly`) |
 //! | 244     | `usb::power_only_apply`         |
 //! | 245     | `usb_ro`                        |
-//! | 246–250 | (re-exports `mythkernel::usb::*`)|
+//! | 246–250 | (re-exports `freallykernel::usb::*`)|
 //!
 //! Per `docs/prd.md` § 1.5.4: no kernel driver, no LSM hooks. Every
 //! Linux syscall surface (fanotify, inotify, audit, eBPF, udev) is

@@ -1,13 +1,13 @@
 [Unit]
-# Mythodikal Anti-Virus Linux real-time daemon (TASK-073 / TASK-076 — Phase 8).
+# Freally Anti-Virus Linux real-time daemon (TASK-073 / TASK-076 — Phase 8).
 #
 # This unit is installed by the .deb / .rpm postinst at
-# `/lib/systemd/system/mythd.service` and enabled with
-# `systemctl enable mythd.service`. The user-mode UI app's
+# `/lib/systemd/system/freallyd.service` and enabled with
+# `systemctl enable freallyd.service`. The user-mode UI app's
 # start-at-login is governed by `tauri-plugin-autostart` (FR-161 /
 # TASK-157) and is independent of this unit.
-Description=Mythodikal Anti-Virus real-time daemon
-Documentation=https://github.com/MikesRuthless12/mythodikal-av
+Description=Freally Anti-Virus real-time daemon
+Documentation=https://github.com/MikesRuthless12/freally-av
 After=local-fs.target
 
 [Service]
@@ -16,7 +16,7 @@ Type=simple
 # every capability except CAP_SYS_ADMIN at startup (TASK-073).
 User=root
 Group=root
-ExecStart=/usr/bin/mythd-linux
+ExecStart=/usr/bin/freallyd-linux
 # TASK-076 — crash budget. Restart on failure; surface > 3
 # restarts/hour as a UI badge through the heartbeat IPC frame.
 Restart=on-failure
@@ -38,12 +38,12 @@ LockPersonality=yes
 MemoryDenyWriteExecute=yes
 SystemCallFilter=@system-service
 SystemCallErrorNumber=EPERM
-# Daemon owns the /run/mythd directory for the engine IPC socket.
-RuntimeDirectory=mythd
+# Daemon owns the /run/freallyd directory for the engine IPC socket.
+RuntimeDirectory=freallyd
 RuntimeDirectoryMode=0750
-# Daemon-local sqlite at /var/lib/mythd/mythd.db (TASK-238 mount
+# Daemon-local sqlite at /var/lib/freallyd/freallyd.db (TASK-238 mount
 # preferences, etc.).
-StateDirectory=mythd
+StateDirectory=freallyd
 StateDirectoryMode=0750
 
 [Install]

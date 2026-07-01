@@ -1,4 +1,4 @@
-# cargo-deny configuration for Mythodikal Anti-Virus.
+# cargo-deny configuration for Freally Anti-Virus.
 #
 # License posture: source-visible All Rights Reserved (`LICENSE.md`). Third-
 # party transitive dependencies must be commercially redistributable as part
@@ -34,7 +34,7 @@ yanked = "warn"
 #     tauri-utils)
 #   - RUSTSEC-2023-0071: Marvin Attack on rsa crate (via yara-x v1.16
 #     → rsa v0.9.10). No safe upgrade available upstream. Mitigation:
-#     our yara-x guest input is trusted (Mythodikal-authored rules
+#     our yara-x guest input is trusted (Freally-authored rules
 #     only), not attacker-controlled, so the timing sidechannel isn't
 #     reachable from untrusted input.
 #   - RUSTSEC-2025-0141: bincode v2 unmaintained (via yara-x v1.16).
@@ -102,7 +102,7 @@ license-files = [
 [bans]
 multiple-versions = "warn"
 # Wildcard deny applies to third-party deps only; workspace path-based
-# deps (mythkernel → mythctl / ui-bridge) intentionally have no version
+# deps (freallykernel → freallyctl / ui-bridge) intentionally have no version
 # pin because they're internal.
 wildcards = "deny"
 allow-wildcard-paths = true

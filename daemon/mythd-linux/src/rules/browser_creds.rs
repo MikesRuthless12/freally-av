@@ -77,7 +77,7 @@ pub fn matched_pattern(path: &Path) -> Option<&'static CredentialPattern> {
 
 /// Allowlist hook — when the opener `exe_path` matches a known
 /// browser binary, the rule does NOT fire. The set is intentionally
-/// generous: the user can opt every browser into Mythodikal's strict
+/// generous: the user can opt every browser into Freally's strict
 /// mode through the per-process exclusion (TASK-042).
 pub fn is_allowlisted_opener(exe_path: &str) -> bool {
     const ALLOWLIST: &[&str] = &[

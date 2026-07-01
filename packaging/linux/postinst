@@ -1,5 +1,5 @@
 #!/bin/sh
-# Mythodikal Anti-Virus — .deb / .rpm postinst (TASK-076, Phase 8).
+# Freally Anti-Virus — .deb / .rpm postinst (TASK-076, Phase 8).
 #
 # Installs the systemd unit if it isn't already loaded, then enables
 # and starts the daemon. Idempotent — re-running this script on an
@@ -10,17 +10,17 @@
 
 set -e
 
-UNIT_PATH="/lib/systemd/system/mythd.service"
+UNIT_PATH="/lib/systemd/system/freallyd.service"
 
 if [ ! -f "$UNIT_PATH" ]; then
-    echo "mythd.service unit not found at $UNIT_PATH — skipping enable"
+    echo "freallyd.service unit not found at $UNIT_PATH — skipping enable"
     exit 0
 fi
 
 if command -v systemctl > /dev/null 2>&1; then
     systemctl daemon-reload || true
-    systemctl enable mythd.service || true
-    systemctl start mythd.service || true
+    systemctl enable freallyd.service || true
+    systemctl start freallyd.service || true
 fi
 
 exit 0

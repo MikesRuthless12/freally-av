@@ -1,8 +1,8 @@
-//! `mythd-macos` library surface (Phase 9 + Phase 8 Wave 2 USB).
+//! `freallyd-macos` library surface (Phase 9 + Phase 8 Wave 2 USB).
 //!
 //! macOS real-time lands in Phase 9 (TASK-079..083 Wave 1,
 //! TASK-251..255 Wave 2); the Wave 2 USB plumbing has its
-//! **cross-platform** portion in `mythkernel::usb::*` and its
+//! **cross-platform** portion in `freallykernel::usb::*` and its
 //! macOS-specific glue here.
 //!
 //! Per `docs/prd.md` § 1.5.4: NOTIFY-only on macOS. No

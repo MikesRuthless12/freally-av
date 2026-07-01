@@ -3,7 +3,7 @@
 # Windows mirror of `scripts/bench-1m-files.sh`. End-to-end Phase 5
 # benchmark: generates a synthetic 1M-file tree under $Target (default
 # $env:TEMP\myth-bench-1m) if it is not already populated, then runs
-# `mythctl scan` against it and asserts the NFR-001 / NFR-002 budget for
+# `freallyctl scan` against it and asserts the NFR-001 / NFR-002 budget for
 # the current release line.
 #
 # Budget (Windows host, NTFS volume, NVMe):
@@ -90,13 +90,13 @@ if ($needGen) {
 # -----------------------------------------------------------------------
 # Build the release binary.
 # -----------------------------------------------------------------------
-Write-Stage "cargo build --release -p mythctl"
-cargo build --release -p mythctl
+Write-Stage "cargo build --release -p freallyctl"
+cargo build --release -p freallyctl
 if ($LASTEXITCODE -ne 0) {
     throw "cargo build failed (exit $LASTEXITCODE)"
 }
 
-$mythctl = (Resolve-Path "target\release\mythctl.exe").Path
+$freallyctl = (Resolve-Path "target\release\freallyctl.exe").Path
 
 # -----------------------------------------------------------------------
 # Cold scan - drop the page cache implicitly by reusing the system's
@@ -106,7 +106,7 @@ $mythctl = (Resolve-Path "target\release\mythctl.exe").Path
 # -----------------------------------------------------------------------
 Write-Stage "cold scan: $Target (budget ${BudgetSeconds}s)"
 $start = Get-Date
-& $mythctl scan $Target --format text | Out-Null
+& $freallyctl scan $Target --format text | Out-Null
 $cold = (Get-Date) - $start
 $coldSecs = [int]$cold.TotalSeconds
 Write-Stage "cold completed in ${coldSecs}s (budget ${BudgetSeconds}s)"
@@ -123,7 +123,7 @@ if ($coldSecs -gt $BudgetSeconds) {
 $warmBudget = 30
 Write-Stage "warm scan: $Target (budget ${warmBudget}s)"
 $start = Get-Date
-& $mythctl scan $Target --format text | Out-Null
+& $freallyctl scan $Target --format text | Out-Null
 $warm = (Get-Date) - $start
 $warmSecs = [int]$warm.TotalSeconds
 Write-Stage "warm completed in ${warmSecs}s (budget ${warmBudget}s)"

@@ -1,0 +1,505 @@
+//! Behavioral heuristics — ransomware shape detection (TASK-084, Phase 10).
+//!
+//! Three temporal heuristics keyed to the three reliable shapes of an
+//! encrypting-ransomware burst:
+//!
+//!  1. rapid-rename storm — every modern encrypting family writes the
+//!     ciphertext beside the plaintext, then `rename(2)`s the new file
+//!     onto the old path (or to a new name carrying a ransom marker).
+//!     A volley of renames from a single process tree within a few
+//!     seconds is the highest-precision tell we have.
+//!  2. mass-rewrite — when the family encrypts in-place (open + write +
+//!     truncate) instead of rename-over, the renames are absent but the
+//!     write rate is still well above any benign editor. Same shape,
+//!     different syscall.
+//!  3. extension-churn — even families that try to evade the first two
+//!     (one rename at a time, throttled writes) eventually change each
+//!     file's extension to their marker (`.locked`, `.crypto`,
+//!     `.encrypted`, etc.). A single process changing N distinct
+//!     extensions in a window is implausible for any benign workload.
+//!
+//! ## Scope
+//!
+//! This module is the **engine-side aggregator only**. The per-OS daemons
+//! (fanotify on Linux, FSEvents/ESF on macOS, ETW on Windows) translate
+//! their native event payloads into [`FsEvent`] and feed them in. Wiring
+//! lives in the daemons:
+//!
+//!   * Linux — `daemon/freallyd-linux/src/fanotify.rs` event loop
+//!   * macOS — `daemon/freallyd-macos/src/esf_failover.rs` post-dedupe drain
+//!   * Windows — Phase 12 (TASK-097 winflt bridge)
+//!
+//! ## Thresholds
+//!
+//! Per-platform — the kernels coalesce events differently, so the same
+//! ransomware burst presents as different counts to user-mode. Pick the
+//! right `Thresholds` constructor at daemon startup; the engine never
+//! second-guesses. The constants are conservative — false positives on a
+//! Critical severity are far worse than a missed firing inside the first
+//! window (the heuristic will trip on the next batch).
+//!
+//! ## Boundary with TASK-143
+//!
+//! TASK-143 (Phase 10 Wave 1, FR-130) will introduce a generic
+//! behavioral-rule DSL with declarative TOML and process-tree anomalies.
+//! TASK-084 stays narrow: three hard-coded ransomware shapes, no DSL,
+//! no extension to other behaviors. The two coexist — generic rules
+//! sit beside these specific ones, both emitting [`HeuristicFinding`].
+
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::path::PathBuf;
+use std::time::{Duration, Instant};
+
+use crate::detect::Severity;
+
+/// Source-tag stamped onto every finding's `rule_source` column.
+pub const RULE_SOURCE: &str = "freally_heuristics";
+
+/// Stable rule identifiers. Reused verbatim in `findings.rule_id` rows so
+/// the UI explainer (FR-040) can render them and a downstream SIEM can
+/// match on them. Keep these strings stable forever — renaming breaks
+/// historical correlation.
+pub const RULE_RAPID_RENAME: &str = "behavior:rapid_rename";
+pub const RULE_MASS_REWRITE: &str = "behavior:mass_rewrite";
+pub const RULE_EXTENSION_CHURN: &str = "behavior:extension_churn";
+
+/// FS-event kinds the heuristics consume. A deliberate subset of what
+/// each platform's daemon emits — only the events that distinguish the
+/// three ransomware shapes are forwarded. `Open` / `Close` / `Read` are
+/// out of scope: they don't move the needle on ransomware detection and
+/// would flood the per-pid ring.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FsEventKind {
+    /// File path changed. `from_ext` / `to_ext` are lowercased,
+    /// dot-stripped extensions (`"txt"`, not `".TXT"`). `None` for an
+    /// extension means the path had no `.<ext>` segment.
+    Renamed {
+        from_ext: Option<String>,
+        to_ext: Option<String>,
+    },
+    /// File contents were rewritten — write + close on Linux fanotify,
+    /// `kFSEventStreamEventFlagItemModified` on macOS, USN `DATA_OVERWRITE`
+    /// on Windows. The daemon coalesces multiple in-flight writes to one
+    /// `Rewritten` per (file, close) so the per-pid count tracks files
+    /// touched, not raw write syscalls.
+    Rewritten,
+}
+
+/// One normalized FS event the aggregator consumes.
+#[derive(Debug, Clone)]
+pub struct FsEvent {
+    pub kind: FsEventKind,
+    pub path: PathBuf,
+    /// PID of the process whose syscall produced the event. Each pid
+    /// gets its own per-process ring so a noisy unrelated process can't
+    /// false-trigger another's tally.
+    pub pid: i32,
+    /// Caller-supplied monotonic timestamp. The aggregator never reads
+    /// the wall clock itself so tests stay deterministic.
+    pub at: Instant,
+}
+
+/// Per-platform thresholds. Counts are "events from a single pid within
+/// `window`"; one firing per (pid, rule) per window is debounced by
+/// [`ProcessActivity::raised`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Thresholds {
+    pub window: Duration,
+    pub rapid_rename_count: u32,
+    pub mass_rewrite_count: u32,
+    pub extension_churn_count: u32,
+}
+
+impl Thresholds {
+    /// Linux fanotify thresholds. fanotify forwards every `FAN_MODIFY` /
+    /// `FAN_MOVED_TO` individually with no kernel-side coalescing, so the
+    /// counts are higher than macOS to keep precision.
+    pub const fn linux() -> Self {
+        Self {
+            window: Duration::from_secs(5),
+            rapid_rename_count: 200,
+            mass_rewrite_count: 150,
+            extension_churn_count: 30,
+        }
+    }
+
+    /// macOS FSEvents / ESF NOTIFY thresholds. FSEvents coalesces events
+    /// per-path within ~1 s, so the user-mode-visible count for the same
+    /// burst is lower than Linux's.
+    pub const fn macos() -> Self {
+        Self {
+            window: Duration::from_secs(5),
+            rapid_rename_count: 100,
+            mass_rewrite_count: 75,
+            extension_churn_count: 20,
+        }
+    }
+
+    /// Windows USN journal + ETW thresholds (Phase 12 wires this in; the
+    /// constants live here so the daemon doesn't fork its own copy).
+    /// USN coalescing behavior is closer to macOS than Linux.
+    pub const fn windows() -> Self {
+        Self {
+            window: Duration::from_secs(5),
+            rapid_rename_count: 100,
+            mass_rewrite_count: 75,
+            extension_churn_count: 20,
+        }
+    }
+}
+
+/// What the aggregator emits when a rule trips. Caller maps these into
+/// `findings` rows via the existing finding-write path; the engine's
+/// FR-133 active-findings index then drives block-on-detected.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HeuristicFinding {
+    pub pid: i32,
+    pub rule_id: &'static str,
+    pub severity: Severity,
+    /// Plain-English one-liner for the UI live-event log + the explainer
+    /// modal. Includes the count + window so an operator can sanity-check
+    /// the firing.
+    pub evidence: String,
+}
+
+struct ProcessActivity {
+    renames: VecDeque<Instant>,
+    rewrites: VecDeque<Instant>,
+    /// Each `Renamed` whose `from_ext` differs from `to_ext` lands here.
+    /// Extension churn is a strict subset of renames; tracking it
+    /// separately lets a slow-moving family (one rename at a time) still
+    /// trip its rule even when `rapid_rename_count` is far from reached.
+    ext_changes: VecDeque<Instant>,
+    raised: HashSet<&'static str>,
+}
+
+impl ProcessActivity {
+    fn new() -> Self {
+        Self {
+            renames: VecDeque::new(),
+            rewrites: VecDeque::new(),
+            ext_changes: VecDeque::new(),
+            raised: HashSet::new(),
+        }
+    }
+
+    /// Drop events older than `now - window`. Also clears the
+    /// per-rule debounce set when its ring empties so the rule can refire
+    /// after a quiet period.
+    fn evict(&mut self, now: Instant, window: Duration) {
+        let cutoff = now.checked_sub(window);
+        evict_ring(&mut self.renames, cutoff);
+        evict_ring(&mut self.rewrites, cutoff);
+        evict_ring(&mut self.ext_changes, cutoff);
+        if self.renames.is_empty() {
+            self.raised.remove(RULE_RAPID_RENAME);
+        }
+        if self.rewrites.is_empty() {
+            self.raised.remove(RULE_MASS_REWRITE);
+        }
+        if self.ext_changes.is_empty() {
+            self.raised.remove(RULE_EXTENSION_CHURN);
+        }
+    }
+
+    fn is_idle(&self) -> bool {
+        self.renames.is_empty() && self.rewrites.is_empty() && self.ext_changes.is_empty()
+    }
+}
+
+fn evict_ring(ring: &mut VecDeque<Instant>, cutoff: Option<Instant>) {
+    let Some(cutoff) = cutoff else { return };
+    while ring.front().is_some_and(|t| *t < cutoff) {
+        ring.pop_front();
+    }
+}
+
+/// Streaming ransomware-shape aggregator. Feed it events via
+/// [`Heuristics::observe`]; check the returned `Option<HeuristicFinding>`
+/// after each call to act on tripped rules.
+pub struct Heuristics {
+    thresholds: Thresholds,
+    by_pid: HashMap<i32, ProcessActivity>,
+}
+
+impl Heuristics {
+    pub fn new(thresholds: Thresholds) -> Self {
+        Self {
+            thresholds,
+            by_pid: HashMap::new(),
+        }
+    }
+
+    pub fn thresholds(&self) -> Thresholds {
+        self.thresholds
+    }
+
+    /// Ingest one event. Returns a finding when the event tips a rule
+    /// past its threshold (and the rule isn't already debounced for this
+    /// pid in the current window). `None` otherwise.
+    pub fn observe(&mut self, event: FsEvent) -> Option<HeuristicFinding> {
+        let window = self.thresholds.window;
+        let activity = self
+            .by_pid
+            .entry(event.pid)
+            .or_insert_with(ProcessActivity::new);
+        activity.evict(event.at, window);
+
+        let is_extension_change = match &event.kind {
+            FsEventKind::Renamed { from_ext, to_ext } => from_ext != to_ext,
+            FsEventKind::Rewritten => false,
+        };
+        match event.kind {
+            FsEventKind::Renamed { .. } => activity.renames.push_back(event.at),
+            FsEventKind::Rewritten => activity.rewrites.push_back(event.at),
+        }
+        if is_extension_change {
+            activity.ext_changes.push_back(event.at);
+        }
+
+        check_rules(event.pid, activity, self.thresholds)
+    }
+
+    /// Manually evict expired events. Useful when the daemon goes
+    /// quiet — `observe()` does per-pid eviction on each call, so a busy
+    /// stream never needs this, but a tick-based caller can use it to
+    /// keep memory bounded during long idle stretches.
+    pub fn evict_old(&mut self, now: Instant) {
+        let window = self.thresholds.window;
+        self.by_pid.retain(|_, a| {
+            a.evict(now, window);
+            !a.is_idle()
+        });
+    }
+
+    /// Number of pids the aggregator is currently tracking. Test +
+    /// observability hook; the daemon does not need to call this.
+    pub fn tracked_pids(&self) -> usize {
+        self.by_pid.len()
+    }
+}
+
+fn check_rules(
+    pid: i32,
+    activity: &mut ProcessActivity,
+    thresholds: Thresholds,
+) -> Option<HeuristicFinding> {
+    let window_secs = thresholds.window.as_secs();
+
+    if activity.renames.len() as u32 >= thresholds.rapid_rename_count
+        && activity.raised.insert(RULE_RAPID_RENAME)
+    {
+        return Some(HeuristicFinding {
+            pid,
+            rule_id: RULE_RAPID_RENAME,
+            severity: Severity::Critical,
+            evidence: format!(
+                "rapid-rename storm: {} renames in {window_secs}s (threshold {})",
+                activity.renames.len(),
+                thresholds.rapid_rename_count
+            ),
+        });
+    }
+    if activity.rewrites.len() as u32 >= thresholds.mass_rewrite_count
+        && activity.raised.insert(RULE_MASS_REWRITE)
+    {
+        return Some(HeuristicFinding {
+            pid,
+            rule_id: RULE_MASS_REWRITE,
+            severity: Severity::Critical,
+            evidence: format!(
+                "mass rewrite: {} files rewritten in {window_secs}s (threshold {})",
+                activity.rewrites.len(),
+                thresholds.mass_rewrite_count
+            ),
+        });
+    }
+    if activity.ext_changes.len() as u32 >= thresholds.extension_churn_count
+        && activity.raised.insert(RULE_EXTENSION_CHURN)
+    {
+        return Some(HeuristicFinding {
+            pid,
+            rule_id: RULE_EXTENSION_CHURN,
+            severity: Severity::Critical,
+            evidence: format!(
+                "extension churn: {} extension changes in {window_secs}s (threshold {})",
+                activity.ext_changes.len(),
+                thresholds.extension_churn_count
+            ),
+        });
+    }
+    None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn rename_event(pid: i32, at: Instant, from: Option<&str>, to: Option<&str>) -> FsEvent {
+        FsEvent {
+            kind: FsEventKind::Renamed {
+                from_ext: from.map(str::to_owned),
+                to_ext: to.map(str::to_owned),
+            },
+            path: PathBuf::from("/tmp/x"),
+            pid,
+            at,
+        }
+    }
+
+    fn write_event(pid: i32, at: Instant) -> FsEvent {
+        FsEvent {
+            kind: FsEventKind::Rewritten,
+            path: PathBuf::from("/tmp/x"),
+            pid,
+            at,
+        }
+    }
+
+    #[test]
+    fn per_os_thresholds_use_documented_constants() {
+        assert_eq!(Thresholds::linux().rapid_rename_count, 200);
+        assert_eq!(Thresholds::macos().rapid_rename_count, 100);
+        assert_eq!(Thresholds::windows().rapid_rename_count, 100);
+        assert_eq!(Thresholds::linux().window, Duration::from_secs(5));
+    }
+
+    #[test]
+    fn rapid_rename_trips_at_threshold_not_before() {
+        let mut h = Heuristics::new(Thresholds::macos());
+        let t0 = Instant::now();
+        // 99 renames — no firing.
+        for i in 0..99 {
+            let fired = h.observe(rename_event(7, t0 + Duration::from_millis(i), None, None));
+            assert!(fired.is_none(), "should not fire at i={i}");
+        }
+        // The 100th flips it.
+        let finding = h
+            .observe(rename_event(7, t0 + Duration::from_millis(99), None, None))
+            .expect("100th rename should fire");
+        assert_eq!(finding.rule_id, RULE_RAPID_RENAME);
+        assert_eq!(finding.pid, 7);
+        assert_eq!(finding.severity, Severity::Critical);
+        assert!(finding.evidence.contains("100 renames"));
+    }
+
+    #[test]
+    fn mass_rewrite_trips_on_write_storm() {
+        let mut h = Heuristics::new(Thresholds::macos());
+        let t0 = Instant::now();
+        let mut fired = None;
+        for i in 0..75 {
+            fired = h.observe(write_event(42, t0 + Duration::from_millis(i)));
+        }
+        let finding = fired.expect("75 rewrites should fire mass_rewrite");
+        assert_eq!(finding.rule_id, RULE_MASS_REWRITE);
+        assert!(finding.evidence.contains("75 files rewritten"));
+    }
+
+    #[test]
+    fn extension_churn_tracks_only_renames_that_change_extension() {
+        let mut h = Heuristics::new(Thresholds::macos());
+        let t0 = Instant::now();
+        // 19 identity renames (.txt -> .txt): no churn counted.
+        for i in 0..19 {
+            let _ = h.observe(rename_event(
+                3,
+                t0 + Duration::from_millis(i),
+                Some("txt"),
+                Some("txt"),
+            ));
+        }
+        // 19 churn events — still under churn threshold (20).
+        for i in 0..19 {
+            let fired = h.observe(rename_event(
+                3,
+                t0 + Duration::from_millis(100 + i),
+                Some("txt"),
+                Some("locked"),
+            ));
+            assert!(
+                fired.is_none() || fired.as_ref().unwrap().rule_id != RULE_EXTENSION_CHURN,
+                "extension_churn shouldn't fire at i={i}"
+            );
+        }
+        // 20th churn event flips it.
+        let finding = h
+            .observe(rename_event(
+                3,
+                t0 + Duration::from_millis(200),
+                Some("txt"),
+                Some("locked"),
+            ))
+            .expect("20th churn rename should fire");
+        assert_eq!(finding.rule_id, RULE_EXTENSION_CHURN);
+        assert!(finding.evidence.contains("20 extension changes"));
+    }
+
+    #[test]
+    fn pids_are_isolated() {
+        let mut h = Heuristics::new(Thresholds::macos());
+        let t0 = Instant::now();
+        // pid 1 fills 75 rewrites. pid 2 fills 50.
+        for i in 0..75 {
+            let _ = h.observe(write_event(1, t0 + Duration::from_millis(i)));
+        }
+        for i in 0..50 {
+            let r = h.observe(write_event(2, t0 + Duration::from_millis(i)));
+            assert!(r.is_none(), "pid 2 should still be below threshold");
+        }
+        // pid 1 already fired; one more rewrite from it must not refire
+        // because of the per-pid debounce.
+        let again = h.observe(write_event(1, t0 + Duration::from_millis(76)));
+        assert!(again.is_none(), "rule must debounce inside the window");
+    }
+
+    #[test]
+    fn rule_refires_after_window_clears() {
+        let mut t = Thresholds::macos();
+        t.window = Duration::from_millis(100);
+        let mut h = Heuristics::new(t);
+        let t0 = Instant::now();
+        for i in 0..t.mass_rewrite_count as u64 {
+            let _ = h.observe(write_event(9, t0 + Duration::from_millis(i)));
+        }
+        // Quiet pause longer than the window.
+        let after_pause = t0 + Duration::from_millis(500);
+        // Re-fill the ring after the pause; rule must refire. Seed `fired` from
+        // the first iteration so the dead-init `None` doesn't trip
+        // `unused_assignments` (the loop range is provably > 0).
+        let mut fired = h.observe(write_event(9, after_pause));
+        for i in 1..t.mass_rewrite_count as u64 {
+            fired = h.observe(write_event(9, after_pause + Duration::from_millis(i)));
+        }
+        let finding = fired.expect("rule should refire after window cleared");
+        assert_eq!(finding.rule_id, RULE_MASS_REWRITE);
+    }
+
+    #[test]
+    fn evict_old_drops_idle_pids() {
+        let mut h = Heuristics::new(Thresholds::macos());
+        let t0 = Instant::now();
+        let _ = h.observe(write_event(1, t0));
+        let _ = h.observe(write_event(2, t0));
+        assert_eq!(h.tracked_pids(), 2);
+        h.evict_old(t0 + Duration::from_secs(60));
+        assert_eq!(h.tracked_pids(), 0, "idle pids must be dropped");
+    }
+
+    #[test]
+    fn observe_evicts_expired_events_per_pid() {
+        let mut h = Heuristics::new(Thresholds::macos());
+        let t0 = Instant::now();
+        // 99 renames at t0..t0+99ms.
+        for i in 0..99 {
+            let _ = h.observe(rename_event(5, t0 + Duration::from_millis(i), None, None));
+        }
+        // A single rename 10 seconds later — old ones must have evicted
+        // so we're nowhere near the threshold.
+        let r = h.observe(rename_event(5, t0 + Duration::from_secs(10), None, None));
+        assert!(
+            r.is_none(),
+            "stale events must evict before threshold check"
+        );
+    }
+}

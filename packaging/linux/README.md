@@ -1,11 +1,11 @@
 # Linux packaging
 
 This directory ships the systemd unit + .deb / .rpm install scripts
-for `mythd-linux` (TASK-073 / TASK-076, Phase 8).
+for `freallyd-linux` (TASK-073 / TASK-076, Phase 8).
 
 | File             | Purpose                                                 |
 | ---------------- | ------------------------------------------------------- |
-| `mythd.service`  | systemd unit. Installed to `/lib/systemd/system/`.      |
+| `freallyd.service`  | systemd unit. Installed to `/lib/systemd/system/`.      |
 | `postinst`       | Enables + starts the daemon on .deb / .rpm install.     |
 | `prerm`          | Stops + disables the daemon on uninstall.               |
 

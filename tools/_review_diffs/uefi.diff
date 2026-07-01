@@ -1,8 +1,8 @@
-diff --git a/crates/mythkernel/src/detect/uefi.rs b/crates/mythkernel/src/detect/uefi.rs
+diff --git a/crates/freallykernel/src/detect/uefi.rs b/crates/freallykernel/src/detect/uefi.rs
 new file mode 100644
 index 0000000..a5935bd
 --- /dev/null
-+++ b/crates/mythkernel/src/detect/uefi.rs
++++ b/crates/freallykernel/src/detect/uefi.rs
 @@ -0,0 +1,229 @@
 +//! UEFI / EFI System Partition scan (TASK-145, FR-138, Phase 10).
 +//!

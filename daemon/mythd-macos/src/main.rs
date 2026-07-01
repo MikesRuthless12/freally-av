@@ -1,4 +1,4 @@
-//! `mythd-macos` daemon entry point (Phase 9 scaffold).
+//! `freallyd-macos` daemon entry point (Phase 9 scaffold).
 //!
 //! Wave-1 mac real-time (FSEvents listener + opportunistic ESF NOTIFY)
 //! ships in Phase 9 (TASK-079/080/081). The binary entry exists at
@@ -9,7 +9,7 @@ use clap::Parser;
 use tracing::info;
 
 #[derive(Parser, Debug)]
-#[command(name = "mythd", version)]
+#[command(name = "freallyd", version)]
 struct Cli {
     #[arg(long)]
     once: bool,
@@ -18,7 +18,7 @@ struct Cli {
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt::init();
     let cli = Cli::parse();
-    info!("mythd-macos scaffold ready; FSEvents + ESF NOTIFY land in Phase 9");
+    info!("freallyd-macos scaffold ready; FSEvents + ESF NOTIFY land in Phase 9");
     if cli.once {
         return Ok(());
     }

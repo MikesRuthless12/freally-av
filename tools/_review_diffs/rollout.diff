@@ -1,8 +1,8 @@
-diff --git a/crates/mythkernel/src/detect/rollout.rs b/crates/mythkernel/src/detect/rollout.rs
+diff --git a/crates/freallykernel/src/detect/rollout.rs b/crates/freallykernel/src/detect/rollout.rs
 new file mode 100644
 index 0000000..6f67dd7
 --- /dev/null
-+++ b/crates/mythkernel/src/detect/rollout.rs
++++ b/crates/freallykernel/src/detect/rollout.rs
 @@ -0,0 +1,185 @@
 +//! A/B canary rule rollout (TASK-151, FR-147, Phase 10).
 +//!

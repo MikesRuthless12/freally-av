@@ -3380,12 +3380,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "mythctl"
+name = "freallyctl"
 version = "0.7.20"
 dependencies = [
  "anyhow",
  "clap",
- "mythkernel",
+ "freallykernel",
  "rusqlite",
  "serde_json",
  "tokio",
@@ -3394,7 +3394,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "mythd-linux"
+name = "freallyd-linux"
 version = "0.7.20"
 dependencies = [
  "anyhow",
@@ -3403,7 +3403,7 @@ dependencies = [
  "clap",
  "hex",
  "libc",
- "mythkernel",
+ "freallykernel",
  "rusqlite",
  "serde",
  "serde_json",
@@ -3415,7 +3415,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "mythd-macos"
+name = "freallyd-macos"
 version = "0.7.20"
 dependencies = [
  "anyhow",
@@ -3424,7 +3424,7 @@ dependencies = [
  "clap",
  "hex",
  "libc",
- "mythkernel",
+ "freallykernel",
  "rusqlite",
  "serde",
  "serde_json",
@@ -3436,7 +3436,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "mythd-windows"
+name = "freallyd-windows"
 version = "0.7.20"
 dependencies = [
  "anyhow",
@@ -3444,7 +3444,7 @@ dependencies = [
  "ciborium",
  "clap",
  "hex",
- "mythkernel",
+ "freallykernel",
  "rusqlite",
  "serde",
  "serde_json",
@@ -3457,7 +3457,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "mythkernel"
+name = "freallykernel"
 version = "0.7.20"
 dependencies = [
  "anyhow",
@@ -3508,11 +3508,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "mythodikal-app"
+name = "freally-app"
 version = "0.7.20"
 dependencies = [
  "dirs 5.0.1",
- "mythkernel",
+ "freallykernel",
  "serde",
  "serde_json",
  "tauri",
@@ -6647,7 +6647,7 @@ name = "ui-bridge"
 version = "0.7.20"
 dependencies = [
  "hex",
- "mythkernel",
+ "freallykernel",
  "rusqlite",
  "serde",
  "serde_json",

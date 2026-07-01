@@ -2,7 +2,7 @@ name: Whitelist refresh (NSRL)
 
 # TASK-175 — Nightly check for a new NIST NSRL RDSv3 release. When a
 # newer modern-minimal zip exists, this job downloads it, extracts the
-# SQLite DB, runs `feed-builder nsrl` to reshape into Mythodikal's
+# SQLite DB, runs `feed-builder nsrl` to reshape into Freally's
 # `nsrl_samples` schema, exports the per-OS sorted-hash bins (TASK-174),
 # and opens a draft PR with the new release assets.
 #
@@ -21,14 +21,14 @@ name: Whitelist refresh (NSRL)
 # `modern_minimal` variant is the smallest curated subset (excludes
 # legacy DOS/Solaris/etc.) — the workflow checks the S3 listing for
 # the most recent `RDS_YYYY.MM.N_modern_minimal.zip` and compares
-# against the version stamp in `myth_meta` of the currently-shipped
+# against the version stamp in `freally_meta` of the currently-shipped
 # `nsrl.sqlite`.
 #
 # **Cost / runtime posture:** the extracted source is ~150-170 GB
 # (one-time per quarter). We use GitHub-hosted `ubuntu-latest` runners
 # which currently have ~75 GB of free disk on the runner volume plus
 # ~14 GB tmpfs — not enough to unpack the full RDSv3 zip alongside the
-# Mythodikal toolchain. The job therefore unpacks streaming into the
+# Freally toolchain. The job therefore unpacks streaming into the
 # `feed-builder nsrl` import in a single pass and writes only the
 # slimmer derived `nsrl.sqlite` to disk (~3-5 GB).
 
@@ -158,7 +158,7 @@ jobs:
 
       - name: Compare against currently-shipped NSRL version
         id: gate
-        # The shipped artifact's `myth_meta` carries the NSRL version
+        # The shipped artifact's `freally_meta` carries the NSRL version
         # under key='artifact_version' (e.g. 'v0.7.9'). For the NSRL
         # source version we keep a separate sentinel file in the repo:
         # `.github/state/nsrl-current-version.txt`. Compare and

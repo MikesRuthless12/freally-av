@@ -1,7 +1,7 @@
 # Bundle the third-party attribution files (ATTRIBUTIONS.txt,
 # THIRD-PARTY-RUST.txt, THIRD-PARTY-NPM.txt, YARA-RULE-AUTHORS.txt)
 # at release time. The Tauri bundler picks these up via the
-# `bundle.resources` map in apps/mythodikal/src-tauri/tauri.conf.json
+# `bundle.resources` map in apps/freally/src-tauri/tauri.conf.json
 # and ships them next to the installed binary.
 #
 # Trigger: every release tag, plus on-demand via workflow_dispatch.
@@ -55,13 +55,13 @@ jobs:
         with:
           node-version: '20'
           cache: 'pnpm'
-          cache-dependency-path: apps/mythodikal/frontend/pnpm-lock.yaml
+          cache-dependency-path: apps/freally/frontend/pnpm-lock.yaml
 
       - name: Install frontend deps
-        run: pnpm -C apps/mythodikal/frontend install --frozen-lockfile
+        run: pnpm -C apps/freally/frontend install --frozen-lockfile
 
       - name: Generate THIRD-PARTY-NPM.txt
-        run: pnpm -C apps/mythodikal/frontend licenses list --prod --long > THIRD-PARTY-NPM.txt
+        run: pnpm -C apps/freally/frontend licenses list --prod --long > THIRD-PARTY-NPM.txt
 
       # ----------------------------------------------------------
       # 3. YARA-RULE-AUTHORS.txt  —  the SHIPPED YARA-Forge core pack
@@ -69,7 +69,7 @@ jobs:
       # The maintainer's own labeling rules under tools/feed-builder/
       # yara_rules/ include DRL-1.1 and CC-BY-NC-licensed files; those
       # are NEVER shipped with the binary. The binary downloads the
-      # YARA-Forge `core` tier at runtime via mythkernel/updater/
+      # YARA-Forge `core` tier at runtime via freallykernel/updater/
       # yara_forge.rs. The attribution manifest in the bundle must
       # describe the SCRUBBED form of that pack — only the rule-sets
       # whose comment-block LICENSE is on the project's permissive
@@ -88,7 +88,7 @@ jobs:
       - name: Download YARA-Forge core release
         run: |
           mkdir -p _yara_forge_core
-          # See crates/mythkernel/src/updater/yara_forge.rs (TASK-066)
+          # See crates/freallykernel/src/updater/yara_forge.rs (TASK-066)
           # for the eventual release-tag pinning. `latest/download/`
           # is used here for the attribution-only side; the at-runtime
           # downloader can pin a specific tag for reproducibility.

@@ -1,4 +1,4 @@
-# MythodikalAV Daily Catchup + Release Prompt
+# FreallyAV Daily Catchup + Release Prompt
 
 Paste this entire file as the FIRST message in a fresh Claude Code session,
 or run `@docs/DAILY-CATCHUP-PROMPT.md` to load it.
@@ -12,11 +12,11 @@ For ad-hoc / focused subsets, see:
 
 ## Who you are
 
-You are Claude Code helping Mike maintain MythodikalAV — a clean-room
+You are Claude Code helping Mike maintain FreallyAV — a clean-room
 antivirus shipping a hash blacklist database to end users via GitHub releases.
 Today's job is the full daily release cycle: pull new malware samples from
 URLhaus + MalwareBazaar (daily archives) + abuse.ch ThreatFox (IOC feed),
-generate Mythodikal-original YARA rules from the bytes, label cleanly, merge
+generate Freally-original YARA rules from the bytes, label cleanly, merge
 into canonical, consolidate into shipping artifacts, and publish a new
 blacklist release so end users get the update.
 
@@ -24,13 +24,13 @@ blacklist release so end users get the update.
 
 1. **Clean-room labels.** `family`, `severity`, `commentary`, `rule_matches`
    columns in the DB and ALL fields in published YARA rules must be 100%
-   Mythodikal-original. Never quote upstream YARA rule names, descriptions,
+   Freally-original. Never quote upstream YARA rule names, descriptions,
    or metadata.
    - The 747 upstream rules at `tools/feed-builder/yara_rules/` are TOOLS used
      during analysis — never the final label source on shipped rows or
      shipped rules.
-   - Final labels must come from `tools/feed-builder/yara_rules_mythodikal/
-     refined_latest.yar` (Mythodikal-original rules generated from yarGen on
+   - Final labels must come from `tools/feed-builder/yara_rules_freally/
+     refined_latest.yar` (Freally-original rules generated from yarGen on
      this user's samples + refined via `tools/yarGen/refine_rules.py`).
 
 2. **Dedup is schema-enforced.** Canonical `samples` table has
@@ -51,7 +51,7 @@ blacklist release so end users get the update.
    `tools/yarGen/smoke_test_extract.py`, `tools/yarGen/smoke_test_refine.py`).
 
 5. **Defender exclusion must be active** on
-   `C:\Users\miken\Desktop\Havoc Software\MythodikalAV\tools\` — otherwise
+   `C:\Users\miken\Desktop\Havoc Software\FreallyAV\tools\` — otherwise
    samples vanish mid-extraction. Verify at start; if extraction is losing
    files, pause and remind user to fix.
 
@@ -66,12 +66,12 @@ blacklist release so end users get the update.
 
 | Purpose | Path |
 |---|---|
-| Repo root | `C:\Users\miken\Desktop\Havoc Software\MythodikalAV\` |
+| Repo root | `C:\Users\miken\Desktop\Havoc Software\FreallyAV\` |
 | Canonical DB | `hash_database\MythAV-HashDB.sqlite` (53.7M+ rows) |
 | Staging DB (per-run, gets created/reused) | `tools\feed-builder\feed-builder.sqlite` |
 | feed-builder.exe binary | `tools\feed-builder\target\release\feed-builder.exe` |
 | Upstream YARA (tool, not labels) | `tools\feed-builder\yara_rules\` |
-| Mythodikal YARA (clean-room labels) | `tools\feed-builder\yara_rules_mythodikal\` |
+| Freally YARA (clean-room labels) | `tools\feed-builder\yara_rules_freally\` |
 | MB CSV (cross-reference) | `tools\feed-builder\full.csv.zip` |
 | ThreatFox CSV | `tools\feed-builder\threatfox_full.csv.zip` |
 | URLhaus zip cache | `tools\feed-builder\urlhaus_cache\` |
@@ -92,7 +92,7 @@ blacklist release so end users get the update.
 | `hash_database\verify_nsrl.py` | Read-only sanity check on nsrl.sqlite |
 | `tools\yarGen\extract_urlhaus_samples.py` | Extract MD5-keyed samples from URLhaus + MB zips |
 | `tools\yarGen\smoke_test_extract.py` | Smoke test the extractor |
-| `tools\yarGen\refine_rules.py` | Refine yarGen output → Mythodikal-original rules |
+| `tools\yarGen\refine_rules.py` | Refine yarGen output → Freally-original rules |
 | `tools\yarGen\smoke_test_refine.py` | Smoke test the refiner |
 
 ---
@@ -117,7 +117,7 @@ If anything missing, STOP and report. Don't auto-fix without ack.
 
 ```python
 import sqlite3, datetime
-DB = r'C:\Users\miken\Desktop\Havoc Software\MythodikalAV\hash_database\MythAV-HashDB.sqlite'
+DB = r'C:\Users\miken\Desktop\Havoc Software\FreallyAV\hash_database\MythAV-HashDB.sqlite'
 conn = sqlite3.connect(f'file:{DB}?mode=ro', uri=True)
 last_ts = conn.execute(
     "SELECT MAX(first_seen) FROM samples WHERE source LIKE 'urlhaus-%' OR source LIKE 'datalake-%' OR source LIKE 'threatfox-%'"
@@ -134,14 +134,14 @@ print(f'window: {start_date} to {end_date} ({days} days)')
 ### Step 2 — Pull URLhaus daily archives (with `--keep-archives`)
 
 ```powershell
-cd "C:\Users\miken\Desktop\Havoc Software\MythodikalAV\tools\feed-builder"
+cd "C:\Users\miken\Desktop\Havoc Software\FreallyAV\tools\feed-builder"
 .\target\release\feed-builder.exe `
   urlhaus `
   --start-date $START `
   --end-date $END `
   --csv-path .\full.csv.zip `
   --cache-dir .\urlhaus_cache `
-  --rules .\yara_rules_mythodikal\refined_latest.yar `
+  --rules .\yara_rules_freally\refined_latest.yar `
   --mapping .\mapping.toml `
   --keep-archives
 ```
@@ -161,7 +161,7 @@ Background. Wait for completion notification. Log to
   --end-date $END `
   --csv-path .\full.csv.zip `
   --cache-dir D:\feed-builder\datalake_cache `
-  --rules .\yara_rules_mythodikal\refined_latest.yar `
+  --rules .\yara_rules_freally\refined_latest.yar `
   --keep-archives
 ```
 
@@ -213,11 +213,11 @@ ETA: ~30-60 min for ~5-8 GB of samples (Python ZipCrypto is slow).
 ```powershell
 $DATE = Get-Date -Format 'yyyy-MM-dd'
 
-cd "C:\Users\miken\Desktop\Havoc Software\MythodikalAV\tools\yarGen"
+cd "C:\Users\miken\Desktop\Havoc Software\FreallyAV\tools\yarGen"
 python yarGen.py `
   -m samples_extracted\ `
-  -o ..\feed-builder\yara_rules_mythodikal\draft_$DATE.yar `
-  -a "Mythodikal AV" `
+  -o ..\feed-builder\yara_rules_freally\draft_$DATE.yar `
+  -a "Freally AV" `
   -r "Daily catchup $DATE" `
   -p myth `
   --excludegood
@@ -225,41 +225,41 @@ python yarGen.py `
 
 Background. ETA: ~30-60 min for ~6,000 samples.
 
-### Step 7 — Refine yarGen draft to Mythodikal-only rules
+### Step 7 — Refine yarGen draft to Freally-only rules
 
 ```powershell
 python tools\yarGen\smoke_test_refine.py
 # expect: "REFINE SMOKE TEST PASSED"
 
 python tools\yarGen\refine_rules.py `
-  --in tools\feed-builder\yara_rules_mythodikal\draft_$DATE.yar `
-  --out tools\feed-builder\yara_rules_mythodikal\refined_$DATE.yar `
+  --in tools\feed-builder\yara_rules_freally\draft_$DATE.yar `
+  --out tools\feed-builder\yara_rules_freally\refined_$DATE.yar `
   --min-distinctive 8
 
-Copy-Item tools\feed-builder\yara_rules_mythodikal\refined_$DATE.yar `
-          tools\feed-builder\yara_rules_mythodikal\refined_latest.yar -Force
+Copy-Item tools\feed-builder\yara_rules_freally\refined_$DATE.yar `
+          tools\feed-builder\yara_rules_freally\refined_latest.yar -Force
 ```
 
 **Expected output**: `kept rules: K  dropped: D` with `K` typically 200-1,500.
 If `K > 3,000`, your `--min-distinctive` is too low — raise it.
 
-### Step 8 — (First-run only) Re-run URLhaus + MB with Mythodikal-only rules
+### Step 8 — (First-run only) Re-run URLhaus + MB with Freally-only rules
 
 If Step 2 + 3 already used `refined_latest.yar`, **skip this step**. Required
 only on the first daily run (when only upstream rules existed) to relabel
 samples with clean-room rules:
 
 ```powershell
-cd "C:\Users\miken\Desktop\Havoc Software\MythodikalAV\tools\feed-builder"
+cd "C:\Users\miken\Desktop\Havoc Software\FreallyAV\tools\feed-builder"
 .\target\release\feed-builder.exe urlhaus `
   --start-date $START --end-date $END `
   --csv-path .\full.csv.zip --cache-dir .\urlhaus_cache `
-  --rules .\yara_rules_mythodikal\refined_latest.yar `
+  --rules .\yara_rules_freally\refined_latest.yar `
   --mapping .\mapping.toml
 .\target\release\feed-builder.exe datalake `
   --start-date $START --end-date $END `
   --csv-path .\full.csv.zip --cache-dir D:\feed-builder\datalake_cache `
-  --rules .\yara_rules_mythodikal\refined_latest.yar
+  --rules .\yara_rules_freally\refined_latest.yar
 ```
 
 ### Step 9 — Smoke-test then merge staging → canonical
@@ -298,7 +298,7 @@ $VERSION = "v0.7.X"  # bump patch from $PREV
 
 Then run:
 ```powershell
-cd "C:\Users\miken\Desktop\Havoc Software\MythodikalAV\tools\feed-builder"
+cd "C:\Users\miken\Desktop\Havoc Software\FreallyAV\tools\feed-builder"
 .\target\release\feed-builder.exe consolidate `
   --src-db ..\..\hash_database\MythAV-HashDB.sqlite `
   --src-nsrl ..\..\hash_database\nsrl.sqlite `
@@ -317,10 +317,10 @@ ETA: 15-25 min (blacklist ~1 min, whitelist ~15-20 min including VACUUM).
 
 ```python
 import sqlite3
-db = r'C:\Users\miken\Desktop\Havoc Software\MythodikalAV\hash_database\myth-blacklist.sqlite'
+db = r'C:\Users\miken\Desktop\Havoc Software\FreallyAV\hash_database\myth-blacklist.sqlite'
 c = sqlite3.connect(f'file:{db}?mode=ro', uri=True)
 n = c.execute('SELECT COUNT(*) FROM samples').fetchone()[0]
-meta = dict(c.execute('SELECT key, value FROM myth_meta').fetchall())
+meta = dict(c.execute('SELECT key, value FROM freally_meta').fetchall())
 print(f'blacklist rows={n:,} version={meta["artifact_version"]} built={meta["built_at_unix"]}')
 assert n >= 50_000_000, f'blacklist row count {n:,} suspiciously low'
 ```
@@ -333,7 +333,7 @@ This is the step that pushes the update to end users. ALWAYS get explicit
 ack before running.
 
 ```powershell
-cd "C:\Users\miken\Desktop\Havoc Software\MythodikalAV"
+cd "C:\Users\miken\Desktop\Havoc Software\FreallyAV"
 $STG = "release-staging-$VERSION"
 New-Item -ItemType Directory -Path $STG -Force | Out-Null
 
@@ -349,7 +349,7 @@ git tag -a $VERSION -m "Daily blacklist release $VERSION"
 git push origin $VERSION
 
 gh release create $VERSION `
-  --title "MythodikalAV $VERSION" `
+  --title "FreallyAV $VERSION" `
   --notes-file release-notes-$VERSION.md `
   "$STG\myth-blacklist-$VERSION.sqlite.zst" `
   "$STG\SHA256SUMS.txt"
@@ -385,7 +385,7 @@ Remove-Item -Force tools\feed-builder\urlhaus_cache\*.zip
 Remove-Item -Force D:\feed-builder\datalake_cache\*.zip
 
 # Draft yarGen file (keep the refined one for posterity)
-Remove-Item -Force tools\feed-builder\yara_rules_mythodikal\draft_$DATE.yar
+Remove-Item -Force tools\feed-builder\yara_rules_freally\draft_$DATE.yar
 
 # Release staging dir
 Remove-Item -Recurse -Force release-staging-$VERSION
@@ -443,7 +443,7 @@ Report disk space reclaimed.
 | 5. Extract bytes (~6,000 samples) | 30-60 min |
 | 6. yarGen on full set | 30-60 min |
 | 7. Refine | <1 sec |
-| 8. (First-run only) Re-run URLhaus + MB with Mythodikal rules | 10-20 min |
+| 8. (First-run only) Re-run URLhaus + MB with Freally rules | 10-20 min |
 | 9. Merge to canonical | <5 sec |
 | 10. Consolidate | 15-25 min |
 | 11. Verify | <1 sec |

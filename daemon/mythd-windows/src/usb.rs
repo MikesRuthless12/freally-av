@@ -4,7 +4,7 @@
 //! GUIDs + `SetupDiGetDeviceInterfaceDetail` to resolve VID/PID/Serial.
 //! **Read-only** — no filter driver registration per § 1.5.4.
 
-use mythkernel::usb::{UsbInsertEvent, UsbWatcher, UsbWatcherError};
+use freallykernel::usb::{UsbInsertEvent, UsbWatcher, UsbWatcherError};
 
 pub struct WindowsUsbWatcher {
     pub stopped: bool,

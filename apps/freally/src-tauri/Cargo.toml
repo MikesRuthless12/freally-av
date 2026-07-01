@@ -1,0 +1,42 @@
+[package]
+name = "freally-app"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license-file.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Freally Anti-Virus desktop application (Tauri v2 shell)"
+publish = false
+
+[lib]
+name = "freally_app_lib"
+path = "src/lib.rs"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[[bin]]
+name = "freally-app"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { workspace = true }
+
+[dependencies]
+tauri = { workspace = true }
+tauri-plugin-single-instance = { workspace = true }
+tauri-plugin-updater = { workspace = true }
+tauri-plugin-autostart = { workspace = true }
+tauri-plugin-process = { workspace = true }
+tauri-plugin-dialog = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+freallykernel = { path = "../../../crates/freallykernel" }
+ui-bridge = { path = "../../../crates/ui-bridge" }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+tokio = { workspace = true }
+thiserror = { workspace = true }
+# Resolve the current user's home dir for the tray quick-scan command
+# (sec-review H1).
+dirs = "5"

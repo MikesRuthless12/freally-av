@@ -1,7 +1,7 @@
 //! IPC types shared with the frontend (TASK-029, Phase 3).
 //!
 //! Hand-written serde-serializable types. The TypeScript mirror lives at
-//! `apps/mythodikal/frontend/src/ipc/types.ts` and is kept in lockstep
+//! `apps/freally/frontend/src/ipc/types.ts` and is kept in lockstep
 //! manually for Phase 3. A `specta`-driven generator is on the table for
 //! Phase 7+ when the type surface grows further.
 //!
@@ -112,7 +112,7 @@ pub struct FindingView {
 }
 
 /// Action the user wants to apply to a finding. Mirrors
-/// [`mythkernel::findings::FindingAction`] for IPC.
+/// [`freallykernel::findings::FindingAction`] for IPC.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FindingAction {
@@ -142,7 +142,7 @@ pub struct BatchItemErr {
 
 /// Discriminator for which kind of batch op was run. Serialized as
 /// lowercase `"restore"` / `"delete"` to match the TS narrow union
-/// in `apps/mythodikal/frontend/src/ipc/types.ts`.
+/// in `apps/freally/frontend/src/ipc/types.ts`.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum BatchKindWire {
@@ -150,17 +150,17 @@ pub enum BatchKindWire {
     Delete,
 }
 
-impl From<mythkernel::quarantine::BatchKind> for BatchKindWire {
-    fn from(k: mythkernel::quarantine::BatchKind) -> Self {
+impl From<freallykernel::quarantine::BatchKind> for BatchKindWire {
+    fn from(k: freallykernel::quarantine::BatchKind) -> Self {
         match k {
-            mythkernel::quarantine::BatchKind::Restore => BatchKindWire::Restore,
-            mythkernel::quarantine::BatchKind::Delete => BatchKindWire::Delete,
+            freallykernel::quarantine::BatchKind::Restore => BatchKindWire::Restore,
+            freallykernel::quarantine::BatchKind::Delete => BatchKindWire::Delete,
         }
     }
 }
 
 /// Final report of a bulk op. Mirrors
-/// [`mythkernel::quarantine::BatchReport`] for IPC.
+/// [`freallykernel::quarantine::BatchReport`] for IPC.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BatchOpReport {
     pub batch_id: BatchOpId,
@@ -299,7 +299,7 @@ pub struct EngineVersionInfo {
 }
 
 /// Most-recent feed updater run (TASK-043). Mirrors
-/// `mythkernel::updater::scheduler::LastRun` field-for-field; we re-
+/// `freallykernel::updater::scheduler::LastRun` field-for-field; we re-
 /// declare here so the IPC boundary doesn't leak the internal type.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UpdaterStatusView {
@@ -315,7 +315,7 @@ pub struct UpdaterStatusView {
 // ---------------------------------------------------------------------------
 
 /// Generic channel-state view (engine or database). Mirrors
-/// `mythkernel::updater::channels::ChannelState`.
+/// `freallykernel::updater::channels::ChannelState`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UpdateChannelStateView {
     pub kind: String, // "engine" | "database"
@@ -360,7 +360,7 @@ pub struct EngineUpdateAvailableView {
 }
 
 /// Progress event emitted to `engine_update:progress`. Mirrors
-/// `mythkernel::updater::engine::EngineUpdateProgress`.
+/// `freallykernel::updater::engine::EngineUpdateProgress`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EngineUpdateProgressEvent {
     /// `"download" | "verify" | "install" | "restart_pending"`.
@@ -371,7 +371,7 @@ pub struct EngineUpdateProgressEvent {
 }
 
 /// Progress event emitted to `db_update:progress`. Mirrors
-/// `mythkernel::updater::database::DatabaseUpdateProgress`.
+/// `freallykernel::updater::database::DatabaseUpdateProgress`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DatabaseUpdateProgressEvent {
     pub feed_id: String,
@@ -386,12 +386,12 @@ pub struct DatabaseUpdateProgressEvent {
 // Autostart (FR-161 / TASK-157) + Tray (FR-162 / TASK-158)
 // ---------------------------------------------------------------------------
 
-/// Reflects the OS autostart state for the Mythodikal app (FR-161).
+/// Reflects the OS autostart state for the Freally app (FR-161).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AutostartState {
     pub enabled: bool,
     /// Free-text description of the OS mechanism used (e.g.
-    /// `"~/.config/autostart/mythodikal.desktop"` on Linux). Empty when
+    /// `"~/.config/autostart/freally.desktop"` on Linux). Empty when
     /// the plugin reports an unknown mechanism.
     pub mechanism: String,
 }
@@ -409,7 +409,7 @@ pub struct TrayState {
 // ---------------------------------------------------------------------------
 
 /// One row in the Windows scan-target chooser. Mirrors
-/// [`mythkernel::platform::win::volumes::VolumeInfo`] for IPC. On
+/// [`freallykernel::platform::win::volumes::VolumeInfo`] for IPC. On
 /// non-Windows hosts the command returns an empty `Vec`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VolumeView {
@@ -467,13 +467,13 @@ pub struct ExclusionRequest {
 
 /// Mapping helper — converts a kernel-level `FindingAction` from the IPC
 /// wire to the kernel enum.
-impl From<FindingAction> for mythkernel::findings::FindingAction {
+impl From<FindingAction> for freallykernel::findings::FindingAction {
     fn from(a: FindingAction) -> Self {
         match a {
-            FindingAction::Quarantine => mythkernel::findings::FindingAction::Quarantine,
-            FindingAction::Restore => mythkernel::findings::FindingAction::Restore,
-            FindingAction::Delete => mythkernel::findings::FindingAction::Delete,
-            FindingAction::Ignore => mythkernel::findings::FindingAction::Ignore,
+            FindingAction::Quarantine => freallykernel::findings::FindingAction::Quarantine,
+            FindingAction::Restore => freallykernel::findings::FindingAction::Restore,
+            FindingAction::Delete => freallykernel::findings::FindingAction::Delete,
+            FindingAction::Ignore => freallykernel::findings::FindingAction::Ignore,
         }
     }
 }

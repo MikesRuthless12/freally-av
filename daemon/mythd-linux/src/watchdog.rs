@@ -1,7 +1,7 @@
 //! Daemon watchdog + start-on-boot policy (TASK-076, Phase 8).
 //!
 //! The actual systemd unit lives in
-//! `packaging/linux/mythd.service`; this module owns the **crash
+//! `packaging/linux/freallyd.service`; this module owns the **crash
 //! budget tracker** that the daemon ships to the engine over the IPC
 //! heartbeat. The UI surfaces "real-time crashed (> 3 restarts/hr)"
 //! when the tracker trips.

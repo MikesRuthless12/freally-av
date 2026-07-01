@@ -1,4 +1,4 @@
-<svg viewBox="0 0 720 144" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Mythodikal Anti-Virus">
+<svg viewBox="0 0 720 144" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Freally Anti-Virus">
   <g fill="#7C5CFF">
     <polygon points="24,24 60,24 100,114 140,24 176,24 176,120 140,120 140,72 116,116 84,116 60,72 60,120 24,120" />
   </g>
@@ -7,5 +7,5 @@
         font-weight="600"
         font-size="56"
         fill="#E6E9F2"
-        letter-spacing="-0.5">Mythodikal Anti-Virus</text>
+        letter-spacing="-0.5">Freally Anti-Virus</text>
 </svg>

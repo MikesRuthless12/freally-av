@@ -6,7 +6,7 @@
 //! toggle does not require a daemon restart.
 //!
 //! Per-mount enabled/disabled persists in the daemon-local sqlite at
-//! `/var/lib/mythd/mythd.db`; the engine-side UI (TASK-075) round-
+//! `/var/lib/freallyd/freallyd.db`; the engine-side UI (TASK-075) round-
 //! trips through the Tauri command in
 //! `crates/ui-bridge/src/commands/mount_toggle.rs`.
 //!

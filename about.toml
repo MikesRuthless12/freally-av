@@ -1,6 +1,6 @@
 # cargo-about configuration. Used by `cargo about generate about.hbs`
 # at release time to produce THIRD-PARTY-RUST.txt — the per-crate
-# attribution bundle shipped alongside the Mythodikal Anti-Virus binary
+# attribution bundle shipped alongside the Freally Anti-Virus binary
 # (see ATTRIBUTIONS.txt § 2 and tauri.conf.json bundle.resources).
 #
 # Allowed licenses mirror what `deny.toml` permits for the workspace.

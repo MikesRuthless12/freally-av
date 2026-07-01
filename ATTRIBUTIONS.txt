@@ -1,14 +1,14 @@
-MYTHODIKAL ANTI-VIRUS — THIRD-PARTY ATTRIBUTIONS
+FREALLY ANTI-VIRUS — THIRD-PARTY ATTRIBUTIONS
 ================================================
 
-Mythodikal Anti-Virus ("the Software") includes data, code, and
+Freally Anti-Virus ("the Software") includes data, code, and
 artifacts derived from the third-party sources listed below. These
 notices are required (or strongly encouraged) by the respective
 upstream licenses and MUST ship alongside any binary distribution
 of the Software.
 
 Last updated: 2026-05-14
-Maintainer:   Mike Weaver  <mythodikalone@gmail.com>
+Maintainer:   Mike Weaver  <freallyone@gmail.com>
 
 
 ================================================================
@@ -27,7 +27,7 @@ Maintainer:   Mike Weaver  <mythodikalone@gmail.com>
     License:     Free for commercial use per the abuse.ch FAQ
                  ( https://bazaar.abuse.ch/faq/ ).
                  Donations to abuse.ch are encouraged; the
-                 Mythodikal project has donated.
+                 Freally project has donated.
     URLs:        https://bazaar.abuse.ch/
                  https://threatfox.abuse.ch/
                  https://urlhaus.abuse.ch/
@@ -154,11 +154,11 @@ Maintainer:   Mike Weaver  <mythodikalone@gmail.com>
 
 
 ================================================================
-2. Rust crate dependencies (mythkernel, mythctl, ui-bridge,
+2. Rust crate dependencies (freallykernel, freallyctl, ui-bridge,
    feed-builder)
 ================================================================
 
-Mythodikal Anti-Virus is built in Rust and depends on a number of
+Freally Anti-Virus is built in Rust and depends on a number of
 open-source crates. License compliance is enforced in CI via
 `cargo-deny` per `deny.toml`. The allow-list of accepted licenses
 is:
@@ -202,7 +202,7 @@ machine-readable form.)
 
 
 ================================================================
-4. Mythodikal-original components
+4. Freally-original components
 ================================================================
 
 The following are original work product of the Licensor (Mike
@@ -211,15 +211,15 @@ obligation:
 
     - All Rust source code under `crates/` and `apps/`
     - All TypeScript / React source code under
-      `apps/mythodikal/frontend/src/`
+      `apps/freally/frontend/src/`
     - The mapping.toml family-name translation table
-    - The Mythodikal-branded per-sample commentary text generated
+    - The Freally-branded per-sample commentary text generated
       by `tools/feed-builder/refresh_unique_commentary.py`
     - The curated strict-bin selection (`family != 'unknown'
       AND vtpercent >= 30`) and the published feed formats:
-      `myth_sha256.bin`, `blake3_blacklist.bin`,
+      `freally_sha256.bin`, `blake3_blacklist.bin`,
       `crc32_blacklist.bin`, `blake3_meta.jsonl`
-    - All brand assets under `assets/` and `apps/mythodikal/
+    - All brand assets under `assets/` and `apps/freally/
       frontend/public/`
 
 These are governed by `LICENSE.md` (Proprietary Source-Visible,
@@ -231,21 +231,21 @@ All Rights Reserved).
 ================================================================
 
 This file MUST be included in any binary distribution of
-Mythodikal Anti-Virus. Conventional placement for the Tauri
+Freally Anti-Virus. Conventional placement for the Tauri
 installer (Windows MSI / NSIS, macOS DMG / pkg) is:
 
   a) Include `ATTRIBUTIONS.txt`, `THIRD-PARTY-RUST.txt`,
      `THIRD-PARTY-NPM.txt`, and `YARA-RULE-AUTHORS.txt` in the
-     `resources` array of `apps/mythodikal/src-tauri/tauri.conf.json`
+     `resources` array of `apps/freally/src-tauri/tauri.conf.json`
      so the files are bundled inside the app's resource directory
      and installed alongside the executable.
 
   b) Expose a link to each file from the in-app "About" dialog
      (modal or external open).
 
-  c) For headless / CLI distributions (`mythctl.exe`), ship the
+  c) For headless / CLI distributions (`freallyctl.exe`), ship the
      files in the same directory as the executable, OR add a
-     `mythctl licenses` / `mythctl attributions` subcommand that
+     `freallyctl licenses` / `freallyctl attributions` subcommand that
      prints them on demand.
 
   d) For source-only / git-clone distributions, the files live at
@@ -264,7 +264,7 @@ If you believe a third-party source has been omitted from this
 file, has changed its license terms, or is being misrepresented
 here, please email:
 
-    mythodikalone@gmail.com
+    freallyone@gmail.com
 
 with the subject `ATTRIBUTIONS:` and a link to the upstream
 notice. Corrections will be issued in the next patch release.

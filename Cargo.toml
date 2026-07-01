@@ -1,17 +1,17 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/mythkernel",
+    "crates/freallykernel",
     "crates/ui-bridge",
-    "crates/mythctl",
-    "apps/mythodikal/src-tauri",
+    "crates/freallyctl",
+    "apps/freally/src-tauri",
     # Phase 8 — per-OS real-time daemons. Each crate's syscall-heavy
     # surface (fanotify on Linux, IOKit on macOS, SetupDi/RegisterDeviceNotification
     # on Windows) is cfg-gated to its target so the workspace
     # `cargo check` / `cargo build` succeeds on every host.
-    "daemon/mythd-linux",
-    "daemon/mythd-macos",
-    "daemon/mythd-windows",
+    "daemon/freallyd-linux",
+    "daemon/freallyd-macos",
+    "daemon/freallyd-windows",
 ]
 # `scripts/gen-signing-key` is a one-shot Tauri Updater minisign keypair
 # generator (TASK-044). It's intentionally outside the workspace so its
@@ -22,10 +22,10 @@ exclude = ["scripts/gen-signing-key", "tools/feed-builder"]
 version = "0.7.20"
 edition = "2024"
 rust-version = "1.85"
-authors = ["Mike Weaver <mythodikalone@gmail.com>"]
+authors = ["Mike Weaver <freallyone@gmail.com>"]
 license-file = "LICENSE.md"
-repository = "https://github.com/MikesRuthless12/mythodikal-av"
-homepage = "https://mythodikal.com"
+repository = "https://github.com/MikesRuthless12/freally-av"
+homepage = "https://freally.com"
 
 [workspace.dependencies]
 tauri = { version = "2", features = ["tray-icon", "image-png"] }
@@ -145,7 +145,7 @@ sysinfo = { version = "0.32", default-features = false, features = ["system"] }
 # `coap-rs` / `webauthn-rs`; MIT-licensed, no transitive C dep.
 ciborium = "0.2"
 
-# Phase 8 — `libc` is already pulled in on Linux/macOS via mythkernel's
+# Phase 8 — `libc` is already pulled in on Linux/macOS via freallykernel's
 # target-conditional deps, but it's surfaced here so the daemon crates
 # can lock to the same version without re-declaring the version in each
 # Cargo.toml. The crates only depend on `libc` for fanotify syscalls

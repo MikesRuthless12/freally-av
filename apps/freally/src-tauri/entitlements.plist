@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  TASK-061 macOS hardened-runtime entitlements.
+
+  Per docs/prd.md § 1.5.3 + § 1.5.4 / FR-031, Freally does NOT enroll
+  in the paid Apple Developer Program and does NOT request any
+  com.apple.security.cs.* entitlement that gates on Apple's approval
+  (notarization, ESF, etc.).
+
+  The keys below are the "secure default" hardened-runtime entitlements
+  that are *free* to set: each is set to <false/> so the binary keeps
+  its restrictions on. These are applied as binary metadata even when
+  the bundle ships unsigned — they are advisory on unsigned binaries but
+  document the intended security posture and become enforced if a
+  downstream consumer ever notarizes a fork on their own dime.
+
+  Library validation is intentionally LEFT ON (the disable-library-
+  validation key is <false/>) because yara-x is pure Rust and does not
+  JIT — there is no need to permit loading of unsigned libraries.
+-->
+<plist version="1.0">
+<dict>
+    <key>com.apple.security.cs.allow-jit</key>
+    <false/>
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <false/>
+    <key>com.apple.security.cs.allow-dyld-environment-variables</key>
+    <false/>
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <false/>
+    <key>com.apple.security.cs.disable-executable-page-protection</key>
+    <false/>
+</dict>
+</plist>

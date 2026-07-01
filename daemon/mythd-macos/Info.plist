@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  Mythodikal Anti-Virus macOS real-time daemon (TASK-080, Phase 9 Wave 1).
+  Freally Anti-Virus macOS real-time daemon (TASK-080, Phase 9 Wave 1).
 
   This Info.plist describes the opportunistic Endpoint Security system
   extension. Per docs/prd.md § 1.5.4:
@@ -14,7 +14,7 @@
       TASK-251 stays BLOCKED.
 
   On stock consumer macOS where the extension fails to load without
-  entitlement, `mythd` falls back silently to FSEvents (TASK-079) —
+  entitlement, `freallyd` falls back silently to FSEvents (TASK-079) —
   no UX regression, just less event metadata.
 -->
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -23,13 +23,13 @@
     <key>CFBundleDevelopmentRegion</key>
     <string>en</string>
     <key>CFBundleExecutable</key>
-    <string>mythd</string>
+    <string>freallyd</string>
     <key>CFBundleIdentifier</key>
-    <string>com.mythodikal.mythd</string>
+    <string>com.freally.freallyd</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleName</key>
-    <string>Mythodikal Real-time Daemon</string>
+    <string>Freally Real-time Daemon</string>
     <key>CFBundlePackageType</key>
     <string>SYSX</string>
     <key>CFBundleShortVersionString</key>
@@ -39,7 +39,7 @@
     <key>LSMinimumSystemVersion</key>
     <string>11.0</string>
     <key>NSSystemExtensionUsageDescription</key>
-    <string>Mythodikal Anti-Virus uses Endpoint Security in NOTIFY-only mode to observe file events for real-time threat detection. No requests are blocked; events are logged and analyzed locally.</string>
+    <string>Freally Anti-Virus uses Endpoint Security in NOTIFY-only mode to observe file events for real-time threat detection. No requests are blocked; events are logged and analyzed locally.</string>
     <key>NSEndpointSecurityRequirement</key>
     <dict>
         <key>NSEndpointSecurityEarlyBoot</key>

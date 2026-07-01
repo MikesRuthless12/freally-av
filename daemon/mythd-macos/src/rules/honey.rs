@@ -1,10 +1,10 @@
 //! Ransomware honeyfile tripwires — macOS daemon (TASK-161, FR-142,
 //! Phase 9 Wave 1).
 //!
-//! Builds on `mythkernel::detect::honeyfiles` (cross-platform planning
+//! Builds on `freallykernel::detect::honeyfiles` (cross-platform planning
 //! and write detection) by adding the macOS-specific **action**:
 //! `kill(pid, SIGSTOP)` on the writer's whole process tree. The
-//! Linux variant lives at `daemon/mythd-linux/src/rules/honey.rs`
+//! Linux variant lives at `daemon/freallyd-linux/src/rules/honey.rs`
 //! (TASK-142); both surfaces share the planner module.
 //!
 //! Per `docs/prd.md` § 1.5.4 the daemon never `SIGKILL`s — SIGSTOP
@@ -144,11 +144,11 @@ pub struct CanaryTrip {
 }
 
 /// True when `write_event_path` matches the planned canary set.
-/// Delegates to `mythkernel::detect::honeyfiles::is_canary_shape` for
+/// Delegates to `freallykernel::detect::honeyfiles::is_canary_shape` for
 /// the actual shape test; this thin wrapper documents the daemon
 /// integration point.
 pub fn is_canary_write(write_event_path: &Path) -> bool {
-    mythkernel::detect::honeyfiles::is_canary_shape(write_event_path)
+    freallykernel::detect::honeyfiles::is_canary_shape(write_event_path)
 }
 
 /// The user-document roots the macOS daemon plants canaries under,
@@ -167,7 +167,7 @@ pub fn default_canary_roots(home: &Path) -> Vec<std::path::PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mythkernel::detect::honeyfiles::plan_canaries;
+    use freallykernel::detect::honeyfiles::plan_canaries;
 
     #[test]
     fn is_canary_write_matches_planned_paths() {

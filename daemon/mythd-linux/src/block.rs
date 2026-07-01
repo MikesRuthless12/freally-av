@@ -2,7 +2,7 @@
 //!
 //! Owns the in-memory denylist + the verdict-policy function. The
 //! engine pushes the path set via
-//! [`mythkernel::ipc::linfan::IpcFrame::ActiveFindingsPush`] every
+//! [`freallykernel::ipc::linfan::IpcFrame::ActiveFindingsPush`] every
 //! time the underlying `findings` table changes. The denylist lives
 //! in this module so a verdict request can be answered in O(log n)
 //! without round-tripping the engine.
@@ -14,8 +14,8 @@
 
 use std::collections::BTreeSet;
 
-use mythkernel::ipc::linfan::{Verdict, VerdictResponse};
-use mythkernel::realtime::shields::ShieldsState;
+use freallykernel::ipc::linfan::{Verdict, VerdictResponse};
+use freallykernel::realtime::shields::ShieldsState;
 
 /// Daemon-side cache of "paths with an open `detected` finding". The
 /// engine pushes; the daemon reads on the verdict hot path.

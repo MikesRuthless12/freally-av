@@ -1,4 +1,4 @@
-//! Mythodikal Anti-Virus Tauri command bridge.
+//! Freally Anti-Virus Tauri command bridge.
 //!
 //! Re-exports `#[tauri::command]` wrappers from `commands` and IPC types from
 //! `types`. Phase 0 / TASK-004 ships stubs; commands are filled in by TASK-028

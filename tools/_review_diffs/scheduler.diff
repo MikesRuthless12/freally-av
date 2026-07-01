@@ -1,7 +1,7 @@
-diff --git a/crates/mythkernel/src/scheduler.rs b/crates/mythkernel/src/scheduler.rs
+diff --git a/crates/freallykernel/src/scheduler.rs b/crates/freallykernel/src/scheduler.rs
 index 2bdd4d9..1df7171 100644
---- a/crates/mythkernel/src/scheduler.rs
-+++ b/crates/mythkernel/src/scheduler.rs
+--- a/crates/freallykernel/src/scheduler.rs
++++ b/crates/freallykernel/src/scheduler.rs
 @@ -1,6 +1,665 @@
 -//! Scheduled scans. Filled in by TASK-086 (Phase 10).
 +//! Scheduled scans (TASK-086, Phase 10).

@@ -4,7 +4,7 @@
 //! `SecItemDelete`. Each exemption is a `kSecClassGenericPassword`
 //! item with:
 //!
-//!   * `kSecAttrService`        = `com.mythodikal.exemption`
+//!   * `kSecAttrService`        = `com.freally.exemption`
 //!   * `kSecAttrAccount`        = `<bundle_id>:<team_id>`
 //!   * `kSecAttrAccessControl`  = `BiometryCurrentSet | Or | DevicePasscode`
 //!
@@ -18,12 +18,12 @@
 //! Exemptions short-circuit the engine call after the syscall has
 //! happened; they never relax kernel policy.
 
-use mythkernel::exempt::per_app::{ExemptionRegistry, PerAppExemption};
+use freallykernel::exempt::per_app::{ExemptionRegistry, PerAppExemption};
 
-/// Stable `kSecAttrService` value used by every Mythodikal exemption.
+/// Stable `kSecAttrService` value used by every Freally exemption.
 /// Hard-coded so a future installer can `SecItemDelete` everything
 /// keyed by this service without touching unrelated Keychain items.
-pub const KEYCHAIN_SERVICE: &str = "com.mythodikal.exemption";
+pub const KEYCHAIN_SERVICE: &str = "com.freally.exemption";
 
 /// Errors surfaced by the wrapper. The two macOS-only OSStatus values
 /// we surface explicitly are `errSecUserCanceled` (user dismissed the
@@ -121,7 +121,7 @@ mod tests {
     fn service_id_is_stable() {
         // Stable id surfaces in the Keychain query — a rename would
         // orphan every existing exemption.
-        assert_eq!(KEYCHAIN_SERVICE, "com.mythodikal.exemption");
+        assert_eq!(KEYCHAIN_SERVICE, "com.freally.exemption");
     }
 
     #[cfg(not(target_os = "macos"))]

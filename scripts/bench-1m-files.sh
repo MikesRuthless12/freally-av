@@ -3,7 +3,7 @@
 #
 # End-to-end Phase-1 benchmark. Generates a synthetic 1M-file tree under
 # $TARGET (default /tmp/myth-bench-1m) if it is not already populated, then
-# runs `mythctl scan` against it and asserts the NFR-001 budget for the
+# runs `freallyctl scan` against it and asserts the NFR-001 budget for the
 # current release line.
 #
 # Budget:
@@ -42,12 +42,12 @@ if [[ ! -d "$TARGET" ]] || [[ "$(find "$TARGET" -type f | wc -l)" -lt "$FILE_COU
     done
 fi
 
-echo "[bench] cargo build --release -p mythctl"
-cargo build --release -p mythctl
+echo "[bench] cargo build --release -p freallyctl"
+cargo build --release -p freallyctl
 
 echo "[bench] scanning $TARGET (budget: ${BUDGET_SECONDS}s)"
 START=$(date +%s)
-target/release/mythctl scan "$TARGET" --format text > /dev/null
+target/release/freallyctl scan "$TARGET" --format text > /dev/null
 END=$(date +%s)
 ELAPSED=$((END - START))
 

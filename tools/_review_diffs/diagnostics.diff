@@ -1,8 +1,8 @@
-diff --git a/crates/mythkernel/src/diagnostics.rs b/crates/mythkernel/src/diagnostics.rs
+diff --git a/crates/freallykernel/src/diagnostics.rs b/crates/freallykernel/src/diagnostics.rs
 new file mode 100644
 index 0000000..affca3c
 --- /dev/null
-+++ b/crates/mythkernel/src/diagnostics.rs
++++ b/crates/freallykernel/src/diagnostics.rs
 @@ -0,0 +1,512 @@
 +//! Diagnostic bundle export (TASK-088, Phase 10).
 +//!
@@ -21,7 +21,7 @@ index 0000000..affca3c
 +//!     [`Config`] struct does not currently carry path fields, so this
 +//!     ships verbatim. Future additions that introduce paths must add
 +//!     themselves to the redactor.
-+//!  3. `logs/mythodikal.log.YYYY-MM-DD` for the most recent N days
++//!  3. `logs/freally.log.YYYY-MM-DD` for the most recent N days
 +//!     (default 7, matching FR-100's retention). Each JSON line is
 +//!     parsed; the redactor walks the value tree and replaces any
 +//!     string value at a `PATH_LIKE_KEYS` key with `"<REDACTED>"`. Non-
@@ -412,13 +412,13 @@ index 0000000..affca3c
 +        std::fs::create_dir_all(&log_dir).unwrap();
 +        // Plant two synthetic log files, one with a path field that
 +        // must be redacted in the output.
-+        let earlier = log_dir.join("mythodikal.log.2026-05-26");
++        let earlier = log_dir.join("freally.log.2026-05-26");
 +        std::fs::write(
 +            &earlier,
 +            "{\"path\":\"/Users/me/keep\",\"level\":\"info\"}\nplain line\n",
 +        )
 +        .unwrap();
-+        let later = log_dir.join("mythodikal.log.2026-05-27");
++        let later = log_dir.join("freally.log.2026-05-27");
 +        std::fs::write(&later, "{\"event\":\"clean\",\"file\":\"/secret\"}\n").unwrap();
 +
 +        let opts = BundleOptions {
@@ -434,10 +434,10 @@ index 0000000..affca3c
 +        assert!(manifest.contains("\"bundle_format_version\": 1"));
 +        let config = read_zip_entry(&out, "config.toml").unwrap();
 +        assert!(config.contains("[general]"));
-+        let log_2027 = read_zip_entry(&out, "logs/mythodikal.log.2026-05-27").unwrap();
++        let log_2027 = read_zip_entry(&out, "logs/freally.log.2026-05-27").unwrap();
 +        assert!(log_2027.contains("<REDACTED>"));
 +        assert!(!log_2027.contains("/secret"));
-+        let log_2026 = read_zip_entry(&out, "logs/mythodikal.log.2026-05-26").unwrap();
++        let log_2026 = read_zip_entry(&out, "logs/freally.log.2026-05-26").unwrap();
 +        assert!(log_2026.contains("plain line"));
 +        assert!(!log_2026.contains("/Users/me/keep"));
 +    }
@@ -450,7 +450,7 @@ index 0000000..affca3c
 +        // platform requires the file be opened with write to mutate
 +        // its metadata).
 +        for i in 0..10 {
-+            let p = dir.path().join(format!("mythodikal.log.2026-05-{i:02}"));
++            let p = dir.path().join(format!("freally.log.2026-05-{i:02}"));
 +            std::fs::write(&p, "x").unwrap();
 +            let f = std::fs::OpenOptions::new().write(true).open(&p).unwrap();
 +            f.set_modified(SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(i as u64 + 1))
@@ -463,7 +463,7 @@ index 0000000..affca3c
 +    #[test]
 +    fn bug_report_redacts_path_fields_from_logs() {
 +        let dir = tempdir().unwrap();
-+        let log = dir.path().join("mythodikal.log.2026-05-27");
++        let log = dir.path().join("freally.log.2026-05-27");
 +        std::fs::write(
 +            &log,
 +            "{\"event\":\"clean\",\"file\":\"/Users/me/secret.txt\"}\n",

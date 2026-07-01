@@ -1,6 +1,6 @@
-//! `mythd-linux` daemon entry point (TASK-073, Phase 8).
+//! `freallyd-linux` daemon entry point (TASK-073, Phase 8).
 //!
-//! Run by systemd as `mythd.service`. Opens the fanotify FD (falling
+//! Run by systemd as `freallyd.service`. Opens the fanotify FD (falling
 //! back to inotify on kernels < 5.1 or audit when even mount-level
 //! fanotify is unavailable), drops every capability except
 //! `CAP_SYS_ADMIN`, opens the engine IPC socket, and enters the main
@@ -13,31 +13,31 @@
 use clap::Parser;
 use tracing::{info, warn};
 
-use mythd_linux::audit::AuditHandle;
-use mythd_linux::block::ActiveDenylist;
-use mythd_linux::ebpf::EbpfObserver;
-use mythd_linux::fanotify::{FanotifyError, FanotifyHandle};
-use mythd_linux::inotify_fallback::InotifyHandle;
-use mythd_linux::ipc_client::IpcClient;
-use mythd_linux::watchdog::CrashBudget;
-use mythd_linux::wsl_peer::WslContext;
+use freallyd_linux::audit::AuditHandle;
+use freallyd_linux::block::ActiveDenylist;
+use freallyd_linux::ebpf::EbpfObserver;
+use freallyd_linux::fanotify::{FanotifyError, FanotifyHandle};
+use freallyd_linux::inotify_fallback::InotifyHandle;
+use freallyd_linux::ipc_client::IpcClient;
+use freallyd_linux::watchdog::CrashBudget;
+use freallyd_linux::wsl_peer::WslContext;
 
 #[derive(Parser, Debug)]
 #[command(
-    name = "mythd",
+    name = "freallyd",
     version,
-    about = "Mythodikal Anti-Virus Linux real-time daemon"
+    about = "Freally Anti-Virus Linux real-time daemon"
 )]
 struct Cli {
     /// Socket path for engine IPC. Defaults to
-    /// `mythkernel::ipc::linfan::SYSTEM_SOCKET_PATH`
-    /// (`/run/mythd/mythd.sock`) when run by systemd; the user-mode
+    /// `freallykernel::ipc::linfan::SYSTEM_SOCKET_PATH`
+    /// (`/run/freallyd/freallyd.sock`) when run by systemd; the user-mode
     /// fallback under `$XDG_RUNTIME_DIR` is set by the caller.
-    #[arg(long, default_value_t = mythkernel::ipc::linfan::SYSTEM_SOCKET_PATH.to_string())]
+    #[arg(long, default_value_t = freallykernel::ipc::linfan::SYSTEM_SOCKET_PATH.to_string())]
     socket: String,
 
     /// Exit after one event-loop iteration. Used by the
-    /// `--once` smoke-test in `packaging/linux/mythd.service.test`.
+    /// `--once` smoke-test in `packaging/linux/freallyd.service.test`.
     #[arg(long)]
     once: bool,
 }
@@ -110,7 +110,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Exit non-zero so systemd treats a launch of this scaffold as a
     // failure rather than "completed successfully" — that lets the
     // crash budget (TASK-076) actually surface to the operator and
-    // prevents shipping a build whose `mythd.service` reports
+    // prevents shipping a build whose `freallyd.service` reports
     // `active (exited)` while doing no enforcement.
     Err("daemon runtime loop not yet wired — install of v0.8.0 foundation requires --once for smoke testing only".into())
 }

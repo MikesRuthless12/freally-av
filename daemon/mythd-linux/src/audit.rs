@@ -7,7 +7,7 @@
 //! Observe-only — the UI shows "audit (observe-only)" and disables
 //! the "block-on-detect" toggle.
 //!
-//! Audit rules installed by the daemon are tagged with `key=mythodikal`
+//! Audit rules installed by the daemon are tagged with `key=freally`
 //! so the daemon's `--uninstall` path can remove only its own rules.
 
 #[derive(Debug, thiserror::Error)]

@@ -5,7 +5,7 @@
 //! from DiskArbitration for the mountpoint. Both APIs are user-mode,
 //! read-only — no kernel extension, no entitlement gating per § 1.5.4.
 
-use mythkernel::usb::{UsbInsertEvent, UsbWatcher, UsbWatcherError};
+use freallykernel::usb::{UsbInsertEvent, UsbWatcher, UsbWatcherError};
 
 pub struct MacosUsbWatcher {
     pub stopped: bool,

@@ -1,8 +1,8 @@
-diff --git a/crates/mythkernel/src/diff.rs b/crates/mythkernel/src/diff.rs
+diff --git a/crates/freallykernel/src/diff.rs b/crates/freallykernel/src/diff.rs
 new file mode 100644
 index 0000000..57e4678
 --- /dev/null
-+++ b/crates/mythkernel/src/diff.rs
++++ b/crates/freallykernel/src/diff.rs
 @@ -0,0 +1,210 @@
 +//! Scan diffing (TASK-149, FR-150, Phase 10).
 +//!

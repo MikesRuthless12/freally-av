@@ -1,5 +1,5 @@
 [package]
-name = "mythd-macos"
+name = "freallyd-macos"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -7,22 +7,22 @@ authors.workspace = true
 license-file.workspace = true
 repository.workspace = true
 homepage.workspace = true
-description = "Mythodikal Anti-Virus macOS real-time daemon (NOTIFY-only)"
+description = "Freally Anti-Virus macOS real-time daemon (NOTIFY-only)"
 publish = false
 
 # Per-OS binary name so all three daemons can build under `cargo
 # build --workspace` without colliding on a shared output path.
 # The launchd plist references the per-OS name directly.
 [[bin]]
-name = "mythd-macos"
+name = "freallyd-macos"
 path = "src/main.rs"
 
 [lib]
-name = "mythd_macos"
+name = "freallyd_macos"
 path = "src/lib.rs"
 
 [dependencies]
-mythkernel = { path = "../../crates/mythkernel" }
+freallykernel = { path = "../../crates/freallykernel" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 ciborium = { workspace = true }

@@ -1,8 +1,8 @@
-diff --git a/crates/mythkernel/src/detect/behavior_dsl.rs b/crates/mythkernel/src/detect/behavior_dsl.rs
+diff --git a/crates/freallykernel/src/detect/behavior_dsl.rs b/crates/freallykernel/src/detect/behavior_dsl.rs
 new file mode 100644
 index 0000000..640d350
 --- /dev/null
-+++ b/crates/mythkernel/src/detect/behavior_dsl.rs
++++ b/crates/freallykernel/src/detect/behavior_dsl.rs
 @@ -0,0 +1,465 @@
 +//! Generic behavioral-rule DSL (TASK-143, FR-130, Phase 10).
 +//!
@@ -35,7 +35,7 @@ index 0000000..640d350
 +//! - TOML is already in the workspace deps (config loader).
 +//! - The conditions vocabulary is tiny — five fields cover every
 +//!   v0.10 rule. A full scripting language would be wasted surface.
-+//! - Rules ship in `crates/mythkernel/src/detect/rules/*.toml` and are
++//! - Rules ship in `crates/freallykernel/src/detect/rules/*.toml` and are
 +//!   embedded at compile time via `include_str!`. Future signed-rule
 +//!   updates (TASK-151's A/B canary rollout) can override by id; the
 +//!   loader merges in order, last wins.

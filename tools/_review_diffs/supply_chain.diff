@@ -1,8 +1,8 @@
-diff --git a/crates/mythkernel/src/detect/supply_chain.rs b/crates/mythkernel/src/detect/supply_chain.rs
+diff --git a/crates/freallykernel/src/detect/supply_chain.rs b/crates/freallykernel/src/detect/supply_chain.rs
 new file mode 100644
 index 0000000..3eddd98
 --- /dev/null
-+++ b/crates/mythkernel/src/detect/supply_chain.rs
++++ b/crates/freallykernel/src/detect/supply_chain.rs
 @@ -0,0 +1,374 @@
 +//! Supply-chain package scan (TASK-147, FR-143, Phase 10).
 +//!
@@ -26,7 +26,7 @@ index 0000000..3eddd98
 +
 +use serde::{Deserialize, Serialize};
 +
-+/// Closed enum of package ecosystems Mythodikal can identify. The
++/// Closed enum of package ecosystems Freally can identify. The
 +/// values match OSV.dev's ecosystem keys (`"npm"`, `"PyPI"`, …) so the
 +/// match against the malicious-package feed can be done by direct
 +/// string equality.

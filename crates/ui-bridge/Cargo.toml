@@ -7,7 +7,7 @@ authors.workspace = true
 license-file.workspace = true
 repository.workspace = true
 homepage.workspace = true
-description = "Mythodikal Anti-Virus Tauri command bridge"
+description = "Freally Anti-Virus Tauri command bridge"
 publish = false
 
 [lib]
@@ -18,7 +18,7 @@ path = "src/lib.rs"
 tauri = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-mythkernel = { path = "../mythkernel" }
+freallykernel = { path = "../freallykernel" }
 tokio = { workspace = true }
 tracing = { workspace = true }
 hex = { workspace = true }

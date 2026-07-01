@@ -12,7 +12,7 @@
 //! hosts the type compiles but `connect` returns
 //! [`IpcClientError::Unsupported`].
 
-use mythkernel::ipc::linfan::IpcFrame;
+use freallykernel::ipc::linfan::IpcFrame;
 
 #[derive(Debug, thiserror::Error)]
 pub enum IpcClientError {
@@ -21,7 +21,7 @@ pub enum IpcClientError {
     #[error("io: {0}")]
     Io(#[from] std::io::Error),
     #[error("ipc: {0}")]
-    Ipc(#[from] mythkernel::ipc::linfan::IpcError),
+    Ipc(#[from] freallykernel::ipc::linfan::IpcError),
 }
 
 #[derive(Debug)]
@@ -36,7 +36,7 @@ impl IpcClient {
         // Wave 1 ships the scaffolding. The full UnixStream connect +
         // the per-frame demuxer thread lands in the runtime-validation
         // pass; the codec itself is already exercised by
-        // `mythkernel::ipc::linfan::IpcCodec`.
+        // `freallykernel::ipc::linfan::IpcCodec`.
         let _ = socket_path;
         Ok(Self {
             mode_label: "scaffolded".to_string(),
@@ -62,7 +62,7 @@ mod tests {
 
     #[test]
     fn connect_off_linux_is_unsupported() {
-        let err = IpcClient::connect("/run/mythd/mythd.sock").unwrap_err();
+        let err = IpcClient::connect("/run/freallyd/freallyd.sock").unwrap_err();
         assert!(matches!(err, IpcClientError::Unsupported));
     }
 }

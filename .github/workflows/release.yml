@@ -6,7 +6,7 @@ name: Release
 # Tauri Updater plugin (TASK-044 / TASK-130) consumes.
 #
 # **Distribution surface:** GitHub Releases only. Per `docs/prd.md` § 1.5.2,
-# there is no `releases.mythodikal.com` mirror — every Tauri Updater check
+# there is no `releases.freally.com` mirror — every Tauri Updater check
 # resolves against this repo's Releases endpoint, which means we don't
 # pay for a CDN and the supply-chain stays inside one publicly-auditable
 # surface.
@@ -95,7 +95,7 @@ jobs:
         with:
           node-version: 20
           cache: pnpm
-          cache-dependency-path: apps/mythodikal/frontend/pnpm-lock.yaml
+          cache-dependency-path: apps/freally/frontend/pnpm-lock.yaml
 
       - name: Setup Rust
         # `dtolnay/rust-toolchain` doesn't tag releases; pin to a SHA
@@ -121,7 +121,7 @@ jobs:
             cargo-release-${{ matrix.target.label }}-rust1.94.0-
 
       - name: Install frontend dependencies
-        run: pnpm -C apps/mythodikal/frontend install --frozen-lockfile
+        run: pnpm -C apps/freally/frontend install --frozen-lockfile
 
       - name: Build & sign Tauri bundles
         # Pinned to a commit SHA per sec-review H1. Update only when
@@ -138,7 +138,7 @@ jobs:
           # but still publishes bundles. That's a release operator's
           # mistake; the workflow does not fail-loud on it because some
           # downstream forks may intentionally release unsigned. Maintainers
-          # of `MikesRuthless12/mythodikal-av` must ensure both secrets are
+          # of `MikesRuthless12/freally-av` must ensure both secrets are
           # set before tagging — see `docs/launch-checklists/v0.4.md`.
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
@@ -148,11 +148,11 @@ jobs:
           # notarize / authenticode-sign. Updater ed25519 signatures are
           # the sole integrity gate.
         with:
-          projectPath: apps/mythodikal/src-tauri
+          projectPath: apps/freally/src-tauri
           tagName: ${{ github.event.inputs.tag || github.ref_name }}
-          releaseName: "Mythodikal Anti-Virus ${{ github.event.inputs.tag || github.ref_name }}"
+          releaseName: "Freally Anti-Virus ${{ github.event.inputs.tag || github.ref_name }}"
           releaseBody: |
-            Mythodikal Anti-Virus release. See `CHANGELOG.md` for details.
+            Freally Anti-Virus release. See `CHANGELOG.md` for details.
 
             - Linux: `.deb`, `.rpm`, `.AppImage`
             - Windows: `.msi`, `.exe` (NSIS) — unsigned per § 1.5.3
@@ -218,7 +218,7 @@ jobs:
           version = tag.lstrip("v")
           out = {
               "version": version,
-              "notes": f"Mythodikal Anti-Virus {tag}. See CHANGELOG.md for details.",
+              "notes": f"Freally Anti-Virus {tag}. See CHANGELOG.md for details.",
               "pub_date": "",
               "platforms": {},
           }

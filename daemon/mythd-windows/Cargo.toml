@@ -1,5 +1,5 @@
 [package]
-name = "mythd-windows"
+name = "freallyd-windows"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -7,23 +7,23 @@ authors.workspace = true
 license-file.workspace = true
 repository.workspace = true
 homepage.workspace = true
-description = "Mythodikal Anti-Virus Windows real-time daemon (ETW + AMSI + WDAC; no kernel driver)"
+description = "Freally Anti-Virus Windows real-time daemon (ETW + AMSI + WDAC; no kernel driver)"
 publish = false
 
 # Per-OS binary name so all three daemons can build under `cargo
 # build --workspace` without colliding on a shared output path
-# (`mythd.exe`). Windows installer / scheduled-task config
+# (`freallyd.exe`). Windows installer / scheduled-task config
 # references the per-OS name directly.
 [[bin]]
-name = "mythd-windows"
+name = "freallyd-windows"
 path = "src/main.rs"
 
 [lib]
-name = "mythd_windows"
+name = "freallyd_windows"
 path = "src/lib.rs"
 
 [dependencies]
-mythkernel = { path = "../../crates/mythkernel" }
+freallykernel = { path = "../../crates/freallykernel" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 ciborium = { workspace = true }

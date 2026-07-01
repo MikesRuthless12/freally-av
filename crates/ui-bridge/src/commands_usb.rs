@@ -1,10 +1,10 @@
 //! USB-stack Tauri commands (TASK-242 + TASK-249 + TASK-250, Phase 8 Wave 2).
 //!
-//! Thin wrappers around `mythkernel::usb::{allowlist, write_log, device_history}`.
+//! Thin wrappers around `freallykernel::usb::{allowlist, write_log, device_history}`.
 //! Each command takes a [`crate::commands::AppState`] for the engine
 //! sqlite connection and returns a JSON-serializable view.
 
-use mythkernel::usb::{
+use freallykernel::usb::{
     allowlist::{self, UsbAllowEntry},
     device_history::{self, DeviceRow},
     power_only::{self, PowerOnlyEntry},

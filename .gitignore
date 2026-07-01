@@ -30,7 +30,7 @@ logs/
 *.log
 *.tmp
 
-# Mythodikal-specific: license files must not be committed
+# Freally-specific: license files must not be committed
 *.lic
 
 # Local config overrides
@@ -43,11 +43,11 @@ config.local.toml
 docs/product-roadmap.md
 docs/gtm.md
 docs/launch-checklists/
-Mythodikal-Build-Prompts-Guide.md
+Freally-Build-Prompts-Guide.md
 # Never git-track any prompt guide — operator-only docs (matches "prompt" anywhere, any case).
 *[Pp][Rr][Oo][Mm][Pp][Tt]*.md
-Mythodikal-Feature-Ideas-Master-List.md
-Mythodikal-Feature-Integration-Plan.md
+Freally-Feature-Ideas-Master-List.md
+Freally-Feature-Integration-Plan.md
 RESEARCH-DOSSIER.md
 vision.json
 
@@ -96,7 +96,7 @@ SECURITY.md
 #   not to the project
 # - downloaded sample bytes are never persisted, but the local SQLite
 #   cache + the CSV dump + the derived artifacts are maintainer-private
-# The mythkernel side consumes the published `crc32_blacklist.bin` +
+# The freallykernel side consumes the published `crc32_blacklist.bin` +
 # `blake3_blacklist.bin` + `blake3_meta.jsonl` artifacts generically —
 # any tool that produces them in the documented format works.
 tools/feed-builder/
@@ -135,7 +135,7 @@ nsrl.sqlite*
 # blake3_blacklist.bin above — built locally, shipped via Releases.
 **/silver_md5.bin
 **/silver_sha256.bin
-**/myth_md5.bin
-**/myth_sha256.bin
+**/freally_md5.bin
+**/freally_sha256.bin
 **/myth-blacklist*.sqlite
 **/myth-whitelist*.sqlite

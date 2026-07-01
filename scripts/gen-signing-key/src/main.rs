@@ -106,10 +106,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!();
     println!("==========================================================");
-    println!("  Mythodikal Updater keypair written to {}", cli.out_dir.display());
+    println!("  Freally Updater keypair written to {}", cli.out_dir.display());
     println!("==========================================================");
     println!();
-    println!("STEP 1 — Public key (paste into apps/mythodikal/src-tauri/tauri.conf.json");
+    println!("STEP 1 — Public key (paste into apps/freally/src-tauri/tauri.conf.json");
     println!("        :: plugins.updater.pubkey, replacing REPLACE_WITH_PUBKEY_FROM_CARGO_TAURI_SIGNER_GENERATE):");
     println!();
     // Tauri's pubkey field wants the base64 body only, NOT the full
@@ -131,7 +131,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
     println!();
     println!("STEP 3 — Back up {} + the password somewhere safe. If you lose them,", sec_path.display());
-    println!("        every installed Mythodikal client will refuse future self-updates and");
+    println!("        every installed Freally client will refuse future self-updates and");
     println!("        the only recovery is to ship a new public key as part of a forced");
     println!("        full-reinstall release.");
     println!();

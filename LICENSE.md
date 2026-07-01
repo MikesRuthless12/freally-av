@@ -1,10 +1,10 @@
-# Mythodikal Anti-Virus — Proprietary Source-Visible License
+# Freally Anti-Virus — Proprietary Source-Visible License
 
-**Copyright © 2026 Mike Weaver (mythodikalone@gmail.com). All Rights Reserved.**
+**Copyright © 2026 Mike Weaver (freallyone@gmail.com). All Rights Reserved.**
 
-SPDX-License-Identifier: LicenseRef-MythodikalARR-1.0
+SPDX-License-Identifier: LicenseRef-FreallyARR-1.0
 
-This is a **proprietary, source-visible** license. The source code of Mythodikal Anti-Virus (the "Software") is published in the public Git repository so that users, security researchers, and the broader community may **inspect** the code that runs with high privilege on their machines.
+This is a **proprietary, source-visible** license. The source code of Freally Anti-Virus (the "Software") is published in the public Git repository so that users, security researchers, and the broader community may **inspect** the code that runs with high privilege on their machines.
 
 Publishing the source does NOT grant any rights to use, copy, modify, distribute, or otherwise exploit the Software. All rights are reserved by the Licensor (Mike Weaver). This license is not OSI-approved "Open Source" and not FSF-approved "Free Software."
 
@@ -20,7 +20,7 @@ If you are looking for a permissive license, this is not it. If you want to use 
 
 1.3 **"You"** (or "Your") means the natural person or legal entity exercising permissions granted by, or attempting to exercise permissions over, the Software.
 
-1.4 **"Licensor"** means Mike Weaver (`mythodikalone@gmail.com`), or any successor designated in writing.
+1.4 **"Licensor"** means Mike Weaver (`freallyone@gmail.com`), or any successor designated in writing.
 
 1.5 **"Permitted Inspection Use"** means the activities described in Section 2 of this license.
 
@@ -34,7 +34,7 @@ The Licensor grants You a non-exclusive, non-transferable, non-sublicensable, **
 
 2.2 **Compile and run** the Software locally on Your own computer for the sole purpose of evaluating its behavior, validating Permitted Inspection Use claims (e.g., "telemetry is off by default"), and security review. Local execution under this clause must NOT be used as a substitute for purchasing or installing officially distributed Compiled Binaries; nothing produced under this clause may be used in any production or operational capacity beyond the personal evaluation use described.
 
-2.3 **Quote, screenshot, or excerpt** small portions of the source code (no more than 50 lines per excerpt; no more than 250 lines cumulative across all uses) for the purposes of: writing a security advisory; writing a technical blog post or article; teaching; academic research; or filing a bug report or vulnerability disclosure with the Licensor. Attribution to "Mythodikal Anti-Virus, © Mike Weaver, All Rights Reserved" must accompany any such excerpt.
+2.3 **Quote, screenshot, or excerpt** small portions of the source code (no more than 50 lines per excerpt; no more than 250 lines cumulative across all uses) for the purposes of: writing a security advisory; writing a technical blog post or article; teaching; academic research; or filing a bug report or vulnerability disclosure with the Licensor. Attribution to "Freally Anti-Virus, © Mike Weaver, All Rights Reserved" must accompany any such excerpt.
 
 2.4 **Submit** bug reports, feature requests, and security disclosures to the Licensor through the channels specified in `SECURITY.md` and the project issue tracker. Section 6 governs the rights in Your submissions.
 
@@ -60,9 +60,9 @@ Without a separate written license from the Licensor, You shall NOT:
 
 3.7 **Use the Software, in whole or in part, to train any machine-learning model, large language model, code-suggestion model, or any other artificial-intelligence system**, including but not limited to indexing the Software in any AI training corpus, retrieval-augmented-generation index, or model fine-tuning dataset, regardless of whether the resulting model is open or closed.
 
-3.8 **Use the Software, in whole or in part, to create, develop, market, or operate any product or service that competes with Mythodikal Anti-Virus**. This includes (without limitation) any anti-virus, anti-malware, endpoint detection and response (EDR), file scanning, threat intelligence aggregation, file-system event monitoring, or related security product or service.
+3.8 **Use the Software, in whole or in part, to create, develop, market, or operate any product or service that competes with Freally Anti-Virus**. This includes (without limitation) any anti-virus, anti-malware, endpoint detection and response (EDR), file scanning, threat intelligence aggregation, file-system event monitoring, or related security product or service.
 
-3.9 **Use any name, mark, logo, or brand element** of Mythodikal Anti-Virus, or the Licensor (including the "M" glyph and the wordmark) without separate written permission, except as required for the limited attribution permitted in Section 2.3.
+3.9 **Use any name, mark, logo, or brand element** of Freally Anti-Virus, or the Licensor (including the "M" glyph and the wordmark) without separate written permission, except as required for the limited attribution permitted in Section 2.3.
 
 3.10 **Use the Software in any way** that is unlawful in Your jurisdiction or that violates the rights of any third party, including any export-control regulations applicable to security software.
 
@@ -104,7 +104,7 @@ The Software depends on third-party components that are governed by their own li
 
 ## 8. Trademark
 
-"Mythodikal Anti-Virus," "Mythkernel,"," the "M" glyph, and the Mythodikal wordmark are unregistered trademarks of the Licensor. Nothing in this license grants You any right to use any of these marks except as expressly permitted in Section 2.3 (limited attribution).
+"Freally Anti-Virus," "Mythkernel,"," the "M" glyph, and the Freally wordmark are unregistered trademarks of the Licensor. Nothing in this license grants You any right to use any of these marks except as expressly permitted in Section 2.3 (limited attribution).
 
 ---
 
@@ -136,9 +136,9 @@ The Software depends on third-party components that are governed by their own li
 
 11.3 **Assignment.** You may not assign this license. The Licensor may freely assign this license.
 
-11.4 **Notices.** Notices to the Licensor shall be sent to `mythodikalone@gmail.com`. Notices to You may be made via the email address associated with Your GitHub account, the email You provided to the Licensor, or — if those are unavailable — by a public announcement on the project repository.
+11.4 **Notices.** Notices to the Licensor shall be sent to `freallyone@gmail.com`. Notices to You may be made via the email address associated with Your GitHub account, the email You provided to the Licensor, or — if those are unavailable — by a public announcement on the project repository.
 
-11.5 **Updates to this license.** The Licensor may publish revised versions of this license. Each version will carry a distinct version identifier (e.g., `LicenseRef-MythodikalARR-1.0`, `…-1.1`). Your use of the Software is governed by the version of this license in effect at the time You obtain or refresh Your local copy. If You disagree with a revised version, Your sole remedy is to stop using the Software and delete Your local copies as described in Section 9.1.
+11.5 **Updates to this license.** The Licensor may publish revised versions of this license. Each version will carry a distinct version identifier (e.g., `LicenseRef-FreallyARR-1.0`, `…-1.1`). Your use of the Software is governed by the version of this license in effect at the time You obtain or refresh Your local copy. If You disagree with a revised version, Your sole remedy is to stop using the Software and delete Your local copies as described in Section 9.1.
 
 11.6 **No partnership.** Nothing in this license creates a partnership, joint venture, agency, employment, or other formal relationship between You and the Licensor.
 
@@ -156,18 +156,18 @@ If You wish to:
 - create a derivative work for sale;
 - include the Software in an OEM bundle;
 
-then You must contact the Licensor at `mythodikalone@gmail.com` for a separate, written commercial license. The Licensor is reachable and reasonable. Custom arrangements can be negotiated in good faith. Don't take what is not given.
+then You must contact the Licensor at `freallyone@gmail.com` for a separate, written commercial license. The Licensor is reachable and reasonable. Custom arrangements can be negotiated in good faith. Don't take what is not given.
 
 ---
 
 ## 13. Contact
 
-- General licensing inquiries: `mythodikalone@gmail.com`
-- Security disclosures: `mythodikalone@gmail.com`
-- Maintainer: Mike Weaver, `mythodikalone@gmail.com`
+- General licensing inquiries: `freallyone@gmail.com`
+- Security disclosures: `freallyone@gmail.com`
+- Maintainer: Mike Weaver, `freallyone@gmail.com`
 
 ---
 
-*This license is the operative legal text governing the source repository "mythodikal-av." It is intentionally conservative because Mythodikal Anti-Virus is a security product and the integrity of its source matters. Source-visibility is a gift from the Licensor to the security community; the gift is bounded by this document.*
+*This license is the operative legal text governing the source repository "freally-av." It is intentionally conservative because Freally Anti-Virus is a security product and the integrity of its source matters. Source-visibility is a gift from the Licensor to the security community; the gift is bounded by this document.*
 
-— *Last revised: 2026-05-09. License version: LicenseRef-MythodikalARR-1.0.*
+— *Last revised: 2026-05-09. License version: LicenseRef-FreallyARR-1.0.*

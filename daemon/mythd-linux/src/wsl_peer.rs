@@ -2,20 +2,20 @@
 //!
 //! When the Linux daemon runs **inside a WSL2 distro**, every emitted
 //! event is tagged with `WSL_DISTRO_NAME` so the Windows-side daemon
-//! (`mythd-windows`, TASK-240 host side) can attribute the event to
+//! (`freallyd-windows`, TASK-240 host side) can attribute the event to
 //! the right distro in the unified UI panel.
 //!
 //! Pure detection logic — checks `/proc/sys/kernel/osrelease` for
 //! the `"microsoft"` substring and reads the `WSL_DISTRO_NAME` env
 //! var. The actual cross-host transport (vsock or
-//! `\\wsl.localhost\<distro>\run\mythd\mythd.sock`) is owned by
-//! `daemon/mythd-windows/src/wsl_bridge.rs`.
+//! `\\wsl.localhost\<distro>\run\freallyd\freallyd.sock`) is owned by
+//! `daemon/freallyd-windows/src/wsl_bridge.rs`.
 //!
 //! The shared `wsl.exe --list --verbose` parser lives in
-//! `mythkernel::platform::wsl` and is re-exported here so callers can
+//! `freallykernel::platform::wsl` and is re-exported here so callers can
 //! pull the whole WSL surface from one module.
 
-pub use mythkernel::platform::wsl::{WslDistroRow, parse_wsl_list_text, parse_wsl_list_utf16le};
+pub use freallykernel::platform::wsl::{WslDistroRow, parse_wsl_list_text, parse_wsl_list_utf16le};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WslContext {

@@ -1,6 +1,6 @@
 //! Ransomware honeyfile tripwires — Linux daemon (TASK-142, FR-142).
 //!
-//! Builds on `mythkernel::detect::honeyfiles` (cross-platform planning
+//! Builds on `freallykernel::detect::honeyfiles` (cross-platform planning
 //! and write detection) by adding the Linux-specific **action**:
 //! `kill(pid, SIGSTOP)` on the writer's whole process tree.
 //!
@@ -96,17 +96,17 @@ pub struct CanaryTrip {
 }
 
 /// True when `write_event_path` matches the planned canary set.
-/// Delegates to `mythkernel::detect::honeyfiles::is_canary_shape` for
+/// Delegates to `freallykernel::detect::honeyfiles::is_canary_shape` for
 /// the actual shape test; this thin wrapper documents the daemon
 /// integration point.
 pub fn is_canary_write(write_event_path: &Path) -> bool {
-    mythkernel::detect::honeyfiles::is_canary_shape(write_event_path)
+    freallykernel::detect::honeyfiles::is_canary_shape(write_event_path)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mythkernel::detect::honeyfiles::plan_canaries;
+    use freallykernel::detect::honeyfiles::plan_canaries;
 
     #[test]
     fn is_canary_write_matches_planned_paths() {

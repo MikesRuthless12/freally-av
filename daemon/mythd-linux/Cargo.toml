@@ -1,5 +1,5 @@
 [package]
-name = "mythd-linux"
+name = "freallyd-linux"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -7,7 +7,7 @@ authors.workspace = true
 license-file.workspace = true
 repository.workspace = true
 homepage.workspace = true
-description = "Mythodikal Anti-Virus Linux real-time daemon"
+description = "Freally Anti-Virus Linux real-time daemon"
 publish = false
 
 # Per-OS binary name so all three daemons can build under `cargo
@@ -15,15 +15,15 @@ publish = false
 # The systemd unit / launchd plist references the per-OS name
 # directly; no rename-at-install step required.
 [[bin]]
-name = "mythd-linux"
+name = "freallyd-linux"
 path = "src/main.rs"
 
 [lib]
-name = "mythd_linux"
+name = "freallyd_linux"
 path = "src/lib.rs"
 
 [dependencies]
-mythkernel = { path = "../../crates/mythkernel" }
+freallykernel = { path = "../../crates/freallykernel" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 ciborium = { workspace = true }

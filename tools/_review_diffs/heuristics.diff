@@ -1,7 +1,7 @@
-diff --git a/crates/mythkernel/src/detect/heuristics.rs b/crates/mythkernel/src/detect/heuristics.rs
+diff --git a/crates/freallykernel/src/detect/heuristics.rs b/crates/freallykernel/src/detect/heuristics.rs
 index 9bba22b..c84a942 100644
---- a/crates/mythkernel/src/detect/heuristics.rs
-+++ b/crates/mythkernel/src/detect/heuristics.rs
+--- a/crates/freallykernel/src/detect/heuristics.rs
++++ b/crates/freallykernel/src/detect/heuristics.rs
 @@ -1 +1,505 @@
 -//! Behavioral heuristics. Filled in by TASK-084 (Phase 10) and TASK-143.
 +//! Behavioral heuristics — ransomware shape detection (TASK-084, Phase 10).
@@ -31,8 +31,8 @@ index 9bba22b..c84a942 100644
 +//! their native event payloads into [`FsEvent`] and feed them in. Wiring
 +//! lives in the daemons:
 +//!
-+//!   * Linux — `daemon/mythd-linux/src/fanotify.rs` event loop
-+//!   * macOS — `daemon/mythd-macos/src/esf_failover.rs` post-dedupe drain
++//!   * Linux — `daemon/freallyd-linux/src/fanotify.rs` event loop
++//!   * macOS — `daemon/freallyd-macos/src/esf_failover.rs` post-dedupe drain
 +//!   * Windows — Phase 12 (TASK-097 winflt bridge)
 +//!
 +//! ## Thresholds
@@ -59,7 +59,7 @@ index 9bba22b..c84a942 100644
 +use crate::detect::Severity;
 +
 +/// Source-tag stamped onto every finding's `rule_source` column.
-+pub const RULE_SOURCE: &str = "mythodikal_heuristics";
++pub const RULE_SOURCE: &str = "freally_heuristics";
 +
 +/// Stable rule identifiers. Reused verbatim in `findings.rule_id` rows so
 +/// the UI explainer (FR-040) can render them and a downstream SIEM can

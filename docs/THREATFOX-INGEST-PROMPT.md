@@ -28,7 +28,7 @@ sha256s via MalwareBazaar API (burns MB API quota — gated behind --fetch-unkno
 ### Step 1 — Run ThreatFox ingest (label-only mode, no API spend)
 
 ```powershell
-cd "C:\Users\miken\Desktop\Havoc Software\MythodikalAV\tools\feed-builder"
+cd "C:\Users\miken\Desktop\Havoc Software\FreallyAV\tools\feed-builder"
 .\target\release\feed-builder.exe `
   threatfox `
   --csv-path .\threatfox_full.csv.zip `
@@ -47,7 +47,7 @@ Logs to stdout — capture with `> D:\feed-builder\threatfox_$DATE.log 2>&1` if 
 ### Step 2 — (Optional) Byte-fetch mode for sha256 IOCs
 
 If you also want bytes for sha256 IOCs not yet in your DB (so they can be
-hashed + run through your Mythodikal YARA rules):
+hashed + run through your Freally YARA rules):
 
 ```powershell
 .\target\release\feed-builder.exe `
@@ -81,7 +81,7 @@ weekly run (most IOCs are already in your DB from URLhaus/MB cycles).
 
 - Pre/post/delta canonical count
 - Family attribution coverage of new rows (ThreatFox has its own family tags;
-  the ingest path maps them to Mythodikal taxonomy via threatfox.rs)
+  the ingest path maps them to Freally taxonomy via threatfox.rs)
 
 If this run added meaningful new rows AND you haven't done a blacklist release
 recently, consider following up with `PUBLISH-BLACKLIST-PROMPT.md` to ship a

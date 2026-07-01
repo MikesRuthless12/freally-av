@@ -1,10 +1,10 @@
-# MythodikalAV v0.7.13
+# FreallyAV v0.7.13
 
-First public release of the Mythodikal hash database artifacts — built locally on the maintainer's rig and shipped here for end users.
+First public release of the Freally hash database artifacts — built locally on the maintainer's rig and shipped here for end users.
 
 ## What's in this release
 
-Two SQLite databases for use by the MythodikalAV runtime, **split into ~1.9 GB parts** because GitHub release assets are capped at 2 GiB per file:
+Two SQLite databases for use by the FreallyAV runtime, **split into ~1.9 GB parts** because GitHub release assets are capped at 2 GiB per file:
 
 | Artifact | Rows | Compressed total | Part files | Required? |
 |---|---:|---:|---:|---|
@@ -41,11 +41,11 @@ End users only need the **blacklist** (required). The whitelist is optional — 
 
 ## Blacklist content (53.7M rows)
 
-Every row is 100% Mythodikal-attributed:
-- **`family`**: Mythodikal-original taxonomy (`myth_malware`, `myth_banker_alpha`, `myth_rat_alpha`, `myth_ransom_*`, etc.). Industry-coined family names (Emotet/Heodo, Mirai, AgentTesla, TrickBot, etc.) are renamed to Mythodikal-coined equivalents via behavior categorization. Long-tail obscure families get deterministic `myth_threat_<hash>` names.
-- **`commentary`**: Mythodikal-original template — no upstream rule text quoted, ever.
+Every row is 100% Freally-attributed:
+- **`family`**: Freally-original taxonomy (`freally_malware`, `freally_banker_alpha`, `freally_rat_alpha`, `freally_ransom_*`, etc.). Industry-coined family names (Emotet/Heodo, Mirai, AgentTesla, TrickBot, etc.) are renamed to Freally-coined equivalents via behavior categorization. Long-tail obscure families get deterministic `freally_threat_<hash>` names.
+- **`commentary`**: Freally-original template — no upstream rule text quoted, ever.
 - **`rule_matches`**: count only (e.g. `{"count": 3}`), never upstream rule names.
-- **`severity`**: 1 (low) / 2 (medium) / 3 (high), derived from VirusTotal coverage + size + match count via Mythodikal's severity formula.
+- **`severity`**: 1 (low) / 2 (medium) / 3 (high), derived from VirusTotal coverage + size + match count via Freally's severity formula.
 
 Coverage tiers:
 - **Gold** (871,729 rows): high-confidence labeled samples with full hash + family + commentary
@@ -63,11 +63,11 @@ Provenance of underlying hashes:
 - BODMAS (UIUC academic)
 - Recent catchup window: 2026-05-15 to 2026-05-25
 
-Hash values themselves are non-copyrightable facts (*Feist v. Rural*); MythodikalAV's contribution is the labels + commentary + taxonomy.
+Hash values themselves are non-copyrightable facts (*Feist v. Rural*); FreallyAV's contribution is the labels + commentary + taxonomy.
 
 ## Whitelist content (72M rows)
 
-Direct copy of NIST NSRL RDSv3 Modern-Minimal release 2026.03.1 (March 2026), reshaped into a Mythodikal schema. NSRL is published by NIST under 17 U.S.C. § 105 (work of the US government — public domain, freely redistributable).
+Direct copy of NIST NSRL RDSv3 Modern-Minimal release 2026.03.1 (March 2026), reshaped into a Freally schema. NSRL is published by NIST under 17 U.S.C. § 105 (work of the US government — public domain, freely redistributable).
 
 Per-OS distribution:
 - windows: 30.6M (42.5%)
@@ -86,22 +86,22 @@ Get-FileHash myth-blacklist-v0.7.13.sqlite.zst -Algorithm SHA256
 zstd -d myth-blacklist-v0.7.13.sqlite.zst
 
 # Result: myth-blacklist-v0.7.13.sqlite (~21 GB)
-# Place where the MythodikalAV runtime expects it.
+# Place where the FreallyAV runtime expects it.
 ```
 
 ## What's NOT in this release
 
 - **Delta updates**: not yet implemented. Every release is currently a full snapshot. Coming in v0.7.14+.
-- **Cloud reputation lookup**: by design — MythodikalAV is offline-first / zero-cost / no telemetry.
+- **Cloud reputation lookup**: by design — FreallyAV is offline-first / zero-cost / no telemetry.
 
 ## Notes for maintainers
 
 - Built with feed-builder.exe (silver-tier-inclusive consolidate landed this release; previous builds dropped 52M+ silver-tier rows due to a strict NOT NULL schema mismatch).
-- 100% Mythodikal-attribution coverage on canonical achieved via `bulk_label_pass.py` (commentary + severity) + `family_normalize.py` (taxonomy renaming).
+- 100% Freally-attribution coverage on canonical achieved via `bulk_label_pass.py` (commentary + severity) + `family_normalize.py` (taxonomy renaming).
 - Blacklist build time: ~30 min for 53.7M rows. Whitelist build time: ~45 min for 72M rows including VACUUM.
 
 ## License
 
-- Mythodikal-authored labels (family / commentary / severity / rule_matches / taxonomy): © MythodikalAV. All rights reserved.
+- Freally-authored labels (family / commentary / severity / rule_matches / taxonomy): © FreallyAV. All rights reserved.
 - Hash values: non-copyrightable facts (*Feist v. Rural*). Free to use.
 - NSRL whitelist content: public domain per 17 U.S.C. § 105.

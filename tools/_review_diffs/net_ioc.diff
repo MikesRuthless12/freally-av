@@ -1,8 +1,8 @@
-diff --git a/crates/mythkernel/src/detect/net_ioc.rs b/crates/mythkernel/src/detect/net_ioc.rs
+diff --git a/crates/freallykernel/src/detect/net_ioc.rs b/crates/freallykernel/src/detect/net_ioc.rs
 new file mode 100644
 index 0000000..fdc0de3
 --- /dev/null
-+++ b/crates/mythkernel/src/detect/net_ioc.rs
++++ b/crates/freallykernel/src/detect/net_ioc.rs
 @@ -0,0 +1,190 @@
 +//! Network IOC check (TASK-148, FR-145, Phase 10).
 +//!

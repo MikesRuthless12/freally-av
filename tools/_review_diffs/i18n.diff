@@ -1,10 +1,10 @@
-diff --git a/apps/mythodikal/frontend/src/i18n/index.tsx b/apps/mythodikal/frontend/src/i18n/index.tsx
+diff --git a/apps/freally/frontend/src/i18n/index.tsx b/apps/freally/frontend/src/i18n/index.tsx
 new file mode 100644
 index 0000000..c204d34
 --- /dev/null
-+++ b/apps/mythodikal/frontend/src/i18n/index.tsx
++++ b/apps/freally/frontend/src/i18n/index.tsx
 @@ -0,0 +1,197 @@
-+// Mythodikal Anti-Virus — localisation scaffolding (TASK-089).
++// Freally Anti-Virus — localisation scaffolding (TASK-089).
 +//
 +// Solid.js context + `useLocalization()` hook. Loads the seed
 +// `en-US.ftl` at module init and exposes `t(id, fallback?, args?)` for

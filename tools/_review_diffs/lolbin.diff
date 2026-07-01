@@ -1,8 +1,8 @@
-diff --git a/crates/mythkernel/src/detect/lolbin.rs b/crates/mythkernel/src/detect/lolbin.rs
+diff --git a/crates/freallykernel/src/detect/lolbin.rs b/crates/freallykernel/src/detect/lolbin.rs
 new file mode 100644
 index 0000000..35ff510
 --- /dev/null
-+++ b/crates/mythkernel/src/detect/lolbin.rs
++++ b/crates/freallykernel/src/detect/lolbin.rs
 @@ -0,0 +1,216 @@
 +//! LOLBin invocation-chain detector (TASK-146, FR-139, Phase 10).
 +//!

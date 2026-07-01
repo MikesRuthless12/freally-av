@@ -4,18 +4,18 @@
 //! Two responsibilities:
 //!
 //!   * Render the LaunchAgent plist text the installer drops into
-//!     `~/Library/LaunchAgents/com.mythodikal.heartbeat.plist`.
+//!     `~/Library/LaunchAgents/com.freally.heartbeat.plist`.
 //!     `KeepAlive=true`, `RunAtLoad=true`, `ThrottleInterval=1`. No
 //!     `sudo` install — LaunchAgents are per-user, signed-plist-not-
 //!     required per `docs/prd.md` § 1.5.3.
 //!   * Tick once per second from the daemon's main loop, writing
 //!     `{ last_beat_at_ms, pid, restart_count }` to
-//!     `~/Library/Application Support/Mythodikal/heartbeat.json`
+//!     `~/Library/Application Support/Freally/heartbeat.json`
 //!     atomically (tmp + rename) so a partial write can never show
 //!     up to the UI as a stale-looking timestamp.
 //!
 //! The UI's heartbeat chip lives in
-//! `apps/mythodikal/frontend/src/components/MacRealtimeHeartbeat.tsx`
+//! `apps/freally/frontend/src/components/MacRealtimeHeartbeat.tsx`
 //! and reads the same file via the Tauri command
 //! `crate::ipc_client` does NOT consume — `crates/ui-bridge/src/commands_mac.rs::mac_heartbeat`
 //! handles the parse + age derivation.
@@ -27,13 +27,13 @@ use serde::Serialize;
 
 /// Stable launchd `Label` value. Reused by the plist + by the
 /// installer's `launchctl bootstrap` invocation.
-pub const LAUNCHD_LABEL: &str = "com.mythodikal.heartbeat";
+pub const LAUNCHD_LABEL: &str = "com.freally.heartbeat";
 
 /// On-disk heartbeat filename. Re-export from
-/// `mythkernel::ipc::macesf::HEARTBEAT_FILENAME` so the writer here
+/// `freallykernel::ipc::macesf::HEARTBEAT_FILENAME` so the writer here
 /// and the reader at `ui_bridge::commands_mac` can never drift
 /// independently (review CR-10, 2026-05-27).
-pub use mythkernel::ipc::macesf::HEARTBEAT_FILENAME;
+pub use freallykernel::ipc::macesf::HEARTBEAT_FILENAME;
 
 #[derive(Debug, thiserror::Error)]
 pub enum LaunchdError {
@@ -96,7 +96,7 @@ pub fn render_agent_plist(exec_path: &str) -> String {
 pub fn heartbeat_path(home: &Path) -> PathBuf {
     home.join("Library")
         .join("Application Support")
-        .join("Mythodikal")
+        .join("Freally")
         .join(HEARTBEAT_FILENAME)
 }
 
@@ -117,7 +117,7 @@ pub fn write_heartbeat(
     let dir = home
         .join("Library")
         .join("Application Support")
-        .join("Mythodikal");
+        .join("Freally");
     std::fs::create_dir_all(&dir)?;
     let final_path = dir.join(HEARTBEAT_FILENAME);
     // PID-disambiguated tmp path so a transient old daemon overlapping
@@ -141,17 +141,17 @@ mod tests {
 
     #[test]
     fn render_plist_contains_keepalive_and_throttle() {
-        let plist = render_agent_plist("/usr/local/bin/mythd");
+        let plist = render_agent_plist("/usr/local/bin/freallyd");
         assert!(plist.contains("<key>KeepAlive</key>\n    <true/>"));
         assert!(plist.contains("<integer>1</integer>"));
-        assert!(plist.contains("/usr/local/bin/mythd"));
+        assert!(plist.contains("/usr/local/bin/freallyd"));
         assert!(plist.contains(LAUNCHD_LABEL));
     }
 
     #[test]
     fn render_plist_is_deterministic_for_same_inputs() {
-        let a = render_agent_plist("/usr/local/bin/mythd");
-        let b = render_agent_plist("/usr/local/bin/mythd");
+        let a = render_agent_plist("/usr/local/bin/freallyd");
+        let b = render_agent_plist("/usr/local/bin/freallyd");
         assert_eq!(a, b);
     }
 
@@ -188,15 +188,15 @@ mod tests {
     fn heartbeat_filename_matches_ui_bridge_constant() {
         // Both the daemon writer and the ui-bridge reader must agree
         // on the same filename. Both now re-export from
-        // mythkernel::ipc::macesf::HEARTBEAT_FILENAME — `::` identity
+        // freallykernel::ipc::macesf::HEARTBEAT_FILENAME — `::` identity
         // is enforced at compile time, but assert the literal value
         // here too so a future inline-override is caught (review
         // CR-10).
         assert_eq!(HEARTBEAT_FILENAME, "heartbeat.json");
         assert_eq!(
             HEARTBEAT_FILENAME,
-            mythkernel::ipc::macesf::HEARTBEAT_FILENAME,
-            "daemon and mythkernel HEARTBEAT_FILENAME drifted"
+            freallykernel::ipc::macesf::HEARTBEAT_FILENAME,
+            "daemon and freallykernel HEARTBEAT_FILENAME drifted"
         );
     }
 }
