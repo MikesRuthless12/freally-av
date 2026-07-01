@@ -103,12 +103,15 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
-      # rust-toolchain.toml pins to 1.94.0; install it explicitly so the
-      # cargo-deny action doesn't fail with "override toolchain not installed".
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: 1.94.0
+      # The cargo-deny-action@v2 container ships rustup 1.85.0, but this repo's
+      # rust-toolchain.toml pins 1.94.0 — rustup reads it as an override and
+      # aborts "override toolchain not installed" before cargo-deny runs.
+      # cargo-deny only parses Cargo.lock + deny.toml (it never compiles), so
+      # RUSTUP_TOOLCHAIN points rustup at the image's baked-in 1.85.0 and makes
+      # it ignore rust-toolchain.toml (zero extra download, deterministic).
       - uses: EmbarkStudios/cargo-deny-action@v2
+        env:
+          RUSTUP_TOOLCHAIN: "1.85.0"
         with:
           command: check
           arguments: --all-features

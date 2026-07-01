@@ -126,7 +126,7 @@ jobs:
       - name: Build & sign Tauri bundles
         # Pinned to a commit SHA per sec-review H1. Update only when
         # auditing the new tauri-action release diff.
-        uses: tauri-apps/tauri-action@9a2e3bd86a76cfe263e0f5b3a1ad14fa5f72e62c # v0.5.21
+        uses: tauri-apps/tauri-action@84b9d35b5fc46c1e45415bdb6144030364f7ebc5 # v0.6.2
         env:
           # ed25519 signing keypair pulled from repo secrets. The
           # `TAURI_SIGNING_PRIVATE_KEY` value is the base64-encoded contents
@@ -142,6 +142,8 @@ jobs:
           # set before tagging — see `docs/launch-checklists/v0.4.md`.
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # tauri-action needs the GH token to create the Release + upload bundles.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Per `docs/prd.md` § 1.5.3 — no Apple Developer Program, no
           # Windows OV/EV cert. The Tauri Action's signing inputs are
           # intentionally **unset** so the workflow doesn't try to
@@ -164,7 +166,7 @@ jobs:
           releaseDraft: false
           prerelease: false
           includeUpdaterJson: true
-          updaterJsonPreferUniversal: true
+          updaterJsonKeepUniversal: true
           args: ${{ matrix.target.args }}
 
   publish-latest-json:

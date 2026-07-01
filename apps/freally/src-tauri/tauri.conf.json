@@ -5,7 +5,7 @@
   "identifier": "com.freally.av",
   "build": {
     "beforeDevCommand": "pnpm -C ../frontend dev",
-    "beforeBuildCommand": "pnpm -C ../frontend build",
+    "beforeBuildCommand": "pnpm -C frontend build",
     "devUrl": "http://localhost:1420",
     "frontendDist": "../frontend/dist"
   },
@@ -86,14 +86,14 @@
         "applicationFolderPosition": { "x": 480, "y": 170 }
       }
     },
-    "createUpdaterArtifacts": false
+    "createUpdaterArtifacts": true
   },
   "plugins": {
     "updater": {
       "endpoints": [
         "https://github.com/MikesRuthless12/freally-av/releases/latest/download/latest.json"
       ],
-      "pubkey": "RWQbjEwBG41EGiaSTWW37d3G02hJDR5rK+Ik6bpQqHW/WEZlT58Ogk78",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDZCQ0ZGMkRBNUE1OTkxNkMKUldSc2tWbGEydkxQYTQ1ZzE0NmFma2VCWVVWWVJUS1pRU0lDejBKcW1qY2hrOC9JYnhJVzdDQWwK",
       "dangerousInsecureTransportProtocol": false,
       "windows": {
         "installMode": "passive"

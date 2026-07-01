@@ -190,6 +190,22 @@ removal). Intel macOS validation moves to maintainer-local rigs +
 release smoke test until a more reliable Intel CI surface is
 available within the zero-cost constraint.
 
+## [0.7.14] — Malware Database Refresh — _(data release, 2026-06-21)_
+
+Data-only release on the signature-database track — no engine code changes
+(the engine line continues at [0.7.20] / [Unreleased]).
+
+### Changed
+
+- Refreshed the curated malware blacklist to **53,725,119** SHA-256 rows
+  (**+10,175** new this batch, deduplicated via `INSERT OR IGNORE`). Hashes
+  are clean-room–labeled through the Mythodikal YARA refinement set before
+  merge.
+- Republished as the split, zstd-compressed SQLite artifact
+  `myth-blacklist-v0.7.14.sqlite.zst` (`*.part-001`..`part-002`) with
+  per-part and full-file `SHA256SUMS` plus reassembly helpers, on the
+  `v0.7.14` GitHub release.
+
 ## [0.7.20] — Phase 7C Engine Enhancement — _(shipped 2026-05-27)_
 
 ### Added — Phase 7C ("Engine Enhancement") foundation wave
