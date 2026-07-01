@@ -75,7 +75,9 @@ mod tests {
         let argv = run_in_distro_argv("Ubuntu", &["sudo", "install", "freallyd"]);
         assert_eq!(
             argv,
-            vec!["wsl.exe", "-d", "Ubuntu", "--", "sudo", "install", "freallyd"]
+            vec![
+                "wsl.exe", "-d", "Ubuntu", "--", "sudo", "install", "freallyd"
+            ]
         );
     }
 

@@ -106,7 +106,9 @@ pub async fn wsl_list_distros() -> Result<Vec<freallykernel::platform::wsl::WslD
             .arg("--verbose")
             .output();
         match out {
-            Ok(o) => Ok(freallykernel::platform::wsl::parse_wsl_list_utf16le(&o.stdout)),
+            Ok(o) => Ok(freallykernel::platform::wsl::parse_wsl_list_utf16le(
+                &o.stdout,
+            )),
             Err(_) => Ok(Vec::new()),
         }
     }

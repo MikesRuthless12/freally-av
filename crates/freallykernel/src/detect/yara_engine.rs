@@ -288,11 +288,7 @@ mod tests {
         assert_eq!(det.rule_count(), 1);
 
         let target = dir.path().join("target.bin");
-        fs::write(
-            &target,
-            b"junk before FREALLY_SMOKE_MARKER_42 junk after",
-        )
-        .unwrap();
+        fs::write(&target, b"junk before FREALLY_SMOKE_MARKER_42 junk after").unwrap();
         let ctx = FileCtx {
             path: &target,
             size_bytes: 50,

@@ -20,9 +20,7 @@ use super::ffi::{
     FanotifyEventIter, FanotifyFd, InotifyEventIter, InotifyFd, ParsedInotifyEvent, device_id,
     statfs_name, walk_getdents64,
 };
-use super::flags::{
-    self, FAN_Q_OVERFLOW, FREALLY_FANOTIFY_MASK, FREALLY_INOTIFY_MASK, ReasonKind,
-};
+use super::flags::{self, FAN_Q_OVERFLOW, FREALLY_FANOTIFY_MASK, FREALLY_INOTIFY_MASK, ReasonKind};
 
 const READ_BUFFER_BYTES: usize = 64 * 1024;
 const POLL_TIMEOUT_MS: i32 = 100;

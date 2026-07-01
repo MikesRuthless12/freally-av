@@ -52,8 +52,7 @@ pub const DEFAULT_CURATED_SHA256_URL: &str = "https://github.com/MikesRuthless12
 /// unchanged — the *source* of the file changes, not its location.
 pub const CURATED_BIN_FILENAME: &str = "abusech_sha256.bin";
 
-const DEFAULT_USER_AGENT: &str =
-    "Freally-AV/0.7 (+https://github.com/MikesRuthless12/freally-av)";
+const DEFAULT_USER_AGENT: &str = "Freally-AV/0.7 (+https://github.com/MikesRuthless12/freally-av)";
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
 /// Emit a download-progress tick at most every 16 MiB.
 const PROGRESS_STEP_BYTES: u64 = 16 * 1024 * 1024;

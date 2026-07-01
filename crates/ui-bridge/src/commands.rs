@@ -1399,7 +1399,10 @@ fn configs_equal(a: &freallykernel::config::Config, b: &freallykernel::config::C
         && a.scanning.skip_hidden == b.scanning.skip_hidden
 }
 
-fn section_change_count(a: &freallykernel::config::Config, b: &freallykernel::config::Config) -> usize {
+fn section_change_count(
+    a: &freallykernel::config::Config,
+    b: &freallykernel::config::Config,
+) -> usize {
     let g = (a.general.close_action != b.general.close_action) as usize;
     let p = (a.telemetry.enabled != b.telemetry.enabled) as usize;
     let s = ((a.scanning.archives_enabled != b.scanning.archives_enabled) as usize)
@@ -1865,7 +1868,8 @@ pub fn build_pipeline_from_feeds(data_dir: &std::path::Path) -> DetectionPipelin
     // to the union .bin when the per-OS variants aren't downloaded.
     // Multiple slices may be loaded as parallel detector instances
     // (host-OS slice + the cross-platform `_other` slice).
-    for nsrl_path in freallykernel::detect::goodware_allowlist::resolve_nsrl_slice_paths(&feeds_dir) {
+    for nsrl_path in freallykernel::detect::goodware_allowlist::resolve_nsrl_slice_paths(&feeds_dir)
+    {
         match GoodwareAllowlistDetector::open(&nsrl_path) {
             Ok(d) => {
                 tracing::info!(
