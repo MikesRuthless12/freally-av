@@ -1903,6 +1903,156 @@ dependencies = [
 ]
 
 [[package]]
+name = "freally-app"
+version = "0.7.20"
+dependencies = [
+ "dirs 5.0.1",
+ "freallykernel",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-autostart",
+ "tauri-plugin-dialog",
+ "tauri-plugin-process",
+ "tauri-plugin-single-instance",
+ "tauri-plugin-updater",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "ui-bridge",
+]
+
+[[package]]
+name = "freallyctl"
+version = "0.7.20"
+dependencies = [
+ "anyhow",
+ "clap",
+ "freallykernel",
+ "rusqlite",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "freallyd-linux"
+version = "0.7.20"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "ciborium",
+ "clap",
+ "freallykernel",
+ "hex",
+ "libc",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "freallyd-macos"
+version = "0.7.20"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "ciborium",
+ "clap",
+ "freallykernel",
+ "hex",
+ "libc",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
+name = "freallyd-windows"
+version = "0.7.20"
+dependencies = [
+ "anyhow",
+ "chrono",
+ "ciborium",
+ "clap",
+ "freallykernel",
+ "hex",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "windows 0.62.2",
+]
+
+[[package]]
+name = "freallykernel"
+version = "0.7.20"
+dependencies = [
+ "anyhow",
+ "base64 0.22.1",
+ "blake3",
+ "bzip2-rs",
+ "chrono",
+ "ciborium",
+ "core-foundation",
+ "core-foundation-sys",
+ "crc32fast",
+ "criterion",
+ "crossbeam-channel",
+ "directories",
+ "flate2",
+ "fsevent-sys",
+ "futures",
+ "hex",
+ "httpdate",
+ "keyring",
+ "libc",
+ "lz4_flex",
+ "lzma-rs",
+ "memmap2",
+ "minisign-verify",
+ "rand 0.8.6",
+ "rayon",
+ "reqwest 0.12.28",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "sevenz-rust2",
+ "sha2",
+ "sysinfo",
+ "tar",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "toml 0.8.2",
+ "tracing",
+ "tracing-appender",
+ "tracing-subscriber",
+ "walkdir",
+ "windows 0.62.2",
+ "yara-x",
+ "zip 4.6.1",
+ "zstd",
+]
+
+[[package]]
 name = "fsevent-sys"
 version = "4.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3377,156 +3527,6 @@ dependencies = [
  "serde",
  "thiserror 2.0.18",
  "windows-sys 0.61.2",
-]
-
-[[package]]
-name = "freallyctl"
-version = "0.7.20"
-dependencies = [
- "anyhow",
- "clap",
- "freallykernel",
- "rusqlite",
- "serde_json",
- "tokio",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "freallyd-linux"
-version = "0.7.20"
-dependencies = [
- "anyhow",
- "chrono",
- "ciborium",
- "clap",
- "hex",
- "libc",
- "freallykernel",
- "rusqlite",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "freallyd-macos"
-version = "0.7.20"
-dependencies = [
- "anyhow",
- "chrono",
- "ciborium",
- "clap",
- "hex",
- "libc",
- "freallykernel",
- "rusqlite",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "freallyd-windows"
-version = "0.7.20"
-dependencies = [
- "anyhow",
- "chrono",
- "ciborium",
- "clap",
- "hex",
- "freallykernel",
- "rusqlite",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "tracing-subscriber",
- "windows 0.62.2",
-]
-
-[[package]]
-name = "freallykernel"
-version = "0.7.20"
-dependencies = [
- "anyhow",
- "base64 0.22.1",
- "blake3",
- "bzip2-rs",
- "chrono",
- "ciborium",
- "core-foundation",
- "core-foundation-sys",
- "crc32fast",
- "criterion",
- "crossbeam-channel",
- "directories",
- "flate2",
- "fsevent-sys",
- "futures",
- "hex",
- "httpdate",
- "keyring",
- "libc",
- "lz4_flex",
- "lzma-rs",
- "memmap2",
- "minisign-verify",
- "rand 0.8.6",
- "rayon",
- "reqwest 0.12.28",
- "rusqlite",
- "serde",
- "serde_json",
- "sevenz-rust2",
- "sha2",
- "sysinfo",
- "tar",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
- "toml 0.8.2",
- "tracing",
- "tracing-appender",
- "tracing-subscriber",
- "walkdir",
- "windows 0.62.2",
- "yara-x",
- "zip 4.6.1",
- "zstd",
-]
-
-[[package]]
-name = "freally-app"
-version = "0.7.20"
-dependencies = [
- "dirs 5.0.1",
- "freallykernel",
- "serde",
- "serde_json",
- "tauri",
- "tauri-build",
- "tauri-plugin-autostart",
- "tauri-plugin-dialog",
- "tauri-plugin-process",
- "tauri-plugin-single-instance",
- "tauri-plugin-updater",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "tracing-subscriber",
- "ui-bridge",
 ]
 
 [[package]]
@@ -6646,8 +6646,8 @@ dependencies = [
 name = "ui-bridge"
 version = "0.7.20"
 dependencies = [
- "hex",
  "freallykernel",
+ "hex",
  "rusqlite",
  "serde",
  "serde_json",
