@@ -451,7 +451,7 @@ mod tests {
 
     #[test]
     fn base64_attachment_is_decoded() {
-        // "Freally\n" in base64 = "TXl0aG9kaWthbAo="
+        // "Freally\n" in base64 = "RnJlYWxseQo="
         let raw = b"From: a@b\r\n\
                     Content-Type: multipart/mixed; boundary=BD\r\n\
                     \r\n\
@@ -462,7 +462,7 @@ mod tests {
                     Content-Type: application/octet-stream; name=\"payload.bin\"\r\n\
                     Content-Disposition: attachment; filename=\"payload.bin\"\r\n\
                     Content-Transfer-Encoding: base64\r\n\r\n\
-                    TXl0aG9kaWthbAo=\r\n\
+                    RnJlYWxseQo=\r\n\
                     --BD--\r\n";
         let msg = parse_eml(raw);
         assert_eq!(msg.attachments.len(), 1);
@@ -531,7 +531,7 @@ mod tests {
                     Content-Type: application/octet-stream; name=\"payload.bin\"\r\n\
                     Content-Disposition: attachment; filename=\"payload.bin\"\r\n\
                     Content-Transfer-Encoding: base64\r\n\r\n\
-                    TXl0aG9kaWthbAo=\r\n";
+                    RnJlYWxseQo=\r\n";
         let msg = parse_eml(raw);
         assert_eq!(msg.attachments.len(), 1, "final part must not be dropped");
         assert_eq!(msg.attachments[0].filename.as_deref(), Some("payload.bin"));
