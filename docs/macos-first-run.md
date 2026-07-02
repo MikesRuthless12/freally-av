@@ -89,9 +89,9 @@ ever notarizes a fork on their own dime.
 
 ## Why we cannot pay to fix this
 
-Per `docs/prd.md` § 1.5.3, the project is committed to shipping at $0 / yr
+The project is committed to shipping at $0 / yr
 for both maintainer and end users. The Apple Developer Program is a
 $99 / yr recurring cost per Apple's terms, and accepting it would violate
 the constraint. If a future sponsor covers the $99 unconditionally, the
-project may revisit; that is a Phase 13 (donor / Pro tier) decision and
-not on the v0.19.84 stable path.
+project may revisit; that decision is not on the v0.19.84 stable path.
+Either way, Freally stays completely free for every user.

@@ -21,7 +21,7 @@ The consumer anti-virus market in 2026 has drifted into bundles that nobody aske
 
 Freally is the AV the maintainer wants to use on his own machines. It does AV. Only AV. Source is on GitHub. Telemetry is off by default. Defaults are sane. The progress bar tells the truth.
 
-The full strategic foundation is in [`docs/product-vision.md`](docs/product-vision.md). The technical blueprint is [`docs/prd.md`](docs/prd.md). The phased build plan is [`docs/product-roadmap.md`](docs/product-roadmap.md). The launch playbook is [`docs/gtm.md`](docs/gtm.md).
+And it is **completely free for everyone** — no Pro tier, no payments, no ads, ever.
 
 ---
 
@@ -31,7 +31,7 @@ The full strategic foundation is in [`docs/product-vision.md`](docs/product-visi
 - **Honest progress.** Time-remaining estimates are calibrated and monotone-non-increasing after the first 3% of work — no "stuck at 99%."
 - **Cross-platform parity.** Same feature set on Windows, macOS, and Linux unless platform constraints forbid.
 - **Source-visible.** Every line of the engine, the UI, and the build pipeline is here on GitHub. License forbids redistribution; reading and learning is welcome.
-- **Real-time on-access protection.** **All user-mode, zero kernel drivers, zero paid signing** (see [`docs/prd.md`](docs/prd.md) § 1.5.4). Windows: ETW Threat Intelligence + AMSI + WDAC + Microsoft Defender bridge. macOS: ESF NOTIFY-only + XProtect-Remediator-style launchd cleanup. Linux: `fanotify` daemon.
+- **Real-time on-access protection.** **All user-mode, zero kernel drivers, zero paid signing.** Windows: ETW Threat Intelligence + AMSI + WDAC + Microsoft Defender bridge. macOS: ESF NOTIFY-only + XProtect-Remediator-style launchd cleanup. Linux: `fanotify` daemon.
 - **Layered detection.** abuse.ch hash blacklist (commercial-clean per [their FAQ](https://bazaar.abuse.ch/faq/)), NIST NSRL goodware allowlist, YARA-Forge `core` permissively-licensed rule pack, original behavioral heuristics.
 - **User-loadable YARA.** First-class rule manager. Add your own rules. Validate, license-scrub, run.
 - **Quarantine with restore + per-finding explanation.** When a file is flagged, you see the exact rule, the exact bytes (for YARA), the source feed, and the action options.
@@ -43,7 +43,7 @@ The full strategic foundation is in [`docs/product-vision.md`](docs/product-visi
 - **No bloat.** No bundled VPN, password manager, "PC speedup," browser toolbar, or affiliate offers — ever.
 - **No telemetry by default.** If telemetry is ever opted-into, the scope is anonymous version + scan-count counter — no paths, no hashes, no IPs.
 
-The current state of the codebase is far short of this list. See [`docs/product-roadmap.md`](docs/product-roadmap.md) for the phase the project is currently in.
+The current state of the codebase is far short of this list. See the roadmap table below for the phase the project is currently in.
 
 ---
 
@@ -60,17 +60,17 @@ Freally is **source-visible, All Rights Reserved**. See [`LICENSE.md`](LICENSE.m
 
 If you want a custom commercial arrangement (embedding, OEM, white-label, etc.), email `freallyone@gmail.com`.
 
-This license posture is unusual for an AV product. The reasoning is in [`docs/product-vision.md`](docs/product-vision.md) § 1 and [`RESEARCH-DOSSIER.md`](RESEARCH-DOSSIER.md) § 9.
+This license posture is unusual for an AV product, but it keeps the code readable by anyone while the project stays solo-maintained.
 
 ---
 
 ## Status & roadmap
 
-The roadmap targets stable **v0.19.84**, sequenced across 16 phases. Current phase status is tracked live in [`docs/product-roadmap.md`](docs/product-roadmap.md).
+The roadmap targets stable **v0.19.84**, sequenced across 16 phases. Current phase status is tracked in the table below.
 
 **Current state:** Phases 0, 1, 2, 3 are shipped. **Phase 6 shipped 2026-05-22 (v0.6.0)** — macOS universal-binary release pipeline + unsigned bundle + hardened-runtime entitlements + platform-aware Modal component all in the tree. **Phase 7B Wave 1 code-complete 2026-05-23** — two-tier samples schema (gold + silver), hash-only ingest subcommand, tier-aware export, NSRL RDSv3 whitelist ingest + sorted-`.bin` export, consolidated single-file shippable artifacts, simplified byte-fetch pipelines with severity derived from MB metadata at insert time, first-scan UX with three NSRL download choices, and the nightly NIST refresh workflow (with integrity verification + version-skip guard). **Phase 7B Wave 2 merged to `main` 2026-05-27 (squash `71e3300` via PR #6)** — Bloom + Cuckoo filter front-ends, partial-match for ≥ 256 MB files, hash de-aging, per-OS NSRL slicing, package-manager / App Store / Microsoft Store / Snap/Flatpak/AppImage / dev-publisher / SBOM allowlists, ephemeral trust-this-once with auto-expiry, confidence-graded findings, feed-freshness widget, mirror failover + chained ed25519 epoch sig, in-app user-IOC editor (CSV / STIX 2.1 / MISP), per-finding citation-copy, reverse-lookup + lateral-search, BLAKE3 + SHA-256 dual-key gate on P0 promotions, and ~85 new unit tests. 22 of 23 Wave 2 tasks landed (TASK-178..199); only **TASK-200** — the v0.7.13 release tag — remains, with release notes and a staging directory already drafted on disk.
 
-**Phase 7C ("Engine Enhancement", v0.7.14 → v0.7.20) shipped 2026-05-27.** All four waves are foundation-complete on `phase-7c/task-201-resumable-scans`. Wave 1 (orchestration): resumable scans (TASK-201), file-state diff cache + epoch invalidation (TASK-202), multi-root parallel producers (TASK-203), foreground-aware throttle (TASK-204), dev exclude pack + project detect (TASK-205/206), LoopGuard (TASK-210). Wave 2 (file policy + content): packer ID (TASK-217), entropy heatmap (TASK-225), file-policy modules (TASK-227/228/229), hot zones + mmap hash + archive bomb guard (TASK-230/232/233). Wave 3 (format-aware detectors, this release): header parser (TASK-216), dual-arch / fat binary (TASK-209), sparse-aware hashing (TASK-211), reparse-point policy (TASK-212), APFS clones (TASK-213), Btrfs/ZFS reflinks (TASK-214), snapshot abstraction (TASK-215), UPX unpacker (TASK-218), .NET IL extractor (TASK-219), Java bytecode parser (TASK-220), Android DEX / AXML (TASK-221), Mach-O code-signature (TASK-222), Authenticode validator (TASK-223), ELF hardening inventory (TASK-224). Wave 4 (power + stats + deltas + remote, this release): wake gate (TASK-207), battery-aware throttle (TASK-208), statistical anomaly engine + baseline (TASK-226), FastCDC selective rehash + chunk store (TASK-231), remote-mount scan mode (TASK-234). The release-ceremony tag (TASK-235) bumps `Cargo.toml` workspace + `tauri.conf.json` to **0.7.20** and adds `docs/launch-checklists/v0.7.20.md`. ~115 new unit tests across the wave; `cargo test -p freallykernel --lib` runs 638 tests green.
+**Phase 7C ("Engine Enhancement", v0.7.14 → v0.7.20) shipped 2026-05-27.** All four waves are foundation-complete on `phase-7c/task-201-resumable-scans`. Wave 1 (orchestration): resumable scans (TASK-201), file-state diff cache + epoch invalidation (TASK-202), multi-root parallel producers (TASK-203), foreground-aware throttle (TASK-204), dev exclude pack + project detect (TASK-205/206), LoopGuard (TASK-210). Wave 2 (file policy + content): packer ID (TASK-217), entropy heatmap (TASK-225), file-policy modules (TASK-227/228/229), hot zones + mmap hash + archive bomb guard (TASK-230/232/233). Wave 3 (format-aware detectors, this release): header parser (TASK-216), dual-arch / fat binary (TASK-209), sparse-aware hashing (TASK-211), reparse-point policy (TASK-212), APFS clones (TASK-213), Btrfs/ZFS reflinks (TASK-214), snapshot abstraction (TASK-215), UPX unpacker (TASK-218), .NET IL extractor (TASK-219), Java bytecode parser (TASK-220), Android DEX / AXML (TASK-221), Mach-O code-signature (TASK-222), Authenticode validator (TASK-223), ELF hardening inventory (TASK-224). Wave 4 (power + stats + deltas + remote, this release): wake gate (TASK-207), battery-aware throttle (TASK-208), statistical anomaly engine + baseline (TASK-226), FastCDC selective rehash + chunk store (TASK-231), remote-mount scan mode (TASK-234). The release-ceremony tag (TASK-235) bumps `Cargo.toml` workspace + `tauri.conf.json` to **0.7.20** and signs off the v0.7.20 launch checklist. ~115 new unit tests across the wave; `cargo test -p freallykernel --lib` runs 638 tests green.
 
 **Phase 8 foundation 2026-05-27** — all 24 wave-1 + wave-2 tasks landed: `daemon/freallyd-{linux,macos,windows}` crates added to the workspace, length-prefixed CBOR IPC (`freallykernel::ipc::linfan`), block-on-detected index + verdict policy, browser-credential-store detector, honeyfile tripwires with SIGSTOP, eBPF observe-only scaffold, audit NETLINK fallback, per-mount real-time toggle, container bind-mount dedupe, WSL distro bridge, and the cross-platform USB stack (`freallykernel::usb::*`: allowlist, BadUSB HID anomaly, power-only override, autorun.inf reader, RTL-override heuristic, write event log, per-device scan history) wired through `crates/ui-bridge/src/commands_{usb,mount}.rs` and six new frontend pages (`Realtime`, `UsbInsertModal`, `Settings/UsbAllowlist`, `Settings/UsbPolicy`, `History/UsbWrites`, `UsbDevices`).
 
@@ -86,8 +86,8 @@ The roadmap targets stable **v0.19.84**, sequenced across 16 phases. Current pha
 | 3 | UI Alpha | v0.3.x | ✅ Shipped |
 | 4 | Linux MVP & Magic Moment | v0.4.x | 🟢 Code-complete (tag gated on TASK-049) |
 | 5 | Windows MFT Superpowers | v0.5.x | 🟢 Code-complete (waves 1+2 shipped 2026-05-12; tag gated on TASK-058 smoke test) |
-| 6 | macOS Port (unsigned, see `docs/prd.md` § 1.5.3) | v0.6.x | ✅ Shipped 2026-05-22 (v0.6.0 consolidated tag) |
-| 7 | YARA & Rule Manager | v0.7.x | Reclassified to optional / Pro / post-MVP per TASK-177 — no longer release-gating |
+| 6 | macOS Port (unsigned — zero-cost signing posture) | v0.6.x | ✅ Shipped 2026-05-22 (v0.6.0 consolidated tag) |
+| 7 | YARA & Rule Manager | v0.7.x | Reclassified to optional / post-MVP per TASK-177 — no longer release-gating |
 | 7B | Hash-Only Blacklist + NSRL Whitelist (Wave 1) | v0.7.x | 🟢 Wave 1 code-complete 2026-05-23 — tag-cut gated on launch checklist |
 | 7B-W2 | Hash-Path Perf + Allowlist Intelligence + IOC Tools (Wave 2) | v0.7.x | 🟢 Wave 2 merged to `main` 2026-05-27 via PR #6 (squash `71e3300`); 22/23 tasks landed (TASK-178..199); TASK-200 v0.7.13 release tag in flight (release notes + staging dir drafted) |
 | 7C | Engine Enhancement: resumable scans + diff rescan + multi-root parallel + adaptive/battery/wake throttle + sparse/clone/reflink/snapshot correctness + PE/ELF/Mach-O/.NET-IL/Java/DEX/Authenticode parsers + entropy + UPX unpacker + stale-temp auto-quarantine + per-extension/hot-zone/zero-trust policy + FastCDC selective rehash + mmap large-file hash + remote-mount slow-mode | v0.7.x | ✅ Foundation-complete 2026-05-27 (v0.7.20 tag, TASK-235) |
@@ -96,12 +96,12 @@ The roadmap targets stable **v0.19.84**, sequenced across 16 phases. Current pha
 | 10 | Polish & Public Launch (Wave 1) | v0.10.x | 🟢 Foundation 2026-05-27 — all 17 implementation tasks (TASK-084..151 + TASK-085a..d); engine 720→804 tests; tag gated on the v0.10.0 launch checklist + frontend UI retrofit pass |
 | 11 | macOS Real-time Enhancement (NOTIFY + XProtect-Style Cleanup) | v0.11.x – v0.12.x | Pending |
 | 12 | Windows Real-time Enforcement Stack (ETW + AMSI + WDAC) | v0.13.x – v0.15.x | Pending |
-| 13 | Donor / Pro Tier (optional, deferred) | v0.16.x – v0.17.x | Pending |
+| 13 | — (Freally Anti-Virus is completely free — no Pro tier, no payments, no ads) | — | n/a |
 | 14 | Hardening | v0.18.x | Pending |
 | 15 | Stable Run-up | v0.19.x | Pending |
 | 16 | **Stable Release** | **v0.19.84** | Pending |
 
-**What works today (after Phase 3):** Both the `freallyctl` CLI **and** the Tauri GUI can scan a directory, ingest abuse.ch and NSRL feeds into local `.bin` files, detect known-bad files by SHA-256, quarantine them (XOR'd, with the key in your OS keychain), and restore them byte-for-byte. The GUI ships four pages — Scan, History, Quarantine, Settings — wired through 20 typed Tauri commands. Scan progress streams to the UI as live events at ≤ 10 Hz per `docs/prd.md` § 4.2. Path-policy gate + strict CSP + Tauri capabilities allowlist are in place per the Phase-3 security review.
+**What works today (after Phase 3):** Both the `freallyctl` CLI **and** the Tauri GUI can scan a directory, ingest abuse.ch and NSRL feeds into local `.bin` files, detect known-bad files by SHA-256, quarantine them (XOR'd, with the key in your OS keychain), and restore them byte-for-byte. The GUI ships four pages — Scan, History, Quarantine, Settings — wired through 20 typed Tauri commands. Scan progress streams to the UI as live events at ≤ 10 Hz. Path-policy gate + strict CSP + Tauri capabilities allowlist are in place per the Phase-3 security review.
 
 ---
 
@@ -112,7 +112,7 @@ Freally is built with Rust + Tauri v2 + pnpm + Solid.js. You will need:
 - Rust ≥ 1.85 (`rustup default stable`)
 - Node 20 + `pnpm` (`corepack enable && corepack prepare pnpm@latest --activate`)
 - Tauri v2 prerequisites for your OS — see [tauri.app/v2/start/prerequisites](https://v2.tauri.app/start/prerequisites/).
-- **No** Windows WDK, **no** Apple Developer Program — per [`docs/prd.md`](docs/prd.md) § 1.5 the project ships with zero paid OS code-signing infrastructure. Windows real-time uses ETW + AMSI + WDAC (Phase 12); macOS real-time uses ESF NOTIFY-only (Phase 11). Neither requires paid tooling.
+- **No** Windows WDK, **no** Apple Developer Program — the project ships with zero paid OS code-signing infrastructure. Windows real-time uses ETW + AMSI + WDAC (Phase 12); macOS real-time uses ESF NOTIFY-only (Phase 11). Neither requires paid tooling.
 
 Once you've cloned the repo:
 
@@ -122,7 +122,7 @@ cargo check --workspace
 pnpm -C apps/freally/frontend tauri dev
 ```
 
-The first run opens a Freally window with the brand mark and the design tokens applied. From there, follow the active phase's smoke test in [`Freally-Build-Prompts-Guide.md`](Freally-Build-Prompts-Guide.md).
+The first run opens a Freally window with the brand mark and the design tokens applied.
 
 You may build locally for personal learning. You may not redistribute the resulting binaries. See [`LICENSE.md`](LICENSE.md).
 
@@ -130,7 +130,7 @@ You may build locally for personal learning. You may not redistribute the result
 
 ## First-run on Windows (unsigned bundle)
 
-Freally ships **unsigned** per [`docs/prd.md`](docs/prd.md) § 1.5.3 — the project's zero-cost / no-paid-signing constraint forbids OV or EV code-signing certificates. On Windows 11 the first launch therefore triggers SmartScreen and (depending on how the file was downloaded) the Mark-of-the-Web "blocked" attribute. Both are expected. Workarounds:
+Freally ships **unsigned** — the project's zero-cost / no-paid-signing constraint forbids OV or EV code-signing certificates. On Windows 11 the first launch therefore triggers SmartScreen and (depending on how the file was downloaded) the Mark-of-the-Web "blocked" attribute. Both are expected. Workarounds:
 
 1. **SmartScreen Defender prompt** ("Windows protected your PC"):
    - Click **More info**.
@@ -144,7 +144,7 @@ Freally ships **unsigned** per [`docs/prd.md`](docs/prd.md) § 1.5.3 — the pro
 
 The published `latest.json` and per-bundle `.sig` files on the GitHub Release are ed25519 signatures consumed by the in-app auto-updater (Tauri Updater plugin, FR-152), **not** Authenticode signatures — Windows does not natively verify them. The in-app updater verifies them against the public key compiled into the binary, so subsequent updates are cryptographically authenticated end-to-end even though the original bundle is unsigned at the OS level.
 
-If a sponsor ever covers an OV/EV cert, code-signing would land as a Phase 13 (donor) extra — never as a P0/P1 release-gate. Until then the workarounds above are the canonical path.
+If a sponsor ever covers an OV/EV cert, code-signing would land as a free improvement for everyone — never as a P0/P1 release-gate. Until then the workarounds above are the canonical path.
 
 ---
 
@@ -153,7 +153,7 @@ If a sponsor ever covers an OV/EV cert, code-signing would land as a Phase 13 (d
 Freally is a closed contribution model — no PRs accepted at this time, with two exceptions:
 
 1. **Security disclosures.** See [`SECURITY.md`](SECURITY.md). Coordinated disclosure within 90 days. Hall-of-fame credit if requested.
-2. **Translations of UI strings** once the localization scaffolding lands at v0.10. Translation contributions are accepted under a Contributor Agreement that grants Freally the right to incorporate the translation into the product. The translation contributor receives credit and a free Pro license.
+2. **Translations of UI strings** once the localization scaffolding lands at v0.10. Translation contributions are accepted under a Contributor Agreement that grants Freally the right to incorporate the translation into the product. The translation contributor receives credit.
 
 The closed contribution model exists because Freally is opinionated — solo-architected, single-vision, source-visible-not-source-open. If you want to fork the philosophy: more power to you, build your own AV, take ideas freely. Just don't take the code.
 
@@ -167,7 +167,7 @@ Freally pulls public threat intelligence from sources documented in [`THIRD-PART
 - **NIST NSRL** — US Government public domain. Used as a goodware allowlist.
 - **YARA-Forge `core` tier** — YARA rules with metadata licensing scrubbed in CI to permit only MIT / Apache-2.0 / BSD / CC0 / MPL-2.0.
 
-Freally does NOT use ClamAV signatures or libclamav (license incompatibility — see [`RESEARCH-DOSSIER.md`](RESEARCH-DOSSIER.md) § 3.4).
+Freally does NOT use ClamAV signatures or libclamav (license incompatibility).
 
 ---
 
