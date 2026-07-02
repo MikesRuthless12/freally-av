@@ -1,8 +1,6 @@
 # Third-Party Data Sources
 
-Freally Anti-Virus pulls public threat intelligence and goodware allowlists from the sources documented below. Every source is selected for **commercial redistribution-friendly licensing** so that compiled binaries shipped under `LICENSE.md` are clean.
-
-For deeper analysis of why each source was chosen — and what alternatives were considered and rejected — see `RESEARCH-DOSSIER.md` § 3.
+Freally Anti-Virus pulls public threat intelligence and goodware allowlists from the sources documented below. Every source is selected for **commercial redistribution-friendly licensing** so that compiled binaries shipped under `LICENSE.md` are clean. The alternatives that were considered and rejected are summarized at the end of this document.
 
 ---
 
@@ -72,9 +70,9 @@ For deeper analysis of why each source was chosen — and what alternatives were
 
 | Source | Why rejected |
 |---|---|
-| ClamAV signatures (`main.cvd`, `daily.cvd`) | License: GPLv2 — incompatible with our closed binary redistribution. See `RESEARCH-DOSSIER.md` § 3.4. |
+| ClamAV signatures (`main.cvd`, `daily.cvd`) | License: GPLv2 — incompatible with our closed binary redistribution. |
 | Microsoft Defender threat feed | Closed source, no public API for third-party AVs. |
-| Commercial threat-intel APIs (Recorded Future, Mandiant, etc.) | Cost and per-seat licensing model conflict with our free-tier guarantee. |
+| Commercial threat-intel APIs (Recorded Future, Mandiant, etc.) | Cost and per-seat licensing model conflict with our free-for-everyone guarantee. |
 | YARA-Forge `extended` and `full` tiers | Contain rules with metadata licenses that fail our scrubber (GPL, AGPL, unspecified). Users may opt into individual rules via the User Rule Manager (TASK-068). |
 
 ---

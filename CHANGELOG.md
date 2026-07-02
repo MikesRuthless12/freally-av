@@ -4,7 +4,7 @@ All notable changes to Freally Anti-Virus are recorded here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to a 0-based pre-stable [Semantic Versioning](https://semver.org/spec/v2.0.0.html) scheme. The first stable release will be **v0.19.84**.
 
-Each release section lists which `TASK-NNN` items from `docs/product-roadmap.md` shipped in that release. Phase Closeout (per `Freally-Build-Prompts-Guide.md`) populates `[Unreleased]` as work lands and promotes it to a version heading at release time.
+Each release section lists which `TASK-NNN` items shipped in that release. Phase Closeout populates `[Unreleased]` as work lands and promotes it to a version heading at release time.
 
 ---
 
@@ -317,10 +317,9 @@ unit tests across the wave; 638 total tests in
     bandwidth cap + fstype-based remote classification. 10 tests.
 
   **Release ceremony** — TASK-235 (this release): version bumps
-  (Cargo.toml workspace, tauri.conf.json → 0.7.20), launch checklist
-  (`docs/launch-checklists/v0.7.20.md`), updated CHANGELOG (this
-  section), updated README + SECURITY + Build-Prompts-Guide +
-  product-roadmap.
+  (Cargo.toml workspace, tauri.conf.json → 0.7.20), launch-checklist
+  sign-off, updated CHANGELOG (this section), updated README and
+  internal project docs.
 
   **License posture** — every foundation module is hand-rolled
   against published specs (FastCDC paper, ECMA-335, JVM spec §4,
@@ -753,12 +752,11 @@ unit tests across the wave; 638 total tests in
   - TASK-026: `freallyctl quarantine {list, restore, delete, restore-all, delete-all --confirm, restore-many <ids...>, delete-many <ids...>}` + `freallyctl feed update [--abusech-auth-key|env] [--nsrl-local|--nsrl-url]`; global `--db <path>` override
   - TASK-027: End-to-end smoke test — drop synthetic payload → hash → build feed → detect → record finding → apply Quarantine action → vault move (XOR'd) → restore (byte-for-byte recovery)
 - **Phase 2 spec changes that landed alongside the build**
-  - PRD: **new § 1.5 Cost & Distribution Constraints (HARD)** — 100% free for end users (commercial use included) and 100% free for the maintainer; GitHub-only hosting; no paid OS code-signing; no kernel drivers; no Lemon Squeezy.
+  - PRD: **new § 1.5 Cost & Distribution Constraints (HARD)** — 100% free for end users (commercial use included) and 100% free for the maintainer; GitHub-only hosting; no paid OS code-signing; no kernel drivers; no payment integrations.
   - PRD: **FR-031** macOS real-time is NOTIFY-only permanently (no AUTH); **FR-032** Windows real-time is user-mode ETW + AMSI + WDAC + Defender bridge (no kernel minifilter); **FR-133** block-on-detect implemented per-platform via the free stacks; **FR-141** BYOVD via WDAC; **FR-160** Shields broadcasts to user-mode daemons only.
   - PRD: **FR-135** revised — enumeration and scanning run **concurrently** (producer-consumer worklist); scanning begins on the first enumerated file; `files_total` is unlocked during enumeration, locks at `enumeration:complete`; UI shows three-piece `X scanned · Y enumerated · counting…` then transitions to `X/Y`. The earlier serial "enumerate-then-scan" model is retired.
-  - PRD § 10/§ 11: payment-integration deferred indefinitely; if launched, **Gumroad** replaces Lemon Squeezy; the free product must remain fully functional regardless.
-  - Roadmap: Phase 11 renamed to "macOS Real-time Enhancement (NOTIFY + XProtect-Style Cleanup)"; Phase 12 renamed to "Windows Real-time Enforcement Stack (ETW + AMSI + WDAC)"; Phase 13 renamed to "Donor / Pro Tier (optional, deferred)". TASK-159 (Defender bridge) and TASK-160 (Sysmon ingest) added to Phase 12.
-  - Build-Prompts Guide: every Phase 11/12/13 prompt rewritten to match the new architecture; FR-135 / TASK-137 prompt rewritten to the concurrent producer-consumer model; preface paragraph pins the zero-cost / GitHub-only contract.
+  - PRD § 10/§ 11: payment-integration dropped entirely — Freally is completely free for everyone, and the full product is fully functional for every user.
+  - Roadmap: Phase 11 renamed to "macOS Real-time Enhancement (NOTIFY + XProtect-Style Cleanup)"; Phase 12 renamed to "Windows Real-time Enforcement Stack (ETW + AMSI + WDAC)". TASK-159 (Defender bridge) and TASK-160 (Sysmon ingest) added to Phase 12.
 
 ### Changed
 - License/attribution scrub across project docs to canonical `Mike Weaver <freallyone@gmail.com>` and GitHub URLs to `MikesRuthless12/freally-av`.
@@ -780,7 +778,7 @@ unit tests across the wave; 638 total tests in
 
 ## Pre-stable release plan
 
-The following entries are placeholders aligned with the Version → Phase Map in `docs/product-roadmap.md`. Each becomes a real release section as the corresponding phase ships. Until then, the `[Unreleased]` section above is the source of truth.
+The following entries are placeholders aligned with the project's Version → Phase Map. Each becomes a real release section as the corresponding phase ships. Until then, the `[Unreleased]` section above is the source of truth.
 
 ### [0.0.x] — Phase 0 — Foundation & Setup _(scheduled)_
 
@@ -930,14 +928,9 @@ The following entries are placeholders aligned with the Version → Phase Map in
 - Microsoft Defender bridge (Set-MpPreference + quarantine push) (TASK-159).
 - Optional Sysmon ingest (bundled, signed-by-Microsoft) (TASK-160).
 
-### [0.16.x – 0.17.x] — Phase 13 — Donor / Pro Tier (optional, deferred) _(scheduled)_
+### [0.16.x – 0.17.x] — Phase 13 — Free for everyone _(scheduled)_
 
-- License-key engine (offline ed25519 verification) (TASK-105). **No P0/P1/P2 feature gated by it.**
-- Payment-provider integration (Gumroad-leading; founder admin) (TASK-106). Lemon Squeezy removed per `docs/prd.md` § 1.5.5.
-- Settings > Activation page (TASK-107).
-- Donor extra: signed scan reports (PDF + JSON) with verifier CLI (TASK-108).
-- Donor extra: multi-device policy sync via private GitHub Gist (opt-in) (TASK-109). **No `sync.freally.com` endpoint.**
-- Donate flow for free users (GitHub Sponsors / Gumroad link) (TASK-110).
+- Freally Anti-Virus is and stays completely free — no Pro tier, no payments, no ads. No paid features are planned for this or any other release.
 
 ### [0.18.x] — Phase 14 — Hardening _(scheduled)_
 
@@ -974,7 +967,7 @@ The following entries are placeholders aligned with the Version → Phase Map in
 
 ## How to add an entry
 
-When you complete a TASK-NNN, add a line to the matching `[Unreleased]` subsection (`Added`, `Changed`, `Fixed`, `Removed`, `Security`). The Phase Closeout protocol (see `Freally-Build-Prompts-Guide.md`) enforces this.
+When you complete a TASK-NNN, add a line to the matching `[Unreleased]` subsection (`Added`, `Changed`, `Fixed`, `Removed`, `Security`). The Phase Closeout protocol enforces this.
 
 When a phase ships its release, promote `[Unreleased]` to the version heading and create a fresh empty `[Unreleased]` section above it.
 

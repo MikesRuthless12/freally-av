@@ -92,7 +92,7 @@ THE LICENSOR'S TOTAL CUMULATIVE LIABILITY ARISING OUT OF OR RELATED TO THIS LICE
 
 6.2 **No obligation.** The Licensor is under no obligation to use, acknowledge, or compensate You for any Submission. Acknowledgment in `THIRD-PARTY-DATA.md`, `CONTRIBUTORS.md`, or release notes is at the Licensor's sole discretion.
 
-6.3 **Security-disclosure incentives.** Notwithstanding Section 6.2, the Licensor maintains a vulnerability hall-of-fame and may, at its sole discretion, offer monetary rewards or complimentary Pro licenses for high-severity, responsibly-disclosed vulnerabilities, per the policy in `SECURITY.md`.
+6.3 **Security-disclosure incentives.** Notwithstanding Section 6.2, the Licensor maintains a vulnerability hall-of-fame and may, at its sole discretion, offer monetary rewards for high-severity, responsibly-disclosed vulnerabilities, per the policy in `SECURITY.md`.
 
 ---
 
