@@ -62,6 +62,12 @@ ignore = [
     # rustybuzz unmaintained — transitive text-shaping dep via the Tauri 2.x
     # Linux WebView stack; no maintained replacement yet. Informational only.
     "RUSTSEC-2026-0206",
+    # quick-xml 0.39 DoS advisories (no semver-compatible patch yet; a major
+    # bump is gated on upstream deps). Transitive XML parsing — this app feeds
+    # it no untrusted XML. Drop when a patched quick-xml becomes pullable.
+    # (crossbeam-epoch's RUSTSEC-2026-0204 was fixed by a lockfile bump to 0.9.20.)
+    "RUSTSEC-2026-0194",
+    "RUSTSEC-2026-0195",
 ]
 
 [licenses]
