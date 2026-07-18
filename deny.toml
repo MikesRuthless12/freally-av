@@ -59,6 +59,9 @@ ignore = [
     "RUSTSEC-2025-0081",
     "RUSTSEC-2025-0098",
     "RUSTSEC-2025-0100",
+    # rustybuzz unmaintained — transitive text-shaping dep via the Tauri 2.x
+    # Linux WebView stack; no maintained replacement yet. Informational only.
+    "RUSTSEC-2026-0206",
 ]
 
 [licenses]
