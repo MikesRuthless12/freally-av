@@ -72,3 +72,7 @@ settings-scheduler-frequency-monthly = Maandelijks
 settings-scheduler-frequency-oneshot = Eenmalig
 settings-scheduler-idle-only = Alleen uitvoeren na { $seconds }s inactiviteit
 settings-scheduler-disabled = Uitgeschakeld
+
+# More Freally apps (Central inside panel)
+more-apps-menu = Meer Freally-apps
+more-apps-title = Meer Freally-apps

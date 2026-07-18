@@ -68,6 +68,9 @@ jobs:
       # comment after each SHA documents what we expect.
       - name: Checkout
         uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+        with:
+          # vendor/freally-central (the "More Freally apps" panel) is a submodule.
+          submodules: recursive
 
       - name: Install Tauri prerequisites (Linux)
         if: startsWith(matrix.target.os, 'ubuntu-')

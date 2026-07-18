@@ -33,7 +33,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          submodules: false
+          # vendor/freally-central (the "More Freally apps" panel) is a submodule.
+          submodules: recursive
 
       - name: Install Tauri prerequisites (Linux)
         if: startsWith(matrix.os, 'ubuntu-')
