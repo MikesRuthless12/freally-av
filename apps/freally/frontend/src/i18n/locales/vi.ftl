@@ -72,3 +72,7 @@ settings-scheduler-frequency-monthly = Hằng tháng
 settings-scheduler-frequency-oneshot = Một lần
 settings-scheduler-idle-only = Chỉ chạy sau { $seconds }s không hoạt động
 settings-scheduler-disabled = Đã tắt
+
+# More Freally apps (Central inside panel)
+more-apps-menu = Ứng dụng Freally khác
+more-apps-title = Ứng dụng Freally khác

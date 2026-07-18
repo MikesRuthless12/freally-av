@@ -72,3 +72,7 @@ settings-scheduler-frequency-monthly = Bulanan
 settings-scheduler-frequency-oneshot = Sekali
 settings-scheduler-idle-only = Hanya jalankan setelah { $seconds }d tidak aktif
 settings-scheduler-disabled = Nonaktif
+
+# More Freally apps (Central inside panel)
+more-apps-menu = Aplikasi Freally lainnya
+more-apps-title = Aplikasi Freally lainnya

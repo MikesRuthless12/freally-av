@@ -72,3 +72,7 @@ settings-scheduler-frequency-monthly = Aylık
 settings-scheduler-frequency-oneshot = Bir kez
 settings-scheduler-idle-only = Yalnızca { $seconds } sn boşta kaldıktan sonra çalıştır
 settings-scheduler-disabled = Devre dışı
+
+# More Freally apps (Central inside panel)
+more-apps-menu = Diğer Freally uygulamaları
+more-apps-title = Diğer Freally uygulamaları
