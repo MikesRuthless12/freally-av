@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Mythodikal Anti-Virus — Documentation</title>
+    <meta
+      name="description"
+      content="Step-by-step user guide for Mythodikal Anti-Virus — scanning, real-time protection, threat updates, quarantine, and more."
+    />
+    <link rel="icon" href="favicon.ico" sizes="any" />
+    <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png" />
+    <link rel="icon" type="image/png" sizes="48x48" href="favicon-48.png" />
+    <link rel="icon" type="image/png" sizes="96x96" href="favicon-96.png" />
+    <link rel="icon" type="image/png" sizes="192x192" href="favicon-192.png" />
+    <link rel="apple-touch-icon" href="apple-touch-icon.png" />
+    <link rel="stylesheet" href="styles.css" />
+    <style>
+      /* ---- Step lists ---- */
+      .steps {
+        list-style: none;
+        margin: 0;
+        padding: 0;
+        counter-reset: step;
+      }
+      .steps > li {
+        counter-increment: step;
+        display: flex;
+        gap: 16px;
+        align-items: flex-start;
+        padding: 13px 0;
+        border-bottom: 1px solid rgba(40, 54, 80, 0.45);
+      }
+      .steps > li:last-child {
+        border-bottom: none;
+        padding-bottom: 0;
+      }
+      .steps > li::before {
+        content: counter(step);
+        flex: 0 0 28px;
+        height: 28px;
+        line-height: 28px;
+        text-align: center;
+        background: rgba(110, 168, 254, 0.12);
+        border: 1px solid rgba(110, 168, 254, 0.3);
+        border-radius: 50%;
+        color: var(--accent);
+        font-size: 0.82rem;
+        font-weight: 700;
+        margin-top: 1px;
+      }
+      .steps > li > span {
+        flex: 1;
+        color: #d4dcea;
+        font-size: 0.98rem;
+        line-height: 1.6;
+      }
+      .steps > li > span strong {
+        color: var(--text);
+      }
+      /* ---- Sub-headers inside a section ---- */
+      .doc-body h3 {
+        margin: 26px 0 10px;
+        font-size: 1.1rem;
+        font-weight: 700;
+        color: var(--text);
+      }
+      /* ---- Section intro ---- */
+      .section-intro {
+        color: #c7d1e0;
+        font-size: 1.02rem;
+        margin: 0 0 20px;
+      }
+      /* ---- Inline code ---- */
+      code {
+        font-family: "SFMono-Regular", ui-monospace, "Cascadia Code", Consolas, monospace;
+        font-size: 0.88rem;
+        background: rgba(110, 168, 254, 0.10);
+        border: 1px solid var(--border);
+        border-radius: 5px;
+        padding: 1px 6px;
+        color: var(--accent);
+      }
+      /* ---- Tip callout ---- */
+      .tip {
+        margin: 18px 0 0;
+        padding: 12px 16px;
+        background: rgba(110, 168, 254, 0.07);
+        border-left: 3px solid var(--accent);
+        border-radius: 0 8px 8px 0;
+        color: #c7d1e0;
+        font-size: 0.93rem;
+        line-height: 1.55;
+      }
+      .tip strong { color: var(--accent); }
+      /* ---- Warning callout ---- */
+      .warn {
+        margin: 18px 0 0;
+        padding: 12px 16px;
+        background: rgba(255, 200, 80, 0.06);
+        border-left: 3px solid #f0b429;
+        border-radius: 0 8px 8px 0;
+        color: #c7d1e0;
+        font-size: 0.93rem;
+        line-height: 1.55;
+      }
+      .warn strong { color: #f0b429; }
+    </style>
+  </head>
+  <body>
+    <header class="hero">
+      <img class="logo" src="icon.png" alt="Mythodikal Anti-Virus icon" width="288" height="288" />
+      <h1>Documentation</h1>
+      <p class="sub">Step-by-step guides for using Mythodikal Anti-Virus.</p>
+    </header>
+
+    <!-- Unified search across every Freally app (autocomplete). -->
+    <style>
+      .doc-searchbar { max-width: 1150px; margin: 1.25rem auto 0; padding: 0 2rem; box-sizing: border-box; }
+      .doc-search { position: relative; }
+      .ds-box { display: flex; align-items: center; gap: 8px; border: 1px solid var(--border, #26324a); border-radius: 12px; background: rgba(255,255,255,0.03); padding: 10px 14px; }
+      .ds-box:focus-within { border-color: var(--accent, #6ea8fe); box-shadow: 0 0 0 3px rgba(110,168,254,0.12); }
+      .ds-icon { color: var(--muted, #93a1b5); font-size: 1.1rem; line-height: 1; }
+      #doc-search-input { flex: 1; min-width: 0; border: none; background: transparent; color: var(--text, #e6edf6); font-size: 0.98rem; outline: none; padding: 2px 0; }
+      #doc-search-input::placeholder { color: var(--muted, #93a1b5); }
+      .ds-results { list-style: none; margin: 6px 0 0; padding: 6px; position: absolute; left: 0; right: 0; z-index: 50; background: var(--panel, #14181f); border: 1px solid var(--border, #26324a); border-radius: 12px; box-shadow: 0 18px 55px rgba(0,0,0,0.55); max-height: 62vh; overflow-y: auto; }
+      .ds-item { display: flex; align-items: flex-start; gap: 10px; padding: 9px 10px; border-radius: 8px; cursor: pointer; }
+      .ds-item.ds-active, .ds-item:hover { background: rgba(110,168,254,0.12); }
+      .ds-app { flex: 0 0 auto; font-size: 0.62rem; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase; color: var(--accent, #6ea8fe); background: rgba(110,168,254,0.12); border: 1px solid rgba(110,168,254,0.25); border-radius: 6px; padding: 3px 6px; margin-top: 2px; white-space: nowrap; }
+      .ds-text { display: flex; flex-direction: column; min-width: 0; }
+      .ds-title { color: var(--text, #e6edf6); font-weight: 600; font-size: 0.92rem; }
+      .ds-desc { color: var(--muted, #93a1b5); font-size: 0.8rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .ds-empty { padding: 10px; color: var(--muted, #93a1b5); font-size: 0.88rem; }
+    </style>
+    <div class="doc-searchbar"><div class="doc-search" id="doc-search"></div></div>
+
+    <div class="doc-layout">
+
+      <!-- ===== LEFT: Sticky table of contents ===== -->
+      <aside class="doc-toc">
+        <nav aria-label="Page sections">
+          <span class="toc-label">On this page</span>
+          <a href="#getting-started">Getting started</a>
+          <a href="#quick-scan">Run a quick scan</a>
+          <a href="#full-custom-scan">Full or custom scan</a>
+          <a href="#handle-detection">Handle a detection</a>
+          <a href="#real-time-protection">Real-time protection</a>
+          <a href="#update-definitions">Update threat definitions</a>
+          <a href="#schedule-scans">Schedule scans</a>
+          <a href="#settings">Change settings</a>
+          <a href="#troubleshooting">Tips &amp; troubleshooting</a>
+          <a href="#privacy">Privacy &amp; local-first</a>
+        </nav>
+      </aside>
+
+      <!-- ===== RIGHT: Content ===== -->
+      <main class="doc-body">
+
+        <!-- Getting started -->
+        <section id="getting-started">
+          <h2>Getting started</h2>
+          <p class="section-intro">Install Mythodikal Anti-Virus and complete first-run setup on your machine.</p>
+          <ol class="steps">
+            <li><span><strong>Download the installer</strong> for your platform (Windows, macOS, or Linux) from the <a href="index.html" style="color:var(--accent)">Releases page</a>.</span></li>
+            <li><span><strong>Run the installer.</strong> On Windows, double-click the <code>.msi</code> or <code>.exe</code> and follow the prompts. On macOS, open the <code>.dmg</code>, drag the app to Applications, then launch it. On Linux, install the provided package with your distribution's package manager.</span></li>
+            <li><span><strong>Windows — clear the SmartScreen prompt.</strong> Because Mythodikal ships unsigned (no paid OV/EV cert), Windows may show "Windows protected your PC." Click <strong>More info → Run anyway</strong>. If the file is blocked by Mark-of-the-Web, right-click the installer → <strong>Properties</strong>, tick <strong>Unblock</strong>, then re-launch.</span></li>
+            <li><span><strong>macOS — clear the Gatekeeper warning.</strong> Open <strong>System Settings → Privacy &amp; Security</strong>, scroll to the notice for Mythodikal, and click <strong>Open Anyway</strong>.</span></li>
+            <li><span><strong>Grant any requested permissions.</strong> The app will ask for access to scan files on your disk. Approve the prompt so the engine can inspect files outside your home directory.</span></li>
+            <li><span><strong>Wait for initial setup.</strong> On first launch, Mythodikal loads its threat-definition database. This takes a few seconds and happens only once.</span></li>
+            <li><span><strong>You're ready.</strong> The main dashboard appears. From here you can start a scan, check your protection status, or adjust settings.</span></li>
+          </ol>
+          <div class="tip"><strong>Tip:</strong> Mythodikal is entirely local-first — no account, no sign-in, and no data ever leaves your machine during setup or scanning.</div>
+        </section>
+
+        <!-- Quick scan -->
+        <section id="quick-scan">
+          <h2>Run a quick scan</h2>
+          <p class="section-intro">A quick scan checks the locations most commonly targeted by malware — fast and low-impact.</p>
+          <ol class="steps">
+            <li><span><strong>Open Mythodikal Anti-Virus</strong> from your Applications folder, Start menu, or app launcher.</span></li>
+            <li><span>On the main dashboard, click <strong>Quick Scan</strong>.</span></li>
+            <li><span>The scan begins immediately. A progress bar shows files scanned and elapsed time. You can continue using your computer normally during the scan.</span></li>
+            <li><span>When the scan finishes, the results screen shows a summary: files checked, threats found, and time taken.</span></li>
+            <li><span>If <strong>no threats were found</strong>, click <strong>Done</strong> to return to the dashboard.</span></li>
+            <li><span>If <strong>threats were found</strong>, see <a href="#handle-detection" style="color:var(--accent)">Handle a detection</a> for next steps.</span></li>
+          </ol>
+          <div class="tip"><strong>Tip:</strong> Quick scans typically complete in under a minute and are a good daily habit after downloading files or visiting unfamiliar websites.</div>
+        </section>
+
+        <!-- Full / custom scan -->
+        <section id="full-custom-scan">
+          <h2>Run a full or custom scan</h2>
+          <p class="section-intro">A full scan covers your entire disk. A custom scan lets you choose exactly which folders or drives to check.</p>
+          <ol class="steps">
+            <li><span>Open Mythodikal Anti-Virus and go to the <strong>Scan</strong> section.</span></li>
+            <li><span>To scan your whole disk, click <strong>Full Scan</strong>. The engine will walk every accessible file. This may take several minutes depending on disk size.</span></li>
+            <li><span>To scan a specific folder or drive, click <strong>Custom Scan</strong>, then click <strong>Choose Folder</strong> (or <strong>Choose Drive</strong>) and navigate to the location you want.</span></li>
+            <li><span>Add multiple locations to a single scan by clicking <strong>Add another location</strong> and repeating the previous step.</span></li>
+            <li><span>Click <strong>Start Scan</strong>. Progress is shown in real time — files scanned, current file path, and any detections as they occur.</span></li>
+            <li><span>To pause, click <strong>Pause</strong>. Click <strong>Resume</strong> to continue. To stop early, click <strong>Cancel</strong>. Long scans persist their state across reboots — you can resume after a restart.</span></li>
+            <li><span>When the scan completes, review the results summary. If threats were found, proceed to <a href="#handle-detection" style="color:var(--accent)">Handle a detection</a>.</span></li>
+          </ol>
+          <div class="tip"><strong>Tip:</strong> Custom scans are useful for checking a specific USB drive, downloaded archive, or shared folder without waiting for a full-disk scan.</div>
+        </section>
+
+        <!-- Handle a detection -->
+        <section id="handle-detection">
+          <h2>Handle a detection</h2>
+          <p class="section-intro">When Mythodikal flags a file as a threat, you can quarantine it, delete it permanently, or restore it if you believe it is safe.</p>
+          <ol class="steps">
+            <li><span>After a scan, the results screen lists each detected file with its name, location, threat classification, matched rule, and the detection source (feed name or YARA rule).</span></li>
+            <li><span><strong>To quarantine a file</strong> (recommended): select it and click <strong>Quarantine</strong>. The file is moved to secure, isolated storage where it cannot run. Your original file is preserved in case you need to restore it later.</span></li>
+            <li><span><strong>To delete a file permanently</strong>: select it and click <strong>Delete</strong>. Confirm when prompted. This action cannot be undone.</span></li>
+            <li><span><strong>To handle all detections at once</strong>: click <strong>Quarantine All</strong> or <strong>Delete All</strong> to apply the same action to every flagged file.</span></li>
+            <li><span><strong>To review quarantined files later</strong>: open the <strong>Quarantine</strong> section from the main navigation. Each item shows when it was detected and what threat it matched.</span></li>
+            <li><span><strong>To restore a quarantined file</strong> (if you are certain it is safe): select the file in Quarantine, click <strong>Restore</strong>, and confirm. The file is moved back to its original location.</span></li>
+            <li><span><strong>To permanently remove a quarantined file</strong>: select it in the Quarantine list and click <strong>Delete</strong>.</span></li>
+          </ol>
+          <div class="tip"><strong>Tip:</strong> When in doubt, quarantine rather than delete. Quarantine keeps the file isolated but recoverable, so you can restore it if it turns out to be a false positive.</div>
+        </section>
+
+        <!-- Real-time protection -->
+        <section id="real-time-protection">
+          <h2>Turn on real-time protection</h2>
+          <p class="section-intro">Real-time protection monitors your system continuously and flags threats the moment they appear — no manual scan needed.</p>
+          <ol class="steps">
+            <li><span>Open Mythodikal Anti-Virus and go to <strong>Settings</strong> (the gear icon or the Settings link in the main navigation).</span></li>
+            <li><span>Find the <strong>Real-Time Protection</strong> section.</span></li>
+            <li><span>Toggle the switch to <strong>On</strong>. The status indicator on the main dashboard changes from grey to green, confirming protection is active.</span></li>
+            <li><span>If your OS shows a permissions prompt — for example, asking to allow file-access monitoring — click <strong>Allow</strong>.</span></li>
+            <li><span>To <strong>turn off real-time protection temporarily</strong> (for example, while installing trusted software), return to this setting and toggle it <strong>Off</strong>. The dashboard will show a reminder so you don't forget to re-enable it.</span></li>
+            <li><span>Toggle the switch back to <strong>On</strong> when you are done.</span></li>
+          </ol>
+          <div class="tip"><strong>Note:</strong> Real-time protection is actively developed on Linux (fanotify daemon). macOS (FSEvents + opportunistic ESF NOTIFY) and Windows (ETW + AMSI + WDAC) real-time engines are part of upcoming releases — check the <a href="index.html" style="color:var(--accent)">Releases page</a> for the latest status.</div>
+        </section>
+
+        <!-- Update definitions -->
+        <section id="update-definitions">
+          <h2>Update threat definitions</h2>
+          <p class="section-intro">Threat definitions are the database Mythodikal uses to recognise malware. Keeping them current ensures the latest threats are detected.</p>
+          <ol class="steps">
+            <li><span>Open Mythodikal and look at the <strong>Protection Status</strong> panel on the dashboard. The current definitions version and last-updated date are shown there.</span></li>
+            <li><span>To check for an update immediately, click <strong>Check for Updates</strong> (or go to <strong>Settings → Threat Definitions → Update Now</strong>).</span></li>
+            <li><span>If an update is available, the download begins automatically. A progress indicator shows download and installation status.</span></li>
+            <li><span>When the update finishes, the dashboard shows the new definitions version and a confirmation message. No restart is required.</span></li>
+            <li><span>To enable <strong>automatic updates</strong>, go to <strong>Settings → Threat Definitions</strong> and turn on <strong>Auto-Update</strong>. Mythodikal will check for and apply new definitions silently in the background.</span></li>
+            <li><span>If an update fails (for example, due to no network connection), the app retries automatically. You can also retry manually by clicking <strong>Check for Updates</strong> again.</span></li>
+          </ol>
+          <div class="tip"><strong>Tip:</strong> Mythodikal draws threat data from public feeds including MalwareBazaar and ThreatFox. Updates are incremental — only new or changed entries are downloaded, keeping the update small and fast.</div>
+        </section>
+
+        <!-- Schedule scans -->
+        <section id="schedule-scans">
+          <h2>Schedule scans</h2>
+          <p class="section-intro">Set up recurring scans so Mythodikal checks your system automatically on a schedule you choose.</p>
+          <ol class="steps">
+            <li><span>Go to <strong>Settings → Scheduled Scans</strong>, or click the <strong>Schedule</strong> option in the Scan section.</span></li>
+            <li><span>Click <strong>Add Schedule</strong> (or <strong>New Schedule</strong>).</span></li>
+            <li><span>Choose the <strong>scan type</strong>: Quick Scan, Full Scan, or Custom Scan (with a folder you specify).</span></li>
+            <li><span>Set the <strong>frequency</strong>: Daily, Weekly, or Monthly. For weekly, choose which day; for monthly, choose which date.</span></li>
+            <li><span>Set the <strong>time</strong> the scan should start. Choosing a time when your machine is usually idle (such as overnight) avoids any impact on your work.</span></li>
+            <li><span>Optionally, enable <strong>Run if missed</strong> so that if your machine is off at the scheduled time, the scan runs as soon as it next starts up.</span></li>
+            <li><span>Click <strong>Save</strong>. The schedule appears in the list with its next run time shown.</span></li>
+            <li><span>To edit or delete a schedule, select it from the list and click <strong>Edit</strong> or <strong>Remove</strong>.</span></li>
+          </ol>
+          <div class="tip"><strong>Tip:</strong> A weekly full scan on a quiet day (such as Sunday night) combined with daily quick scans gives strong coverage without noticeable slowdowns during your workday.</div>
+        </section>
+
+        <!-- Settings -->
+        <section id="settings">
+          <h2>Change settings</h2>
+          <p class="section-intro">Mythodikal's settings let you tune protection, scan behaviour, notifications, and exclusions to fit how you work.</p>
+          <ol class="steps">
+            <li><span>Open Mythodikal and click the <strong>gear icon</strong> or the <strong>Settings</strong> link in the main navigation.</span></li>
+            <li><span><strong>Add a scan exclusion</strong> (a path Mythodikal should never scan): go to <strong>Exclusions</strong>, click <strong>Add Exclusion</strong>, and choose the path. Supports path, glob, hash, and signing-key exclusions. Exclusions are snapshotted per scan so history remains reproducible.</span></li>
+            <li><span><strong>Change notification preferences</strong>: go to <strong>Notifications</strong> and toggle which events trigger alerts — detections, completed scans, definition updates, or real-time protection status changes.</span></li>
+            <li><span><strong>Adjust scan performance</strong>: go to <strong>Scan Settings → Resource Usage</strong> and choose a throttle level. Lower settings reduce CPU and disk impact but make scans slower. The app automatically throttles on battery power.</span></li>
+            <li><span><strong>Change the quarantine storage location</strong>: go to <strong>Quarantine → Storage Path</strong> and click <strong>Change Folder</strong>. Pick a folder with enough space to hold isolated files.</span></li>
+            <li><span><strong>Reset all settings to defaults</strong>: scroll to the bottom of Settings and click <strong>Reset to Defaults</strong>. This does not affect quarantined files or scan history.</span></li>
+          </ol>
+          <div class="tip"><strong>Tip:</strong> All settings are stored locally on your machine. Nothing is synced to a server or tied to an account.</div>
+        </section>
+
+        <!-- Troubleshooting -->
+        <section id="troubleshooting">
+          <h2>Tips &amp; troubleshooting</h2>
+          <p class="section-intro">Common issues and how to resolve them.</p>
+          <ol class="steps">
+            <li><span><strong>Scan seems slow or freezes.</strong> Open <strong>Settings → Scan Settings → Resource Usage</strong> and lower the throttle setting. On battery, the app throttles automatically. If the issue persists, try restarting the app.</span></li>
+            <li><span><strong>A file was quarantined that you know is safe (false positive).</strong> Go to the <strong>Quarantine</strong> section, select the file, and click <strong>Restore</strong>. Then add its containing folder to <strong>Settings → Exclusions</strong> to prevent future alerts.</span></li>
+            <li><span><strong>Threat definitions appear out of date.</strong> Go to <strong>Settings → Threat Definitions</strong> and click <strong>Update Now</strong>. Check your internet connection if the download fails.</span></li>
+            <li><span><strong>Real-time protection keeps turning off.</strong> Some operating systems require the app to have persistent background access. Check <strong>System Settings → Privacy &amp; Security</strong> (macOS) or Windows Security settings to ensure Mythodikal is allowed to run in the background.</span></li>
+            <li><span><strong>The app shows a permissions error on macOS.</strong> Open <strong>System Settings → Privacy &amp; Security → Full Disk Access</strong> and make sure Mythodikal Anti-Virus is listed and enabled.</span></li>
+            <li><span><strong>A scheduled scan did not run.</strong> Check that <strong>Run if missed</strong> is enabled in the schedule. Also confirm the machine was on at the scheduled time, or enable run-if-missed so it catches up on next launch.</span></li>
+            <li><span><strong>Need help or found a bug?</strong> Open an issue on the <a href="https://github.com/MikesRuthless12/freally-av" style="color:var(--accent)">GitHub repository</a>. Include your OS version and a description of what you expected vs. what happened.</span></li>
+          </ol>
+        </section>
+
+        <!-- Privacy -->
+        <section id="privacy">
+          <h2>Privacy &amp; local-first</h2>
+          <p class="section-intro">Mythodikal is designed from the ground up to protect your privacy. Here is what that means in practice.</p>
+          <ol class="steps">
+            <li><span><strong>All scanning happens on your device.</strong> Files you scan are never uploaded, streamed, or sent to any server. The engine runs entirely locally.</span></li>
+            <li><span><strong>No account required.</strong> There is no sign-in, registration, or cloud account. You install the app and use it — nothing more.</span></li>
+            <li><span><strong>No telemetry.</strong> Mythodikal does not collect usage data, crash reports, or diagnostic information. Nothing is phoned home.</span></li>
+            <li><span><strong>Threat definition updates are one-way.</strong> When definitions update, your machine downloads new data from the update server. No information about your system or scans is sent in return.</span></li>
+            <li><span><strong>All data stays on your machine.</strong> Scan history, quarantine contents, settings, and logs are stored in local application data and are never synchronised anywhere.</span></li>
+            <li><span><strong>To review what data the app stores locally</strong>, go to <strong>Settings → Privacy</strong>. From there you can also clear scan history or the quarantine if you wish.</span></li>
+          </ol>
+          <div class="tip"><strong>Source-visible:</strong> Mythodikal's source code is available on <a href="https://github.com/MikesRuthless12/freally-av" style="color:var(--accent)">GitHub</a> so you can verify these claims for yourself. The project is All Rights Reserved but the code is open to read.</div>
+        </section>
+
+      </main>
+    </div>
+
+    <footer>
+      <p>© 2026 Mike Weaver — All Rights Reserved · no telemetry · local-first · privacy-respecting</p>
+      <p>
+        <a href="https://github.com/MikesRuthless12/freally-av">GitHub</a> ·
+        <a href="https://github.com/MikesRuthless12/freally-av/releases">All releases</a> ·
+        <a href="https://github.com/MikesRuthless12/freally-av/blob/main/LICENSE.md">License</a> ·
+        <a href="documentation.html" aria-current="page">Documentation</a>
+      </p>
+    </footer>
+
+    <script>
+  (function () {
+    var links = document.querySelectorAll('.doc-toc a');
+    var sections = [];
+    links.forEach(function (a) {
+      var id = a.getAttribute('href').replace('#', '');
+      var el = document.getElementById(id);
+      if (el) sections.push({ id: id, el: el, a: a });
+    });
+    function onScroll() {
+      var active = sections[0];
+      for (var i = 0; i < sections.length; i++) {
+        if (sections[i].el.getBoundingClientRect().top <= 120) { active = sections[i]; }
+      }
+      links.forEach(function (a) { a.classList.remove('active'); });
+      if (active) active.a.classList.add('active');
+    }
+    window.addEventListener('scroll', onScroll, { passive: true });
+    onScroll();
+  })();
+</script>
+    <script src="search-index.js"></script>
+    <script src="search.js"></script>
+  </body>
+</html>
